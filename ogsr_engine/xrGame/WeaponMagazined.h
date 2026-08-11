@@ -33,6 +33,8 @@ protected:
     HUD_SOUND sndItemOn;
     //звук текущего выстрела
     HUD_SOUND* m_pSndShotCurrent;
+	HUD_SOUND sndBore;
+	HUD_SOUND sndBoreEmpty;
 
     virtual void StopHUDSounds();
 
@@ -186,10 +188,12 @@ protected:
     virtual bool AllowFireWhileWorking() { return false; }
 
     //виртуальные функции для проигрывания анимации HUD
+	virtual void PlayAnimBore();
     virtual void PlayAnimShow();
     virtual void PlayAnimHide();
     virtual void PlayAnimReload();
     virtual void PlayAnimIdle();
+	virtual void PlayAnimFiremode();
 
     bool LaserSwitch{}, TorchSwitch{}, HeadLampSwitch{}, NightVisionSwitch{};
     bool CartridgeInTheChamberEnabled{};

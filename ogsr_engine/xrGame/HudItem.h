@@ -31,6 +31,7 @@ public:
         eMisfire,
         eMagEmpty,
         eSwitch,
+		eFiremode,
         eSprintStart,
         eSprintEnd,
         eBore,

@@ -70,6 +70,8 @@ enum EGameActions
 
     kHIDEHUD,
     kSHOWHUD,
+	
+	kANIM_BORE,
 
     kLASTACTION = u32(-3),
     kNOTBINDED = u32(-2),

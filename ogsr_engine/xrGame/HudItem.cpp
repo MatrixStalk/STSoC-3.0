@@ -304,7 +304,7 @@ void CHudItem::UpdateCL()
             }
 
             m_dwMotionCurrTm = Device.dwTimeGlobal;
-            if (m_dwMotionCurrTm > m_dwMotionEndTm)
+            if (m_dwMotionCurrTm >= m_dwMotionEndTm)
             {
                 m_current_motion_def = nullptr;
                 m_dwMotionStartTm = 0;

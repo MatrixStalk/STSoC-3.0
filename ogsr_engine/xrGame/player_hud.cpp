@@ -52,9 +52,6 @@ u16 hud_bone_id(const IKinematics* skeleton, LPCSTR bone_name)
         {"r_finger0", source_r_thumb0},
         {"r_finger01", source_r_thumb01},
         {"r_finger02", source_r_thumb02},
-        // Procedural Movement Animations uses this legacy HUD pivot. Source
-        // rigs rotate the complete arms from their common upper-body root.
-        {"lead_gun", source_root_bone},
     };
 
     for (const bone_alias& alias : aliases)
@@ -95,6 +92,23 @@ float CalculateMotionStartSeconds(float fStartFromTime, float fMotionLength)
         return (abs(fStartFromTime) * fMotionLength);
     }
 }
+
+namespace
+{
+void setup_hud_blend(CBlend* blend, const motion_params& params, const float speed)
+{
+    R_ASSERT(blend);
+
+    blend->speed *= speed;
+    blend->timeCurrent = CalculateMotionStartSeconds(params.start_k, blend->timeTotal);
+
+    // A config-side *_stop_at_end flag must affect the actual skeleton track,
+    // not only the CHudItem completion timer. Otherwise a cyclic OGF motion
+    // wraps to its first frames before OnAnimationEnd switches the HUD state.
+    if (params.stop_at_end)
+        blend->stop_at_end = TRUE;
+}
+} // namespace
 
 player_hud_motion* player_hud_motion_container::find_motion(const shared_str& name)
 {
@@ -759,9 +773,7 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
         for (u16 pid = 0; pid < pc; ++pid)
         {
             CBlend* B = ka->PlayCycle(pid, M2, bMixIn);
-            R_ASSERT(B);
-            B->speed *= speed;
-            B->timeCurrent = CalculateMotionStartSeconds(anm->params.start_k, B->timeTotal);
+            setup_hud_blend(B, anm->params, speed);
         }
 
         m_model->CalculateBones_Invalidate();
@@ -805,16 +817,17 @@ player_hud::player_hud()
 
     if (pSettings->section_exist("hud_movement_layers"))
     {
-        m_movement_layers.reserve(move_anms_end);
+        m_movement_layers.resize(move_anms_end, nullptr);
 
         for (int i = 0; i < move_anms_end; i++)
         {
-            movement_layer* anm = xr_new<movement_layer>();
-
             char temp[20];
             string512 tmp;
             strconcat(sizeof(temp), temp, "movement_layer_", std::to_string(i).c_str());
-            R_ASSERT2(pSettings->line_exist("hud_movement_layers", temp), make_string("Missing definition for [hud_movement_layers] %s", temp));
+            if (!pSettings->line_exist("hud_movement_layers", temp))
+                continue;
+
+            movement_layer* anm = xr_new<movement_layer>();
             LPCSTR layer_def = pSettings->r_string("hud_movement_layers", temp);
             const int item_count = _GetItemCount(layer_def);
             R_ASSERT2(item_count > 0, make_string("Wrong definition for [hud_movement_layers] %s", temp));
@@ -842,12 +855,7 @@ player_hud::player_hud()
                 _GetItem(layer_def, 4, tmp);
                 anm->m_blend_out = _max(static_cast<float>(atof(tmp)), EPS_S);
             }
-            if (item_count > 5)
-            {
-                _GetItem(layer_def, 5, tmp);
-                anm->m_pivot_bone = tmp;
-            }
-            m_movement_layers.push_back(anm);
+            m_movement_layers[i] = anm;
         }
     }
 }
@@ -1296,8 +1304,15 @@ void player_hud::update(const Fmatrix& cam_trans)
     need_blend[1] = source_movement || (script_anim_part == 1 || script_anim_part == 2) ||
         (m_attached_items[1] && m_attached_items[1]->m_parent_hud_item->NeedBlendAnm());
 
-    for (movement_layer* anm : m_movement_layers)
+    // Matrix composition order matters: the original setup applies the idle
+    // foundation first and the selected locomotion transform on top of it.
+    static constexpr eMovementLayers movement_layer_order[] = {
+        eMovementAimIdle, eMovementIdle, eAimWalk, eAimCrouch, eCrouch, eWalk, eRun, eSprint};
+
+    for (const eMovementLayers layer : movement_layer_order)
     {
+        const u32 layer_idx = static_cast<u32>(layer);
+        movement_layer* anm = layer_idx < m_movement_layers.size() ? m_movement_layers[layer_idx] : nullptr;
         if (!anm || !anm->anm || (!anm->active && anm->blend_amount[0] == 0.f && anm->blend_amount[1] == 0.f))
             continue;
 
@@ -1343,31 +1358,20 @@ void player_hud::update(const Fmatrix& cam_trans)
             anm->anm->Update(Device.fTimeDelta);
         }
 
-        const auto apply_layer = [anm](Fmatrix& transform, const IKinematics* skeleton, const u8 part)
+        if (anm->blend_amount[0] == anm->blend_amount[1])
         {
-            Fmatrix layer_transform = anm->XFORM(part);
-            const u16 pivot_id =
-                anm->m_pivot_bone.size() ? hud_bone_id(skeleton, *anm->m_pivot_bone) : BI_NONE;
-            if (pivot_id == BI_NONE)
-            {
-                transform.mulB_43(layer_transform);
-                return;
-            }
+            Fmatrix blend = anm->XFORM(0);
+            m_transform.mulB_43(blend);
+            m_transform_2.mulB_43(blend);
+        }
+        else
+        {
+            if (anm->blend_amount[0] > 0.f)
+                m_transform.mulB_43(anm->XFORM(0));
 
-            const Fmatrix& pivot = skeleton->LL_GetTransform(pivot_id);
-            Fmatrix inverse_pivot;
-            inverse_pivot.invert(pivot);
-            Fmatrix around_pivot;
-            around_pivot.mul_43(pivot, layer_transform);
-            around_pivot.mulB_43(inverse_pivot);
-            transform.mulB_43(around_pivot);
-        };
-
-        if (anm->blend_amount[0] > 0.f)
-            apply_layer(m_transform, m_model_kinematics, 0);
-
-        if (anm->blend_amount[1] > 0.f)
-            apply_layer(m_transform_2, m_model_2_kinematics, 1);
+            if (anm->blend_amount[1] > 0.f)
+                m_transform_2.mulB_43(anm->XFORM(1));
+        }
     }
 
 
@@ -1454,16 +1458,12 @@ u32 player_hud::anim_play(u16 part, const motion_params& P, const motion_descr& 
                 if (pid == 0 || pid == 2)
                 {
                     CBlend* B = m_model->PlayCycle(pid, M.mid, bMixIn);
-                    R_ASSERT(B);
-                    B->speed *= speed;
-                    B->timeCurrent = CalculateMotionStartSeconds(P.start_k, B->timeTotal);
+                    setup_hud_blend(B, P, speed);
                 }
                 if (pid == 0 || pid == 1)
                 {
                     CBlend* B = m_model_2->PlayCycle(pid, M.mid, bMixIn);
-                    R_ASSERT(B);
-                    B->speed *= speed;
-                    B->timeCurrent = CalculateMotionStartSeconds(P.start_k, B->timeTotal);
+                    setup_hud_blend(B, P, speed);
                 }
             }
 
@@ -1477,9 +1477,7 @@ u32 player_hud::anim_play(u16 part, const motion_params& P, const motion_descr& 
                 if (pid != 1)
                 {
                     CBlend* B = m_model->PlayCycle(pid, M.mid, bMixIn);
-                    R_ASSERT(B);
-                    B->speed *= speed;
-                    B->timeCurrent = CalculateMotionStartSeconds(P.start_k, B->timeTotal);
+                    setup_hud_blend(B, P, speed);
                 }
             }
 
@@ -1492,9 +1490,7 @@ u32 player_hud::anim_play(u16 part, const motion_params& P, const motion_descr& 
                 if (pid != 2)
                 {
                     CBlend* B = m_model_2->PlayCycle(pid, M.mid, bMixIn);
-                    R_ASSERT(B);
-                    B->speed *= speed;
-                    B->timeCurrent = CalculateMotionStartSeconds(P.start_k, B->timeTotal);
+                    setup_hud_blend(B, P, speed);
                 }
             }
 
@@ -2174,9 +2170,7 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR hud_section, LPCSTR anm_name, b
         for (u16 pid = 0; pid < pc; ++pid)
         {
             CBlend* B = script_anim_item_model->PlayCycle(pid, M2, bMixIn);
-            R_ASSERT(B);
-            B->speed *= speed;
-            B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
+            setup_hud_blend(B, phm->params, speed);
         }
 
         script_anim_item_model->dcast_PKinematics()->CalculateBones_Invalidate();
@@ -2185,35 +2179,27 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR hud_section, LPCSTR anm_name, b
     if (!merge_script_skeleton && hand == 0) // right hand
     {
         CBlend* B = m_model->PlayCycle(0, M.mid, bMixIn);
-        B->speed *= speed;
-        B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
+        setup_hud_blend(B, phm->params, speed);
         B = m_model->PlayCycle(2, M.mid, bMixIn);
-        B->speed *= speed;
-        B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
+        setup_hud_blend(B, phm->params, speed);
     }
     else if (!merge_script_skeleton && hand == 1) // left hand
     {
         CBlend* B = m_model_2->PlayCycle(0, M.mid, bMixIn);
-        B->speed *= speed;
-        B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
+        setup_hud_blend(B, phm->params, speed);
         B = m_model_2->PlayCycle(1, M.mid, bMixIn);
-        B->speed *= speed;
-        B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
+        setup_hud_blend(B, phm->params, speed);
     }
     else if (!merge_script_skeleton && hand == 2) // both hands
     {
         CBlend* B = m_model->PlayCycle(0, M.mid, bMixIn);
-        B->speed *= speed;
-        B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
+        setup_hud_blend(B, phm->params, speed);
         B = m_model_2->PlayCycle(0, M.mid, bMixIn);
-        B->speed *= speed;
-        B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
+        setup_hud_blend(B, phm->params, speed);
         B = m_model->PlayCycle(2, M.mid, bMixIn);
-        B->speed *= speed;
-        B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
+        setup_hud_blend(B, phm->params, speed);
         B = m_model_2->PlayCycle(1, M.mid, bMixIn);
-        B->speed *= speed;
-        B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
+        setup_hud_blend(B, phm->params, speed);
     }
 
     const CMotionDef* md;
@@ -2322,26 +2308,37 @@ void player_hud::updateMovementLayerState()
             || (m_attached_items[0] && m_attached_items[0]->m_parent_hud_item->NeedBlendAnm()) 
             || (m_attached_items[1] && m_attached_items[1]->m_parent_hud_item->NeedBlendAnm()));
 
+    const auto play_layer = [this](const eMovementLayers layer)
+    {
+        const u32 layer_idx = static_cast<u32>(layer);
+        if (layer_idx < m_movement_layers.size() && m_movement_layers[layer_idx])
+            m_movement_layers[layer_idx]->Play();
+    };
+
+    CWeapon* wep = nullptr;
+    if (m_attached_items[0] && m_attached_items[0]->m_parent_hud_item->object().cast_weapon())
+        wep = m_attached_items[0]->m_parent_hud_item->object().cast_weapon();
+
+    // The original procedural movement setup always plays an idle foundation
+    // and adds the current locomotion layer on top of it.
+    if (need_blend)
+        play_layer(wep && wep->IsZoomed() ? eMovementAimIdle : eMovementIdle);
+
     if (pActor->AnyMove() && need_blend)
     {
         CEntity::SEntityState state;
         pActor->g_State(state);
 
-        CWeapon* wep = nullptr;
-
-        if (m_attached_items[0] && m_attached_items[0]->m_parent_hud_item->object().cast_weapon())
-            wep = m_attached_items[0]->m_parent_hud_item->object().cast_weapon();
-
         if (wep && wep->IsZoomed())
-            state.bCrouch ? m_movement_layers[eAimCrouch]->Play() : m_movement_layers[eAimWalk]->Play();
+            play_layer(state.bCrouch ? eAimCrouch : eAimWalk);
         else if (state.bCrouch)
-            m_movement_layers[eCrouch]->Play();
+            play_layer(eCrouch);
         else if (state.bSprint)
-            m_movement_layers[eSprint]->Play();
+            play_layer(eSprint);
         else if (!isActorAccelerated(pActor->MovingState(), false))
-            m_movement_layers[eWalk]->Play();
+            play_layer(eWalk);
         else
-            m_movement_layers[eRun]->Play();
+            play_layer(eRun);
     }
 }
 

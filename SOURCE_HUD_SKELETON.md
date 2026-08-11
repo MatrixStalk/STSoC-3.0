@@ -98,16 +98,21 @@ layers are available, preventing the two movement effects from accumulating.
 Each layer accepts the following values:
 
 ```ini
-; path, speed, power, blend_in_seconds, blend_out_seconds, pivot_bone
-movement_layer_3 = movement\walk.anm, 1.0, 0.50, 0.25, 0.30, lead_gun
-movement_layer_4 = movement\sprint_generic.anm, 0.8, 0.25, 0.22, 0.32, lead_gun
+; path, speed, power, blend_in_seconds, blend_out_seconds
+movement_layer_3 = movement\walk.anm, 1.0, 0.50, 0.25, 0.30
+movement_layer_4 = movement\walk.anm, 1.0, 0.60, 0.22, 0.32
+movement_layer_6 = movement\idle_aim.anm, 0.5, 0.20, 0.22, 0.32
+movement_layer_7 = movement\idle.anm, 0.5, 0.70, 0.22, 0.32
 ```
 
-The transition weight uses a minimum-jerk S-curve. `lead_gun` remains valid for
-legacy rigs and maps to `ValveBiped.Bip01_Spine4` on a Source rig. The first
-three values remain compatible with old configurations; omitted transition
-times default to 0.4 seconds and an omitted pivot applies the animation around
-the HUD root.
+Layers 6 and 7 provide the aiming and normal idle foundations. The selected
+walk/run layer is composed on top, matching the original procedural movement
+setup. Configurations containing only layers 0 through 5 remain valid.
+
+The transition weight uses a minimum-jerk S-curve. The first three values remain
+compatible with old configurations; omitted transition times default to 0.4
+seconds. Movement matrices are applied around the HUD root, avoiding pivots
+whose position and axes depend on a particular hands rig.
 
 For merged Source skeletons, non-idle HUD aliases are treated as stop-at-end
 motions when the exported motion definition does not contain that flag. Idle

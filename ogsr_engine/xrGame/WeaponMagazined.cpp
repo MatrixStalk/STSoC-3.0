@@ -67,6 +67,8 @@ CWeaponMagazined::~CWeaponMagazined()
     HUD_SOUND::DestroySound(sndItemOn);
     HUD_SOUND::DestroySound(sndAimStart);
     HUD_SOUND::DestroySound(sndAimEnd);
+	HUD_SOUND::DestroySound(sndBore);
+	HUD_SOUND::DestroySound(sndBoreEmpty);
     if (m_binoc_vision)
         xr_delete(m_binoc_vision);
 }
@@ -87,6 +89,7 @@ void CWeaponMagazined::StopHUDSounds()
     HUD_SOUND::StopSound(sndItemOn);
     HUD_SOUND::StopSound(sndAimStart);
     HUD_SOUND::StopSound(sndAimEnd);
+	HUD_SOUND::StopSound(sndBore);
 
     HUD_SOUND::StopSound(sndShot);
     HUD_SOUND::StopSound(sndSilencerShot);
@@ -149,6 +152,9 @@ void CWeaponMagazined::Load(LPCSTR section)
 
     if (pSettings->line_exist(section, "snd_fire_modes"))
         HUD_SOUND::LoadSound(section, "snd_fire_modes", sndFireModes, m_eSoundEmptyClick);
+	else if (pSettings->line_exist(section, "snd_changefiremode")) //STCoP or IWP firemode sound
+        HUD_SOUND::LoadSound(section, "snd_changefiremode", sndFireModes, m_eSoundEmptyClick);
+		
     if (pSettings->line_exist(section, "snd_zoom_change"))
         HUD_SOUND::LoadSound(section, "snd_zoom_change", sndZoomChange, m_eSoundEmptyClick);
     if (pSettings->line_exist(section, "snd_tact_item_on"))
@@ -160,6 +166,13 @@ void CWeaponMagazined::Load(LPCSTR section)
         HUD_SOUND::LoadSound(section, "snd_aim_start", sndAimStart, m_eSoundShow);
     if (pSettings->line_exist(section, "snd_aim_end"))
         HUD_SOUND::LoadSound(section, "snd_aim_end", sndAimEnd, m_eSoundHide);
+	
+	if (pSettings->line_exist(section, "snd_bore"))
+        HUD_SOUND::LoadSound(section, "snd_bore", sndBore, m_eSoundEmptyClick);
+	
+	if (pSettings->line_exist(section, "snd_bore_empty"))
+        HUD_SOUND::LoadSound(section, "snd_bore_empty", sndBoreEmpty, m_eSoundEmptyClick);
+	
 
     m_pSndShotCurrent = &sndShot;
 
@@ -234,6 +247,10 @@ void CWeaponMagazined::FireStart()
             if (GetState() == eHiding)
                 return;
             if (GetState() == eMisfire)
+                return;
+			if (GetState() == eBore)
+                return;
+			if (GetState() == eFiremode)
                 return;
 
             inherited::FireStart();
@@ -603,6 +620,8 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
     case eDeviceSwitch:
         PlayAnimDeviceSwitch();
         break;
+	case eBore: PlayAnimBore(); break;
+	case eFiremode: PlayAnimFiremode(); break;
     }
 }
 
@@ -653,6 +672,8 @@ void CWeaponMagazined::UpdateCL()
         case eDeviceSwitch:
         case eSprintStart:
         case eSprintEnd:
+		case eBore:
+		case eFiremode:
         case eIdle:
             fTime -= dt;
             if (fTime < 0)
@@ -726,6 +747,8 @@ void CWeaponMagazined::UpdateSounds()
         sndAimStart.set_position(get_LastFP());
     if (sndAimEnd.playing())
         sndAimEnd.set_position(get_LastFP());
+	if (sndBore.playing())
+        sndBore.set_position(get_LastFP());
 }
 
 void CWeaponMagazined::state_Fire(float dt)
@@ -873,6 +896,8 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
     case eDeviceSwitch:
     case eFire:
     case eFire2: SwitchState(eIdle); break;
+	case eBore: SwitchState(eIdle); break;
+	case eFiremode: SwitchState(eIdle); break;
     default: inherited::OnAnimationEnd(state);
     }
 }
@@ -1034,17 +1059,19 @@ bool CWeaponMagazined::Action(s32 cmd, u32 flags)
     }
         return true;
     case kWPN_FIREMODE_PREV: {
-        if (flags & CMD_START)
+        if ((flags & CMD_START) && GetState() == eIdle && !IsZoomed())
         {
             OnPrevFireMode(flags & CMD_OPT);
+			SwitchState(eFiremode);
             return true;
         }
     }
     break;
     case kWPN_FIREMODE_NEXT: {
-        if (flags & CMD_START)
+        if ((flags & CMD_START) && GetState() == eIdle && !IsZoomed())
         {
             OnNextFireMode(flags & CMD_OPT);
+			SwitchState(eFiremode);
             return true;
         }
     }
@@ -1084,6 +1111,14 @@ bool CWeaponMagazined::Action(s32 cmd, u32 flags)
         {
             NightVisionSwitch = true;
             DeviceSwitch();
+            return true;
+        }
+    }
+    break;
+	case kANIM_BORE: {
+        if ((flags & CMD_START) && GetState() == eIdle && !IsZoomed())
+        {
+            SwitchState(eBore);
             return true;
         }
     }
@@ -1677,7 +1712,7 @@ bool CWeaponMagazined::SwitchMode()
 
 void CWeaponMagazined::OnNextFireMode(bool opt)
 {
-    if (m_aFireModes.size() < 2)
+    if (IsZoomed() || m_aFireModes.size() < 2)
         return;
     if (opt && m_iCurFireMode + 1 == m_aFireModes.size())
         return;
@@ -1688,7 +1723,7 @@ void CWeaponMagazined::OnNextFireMode(bool opt)
 
 void CWeaponMagazined::OnPrevFireMode(bool opt)
 {
-    if (m_aFireModes.size() < 2)
+    if (IsZoomed() || m_aFireModes.size() < 2)
         return;
     if (opt && m_iCurFireMode == 0)
         return;
@@ -1856,4 +1891,39 @@ bool CWeaponMagazined::ShouldPlayFlameParticles()
         return false;
 
     return true;
+}
+
+void CWeaponMagazined::PlayAnimBore()
+{
+    string128 guns_anm_bore;
+    xr_strconcat(guns_anm_bore, "anm_bore", IsMisfire() ? "_jammed" : (iAmmoElapsed == 0 ? "_empty" : ""), IsGrenadeLauncherAttached() ? (!IsGrenadeMode() ? "_w_gl" : "_g") : "");
+
+    if (AnimationExist(guns_anm_bore))
+    {
+        PlayHUDMotion(guns_anm_bore, true, GetState());
+		
+		if (iAmmoElapsed == 0)
+            PlaySound(sndBoreEmpty, get_LastFP());
+        else
+            PlaySound(sndBore, get_LastFP());
+		
+        SetPending(TRUE);
+    }
+    else
+        SwitchState(eIdle);
+}
+
+void CWeaponMagazined::PlayAnimFiremode()
+{
+    string128 guns_anm_firemode;
+    xr_strconcat(guns_anm_firemode, "anm_firemode", IsMisfire() ? "_jammed" : (iAmmoElapsed == 0 ? "_empty" : ""), IsGrenadeLauncherAttached() ? "_w_gl" : "");
+
+    if (AnimationExist(guns_anm_firemode))
+    {
+        PlayHUDMotion(guns_anm_firemode, true, GetState());
+        PlaySound(sndFireModes, get_LastFP());
+        SetPending(TRUE);
+    }
+    else
+        SwitchState(eIdle);
 }
