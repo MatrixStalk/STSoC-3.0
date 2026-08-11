@@ -662,15 +662,15 @@ void attachable_hud_item::reload_motions()
     IKinematicsAnimated* animatedHudItem = smart_cast<IKinematicsAnimated*>(m_model);
     const bool can_merge_source_skeletons = m_has_separated_hands && animatedHudItem && is_source_hud_skeleton(m_parent->Model()) &&
         is_source_hud_skeleton(m_model);
-    m_merge_skeleton = READ_IF_EXISTS(pSettings, r_bool, sect_name, "skeleton_merge", can_merge_source_skeletons);
+    m_merge_skeleton = READ_IF_EXISTS(pSettings, r_bool, m_sect_name, "skeleton_merge", can_merge_source_skeletons);
 
     if (m_merge_skeleton && !can_merge_source_skeletons)
     {
-        Msg("! [%s] skeleton_merge requested for incompatible HUD skeletons in section [%s]; using the legacy animation path", __FUNCTION__, sect_name.c_str());
+        Msg("! [%s] skeleton_merge requested for incompatible HUD skeletons in section [%s]; using the legacy animation path", __FUNCTION__, m_sect_name.c_str());
         m_merge_skeleton = false;
     }
 
-    m_hand_motions.load(m_has_separated_hands, m_merge_skeleton, m_parent->AnimatedModel(), animatedHudItem, sect_name);
+    m_hand_motions.load(m_has_separated_hands, m_merge_skeleton, m_parent->AnimatedModel(), animatedHudItem, m_sect_name);
 }
 
 u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, bool randomAnim, float speed)
