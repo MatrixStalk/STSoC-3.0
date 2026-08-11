@@ -95,6 +95,8 @@ player_hud_motion* player_hud_motion_container::find_motion(const shared_str& na
 void player_hud_motion_container::load(
     bool has_separated_hands, bool merge_skeleton, IKinematicsAnimated* model, IKinematicsAnimated* animatedHudItem, const shared_str& sect)
 {
+    m_anims.clear();
+
     string512 buff;
     MotionID motion_ID;
 
@@ -652,6 +654,11 @@ void attachable_hud_item::load(const shared_str& sect_name)
     m_attach_place_idx = READ_IF_EXISTS(pSettings, r_u16, sect_name, "attach_place_idx", 0);
     m_measures.load(sect_name, m_model);
 
+    reload_motions();
+}
+
+void attachable_hud_item::reload_motions()
+{
     IKinematicsAnimated* animatedHudItem = smart_cast<IKinematicsAnimated*>(m_model);
     const bool can_merge_source_skeletons = m_has_separated_hands && animatedHudItem && is_source_hud_skeleton(m_parent->Model()) &&
         is_source_hud_skeleton(m_model);
@@ -843,6 +850,7 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
     if (script_override_arms) return;
 
     clear_source_skeleton_merge();
+    _m_hand_motions.clear();
 
     const bool b_reload = m_model_kinematics != nullptr || m_model_2_kinematics != nullptr;
     if (m_model_kinematics)
@@ -912,6 +920,14 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
     }
 
     //	Msg("hands visual changed to[%s] [%s] [%s]", model_name.c_str(), b_reload?"R":"", m_attached_items[0]?"Y":"");
+
+    // Attached HUD items may outlive a hands-mesh replacement. Re-evaluate
+    // their animation source before on_a_hud_attach can start a new motion.
+    for (attachable_hud_item* item : m_attached_items)
+    {
+        if (item)
+            item->reload_motions();
+    }
 
     if (!b_reload)
     {
@@ -1457,6 +1473,7 @@ void player_hud::attach_item(CHudItem* item)
         if (item_idx == 0 && m_attached_items[1])
             m_attached_items[1]->m_parent_hud_item->CheckCompatibility(item);
 
+        pi->reload_motions();
         item->on_a_hud_attach();
 
         updateMovementLayerState();

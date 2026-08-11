@@ -31,7 +31,7 @@ hand equivalents do not have to exist in the item skeleton.
 
 ```ini
 [actor_hud_source]
-visual          = stsoc\hands\source_gorka
+visual          = stsoc\hands\Gorka
 ; visual_2 may point to another mesh. If omitted, visual is duplicated.
 ancor_0         = ValveBiped.Bip01_R_Hand
 ancor_1         = ValveBiped.Bip01_L_Hand
@@ -39,12 +39,21 @@ position        = 0, 0, 0
 orientation     = 0, 0, 0
 
 [wpn_source_hud]
-item_visual     = weapons\source\ar15_hud
+item_visual     = stsoc\ar15\reciever_m4_skeleton
 attach_place_idx = 0
 skeleton_merge  = true
 item_position   = 0, 0, 0
 item_orientation = 0, 0, 0
 anm_idle        = idle
+anm_idle_empty  = idle_empty
+anm_show        = draw_empty
+anm_show_empty  = draw_empty
+anm_hide        = holster
+anm_hide_empty  = holster_empty
+anm_reload      = reload
+anm_reload_empty = reload_empty
+anm_shots       = fire_01
+anm_shot_l      = fire_empty
 ```
 
 `skeleton_merge` is optional: it defaults to `true` when both visuals have the
@@ -58,3 +67,13 @@ skeleton is the animation master, and all common `ValveBiped.Bip01_*`
 transforms are copied to the selected hands mesh by name after animation
 evaluation. Embedded OGF animations and external OMF animations use the same
 runtime path.
+
+For merged Source skeletons, non-idle HUD aliases are treated as stop-at-end
+motions when the exported motion definition does not contain that flag. Idle
+aliases remain cyclic; `_start` and `_end` idle transitions stop normally. The
+default can be overridden per alias, for example:
+
+```ini
+anm_inspect_stop_at_end = true
+anm_custom_loop_stop_at_end = false
+```

@@ -318,6 +318,7 @@ public:
     ~attachable_hud_item();
 
     void load(const shared_str& sect_name);
+    void reload_motions();
     void update(bool bForce);
     void setup_firedeps(firedeps& fd);
     void render(u32 context_id, IRenderable* root);
