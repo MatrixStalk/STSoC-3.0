@@ -10,7 +10,9 @@ models contain these bones:
 
 Bone matching is name-based. Bone indices may differ, and optional mesh bones
 such as `ValveBiped.Bip01_L_Ulna`, `ValveBiped.Bip01_L_Wrist` and their right
-hand equivalents do not have to exist in the item skeleton.
+hand equivalents do not have to exist in the item skeleton. These helper bones
+keep the hands mesh bind transforms and follow their retargeted parent instead
+of consuming potentially synthetic weapon animation tracks.
 
 ## Conversion requirements
 
@@ -20,8 +22,8 @@ hand equivalents do not have to exist in the item skeleton.
    `mag`, and similar roots). Every root branch is evaluated in model space;
    no destructive reparenting of already converted animation tracks is needed.
 3. Common ValveBiped bones may use different bind poses and numeric indices.
-   The runtime retargets each local animation delta onto the hands bind pose,
-   preserving the hands skeleton positions, hierarchy and bone lengths.
+   The runtime transfers the animation in model space using both inverse bind
+   matrices, preserving the hands skeleton positions and bone lengths.
 4. Put the complete weapon skeleton and its animations in the item OGF or its
    optional OMF. The replaceable hands OGF only needs the hands mesh and the
    ValveBiped skeleton. It may be a skeletal-rigid OGF without any animations.
