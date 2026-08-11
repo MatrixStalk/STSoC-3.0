@@ -26,6 +26,7 @@ struct motion_params
     float speed_k{1.0f};
     float start_k{0.0f};
     float stop_k{1.0f};
+    bool stop_at_end{};
 };
 
 struct player_hud_motion

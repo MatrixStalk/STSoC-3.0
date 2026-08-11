@@ -101,7 +101,8 @@ void player_hud_motion_container::load(
     for (const auto& [name, anm] : pSettings->r_section(sect).Data)
     {
         if ((strstr(name.c_str(), "anm_") == name.c_str() || strstr(name.c_str(), "anim_") == name.c_str()) 
-            && !strstr(name.c_str(), "_speed_k") && !strstr(name.c_str(), "_start_k") && !strstr(name.c_str(), "_stop_k") && !strstr(name.c_str(), "_effector"))
+            && !strstr(name.c_str(), "_speed_k") && !strstr(name.c_str(), "_start_k") && !strstr(name.c_str(), "_stop_k") &&
+            !strstr(name.c_str(), "_stop_at_end") && !strstr(name.c_str(), "_effector"))
         {
             player_hud_motion pm;
 
@@ -148,6 +149,14 @@ void player_hud_motion_container::load(
                 if (k < 1.f && k > 0.001f)
                     pm.params.stop_k = k;
             }
+
+            string128 stop_at_end_param;
+            xr_strconcat(stop_at_end_param, name.c_str(), "_stop_at_end");
+            const bool is_idle_alias = !strncmp(name.c_str(), "anm_idle", xr_strlen("anm_idle")) ||
+                !strncmp(name.c_str(), "anim_idle", xr_strlen("anim_idle"));
+            const bool is_idle_transition = is_idle_alias && (strstr(name.c_str(), "_start") || strstr(name.c_str(), "_end"));
+            pm.params.stop_at_end =
+                READ_IF_EXISTS(pSettings, r_bool, sect, stop_at_end_param, merge_skeleton && (!is_idle_alias || is_idle_transition));
 
             string128 start_param;
             xr_strconcat(start_param, name.c_str(), "_start_k");
@@ -1020,7 +1029,7 @@ u32 player_hud::motion_length(const motion_params& P, const motion_descr& M, con
 
     md = model->LL_GetMotionDef(M.mid);
     VERIFY(md);
-    if (md->flags & esmStopAtEnd)
+    if ((md->flags & esmStopAtEnd) || P.stop_at_end)
     {
         CMotion* motion = model->LL_GetRootMotion(M.mid);
 
