@@ -642,8 +642,8 @@ void attachable_hud_item::load(const shared_str& sect_name)
     m_measures.load(sect_name, m_model);
 
     IKinematicsAnimated* animatedHudItem = smart_cast<IKinematicsAnimated*>(m_model);
-    const bool can_merge_source_skeletons = m_has_separated_hands && animatedHudItem && m_parent->Model() &&
-        is_source_hud_skeleton(m_parent->Model()->dcast_PKinematics()) && is_source_hud_skeleton(m_model);
+    const bool can_merge_source_skeletons = m_has_separated_hands && animatedHudItem && is_source_hud_skeleton(m_parent->Model()) &&
+        is_source_hud_skeleton(m_model);
     m_merge_skeleton = READ_IF_EXISTS(pSettings, r_bool, sect_name, "skeleton_merge", can_merge_source_skeletons);
 
     if (m_merge_skeleton && !can_merge_source_skeletons)
@@ -652,7 +652,7 @@ void attachable_hud_item::load(const shared_str& sect_name)
         m_merge_skeleton = false;
     }
 
-    m_hand_motions.load(m_has_separated_hands, m_merge_skeleton, m_parent->Model(), animatedHudItem, sect_name);
+    m_hand_motions.load(m_has_separated_hands, m_merge_skeleton, m_parent->AnimatedModel(), animatedHudItem, sect_name);
 }
 
 u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, const CMotionDef*& md, bool randomAnim, float speed)
@@ -796,17 +796,19 @@ player_hud::player_hud()
 
 player_hud::~player_hud()
 {
-    if (m_model)
+    if (m_model_kinematics)
     {
-        IRenderVisual* v = m_model->dcast_RenderVisual();
+        IRenderVisual* v = m_model_kinematics->dcast_RenderVisual();
         ::Render->model_Delete(v);
         m_model = nullptr;
+        m_model_kinematics = nullptr;
     }
-    if (m_model_2)
+    if (m_model_2_kinematics)
     {
-        IRenderVisual* v2 = m_model_2->dcast_RenderVisual();
+        IRenderVisual* v2 = m_model_2_kinematics->dcast_RenderVisual();
         ::Render->model_Delete(v2);
         m_model_2 = nullptr;
+        m_model_2_kinematics = nullptr;
     }
 
     auto it = m_pool.begin();
@@ -831,18 +833,20 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
 
     clear_source_skeleton_merge();
 
-    const bool b_reload = m_model != nullptr || m_model_2 != nullptr;
-    if (m_model)
+    const bool b_reload = m_model_kinematics != nullptr || m_model_2_kinematics != nullptr;
+    if (m_model_kinematics)
     {
-        IRenderVisual* v = m_model->dcast_RenderVisual();
+        IRenderVisual* v = m_model_kinematics->dcast_RenderVisual();
         ::Render->model_Delete(v);
         m_model = nullptr;
+        m_model_kinematics = nullptr;
     }
-    if (m_model_2)
+    if (m_model_2_kinematics)
     {
-        IRenderVisual* v = m_model_2->dcast_RenderVisual();
+        IRenderVisual* v = m_model_2_kinematics->dcast_RenderVisual();
         ::Render->model_Delete(v);
         m_model_2 = nullptr;
+        m_model_2_kinematics = nullptr;
     }
 
     m_source_skeleton_mode = false;
@@ -854,17 +858,22 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
     const char* model_name = pSettings->r_string(player_hud_sect, "visual");
 
     ::Render->hud_loading = true;
-    m_model = smart_cast<IKinematicsAnimated*>(::Render->model_Create(model_name));
+    IRenderVisual* hands_visual_0 = ::Render->model_Create(model_name);
+    m_model_kinematics = smart_cast<IKinematics*>(hands_visual_0);
+    m_model = smart_cast<IKinematicsAnimated*>(hands_visual_0);
     const char* model_name_2 = READ_IF_EXISTS(pSettings, r_string, player_hud_sect, "visual_2", model_name);
-    m_model_2 = smart_cast<IKinematicsAnimated*>(::Render->model_Create(model_name_2));
+    IRenderVisual* hands_visual_1 = ::Render->model_Create(model_name_2);
+    m_model_2_kinematics = smart_cast<IKinematics*>(hands_visual_1);
+    m_model_2 = smart_cast<IKinematicsAnimated*>(hands_visual_1);
     ::Render->hud_loading = false;
 
-    R_ASSERT3(m_model, "HUD hands visual must be an animated skeleton", model_name);
-    R_ASSERT3(m_model_2, "HUD hands visual_2 must be an animated skeleton", model_name_2);
+    R_ASSERT3(m_model_kinematics, "HUD hands visual must be a skeleton", model_name);
+    R_ASSERT3(m_model_2_kinematics, "HUD hands visual_2 must be a skeleton", model_name_2);
 
-    IKinematics* hands_0 = m_model->dcast_PKinematics();
-    IKinematics* hands_1 = m_model_2->dcast_PKinematics();
+    IKinematics* hands_0 = m_model_kinematics;
+    IKinematics* hands_1 = m_model_2_kinematics;
     m_source_skeleton_mode = is_source_hud_skeleton(hands_0) && is_source_hud_skeleton(hands_1);
+    R_ASSERT3(m_source_skeleton_mode || (m_model && m_model_2), "Legacy HUD hands visuals must be animated skeletons", model_name);
 
     const LPCSTR l_clavicle_name = m_source_skeleton_mode ? source_l_clavicle : "l_clavicle";
     const LPCSTR r_clavicle_name = m_source_skeleton_mode ? source_r_clavicle : "r_clavicle";
@@ -876,8 +885,8 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
     setup_thumb_callbacks();
 
     // hides the unused arm meshes
-    m_model->dcast_PKinematics()->LL_SetBoneVisible(l_arm, FALSE, TRUE);
-    m_model_2->dcast_PKinematics()->LL_SetBoneVisible(r_arm, FALSE, TRUE);
+    m_model_kinematics->LL_SetBoneVisible(l_arm, FALSE, TRUE);
+    m_model_2_kinematics->LL_SetBoneVisible(r_arm, FALSE, TRUE);
 
     m_ancors.clear();
     for (const auto& [key, _bone] : pSettings->r_section(player_hud_sect).Data)
@@ -896,9 +905,9 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
     if (!b_reload)
     {
         const shared_str idle_name = m_source_skeleton_mode ? "idle" : "hand_idle_doun";
-        if (m_model->ID_Cycle_Safe(idle_name).valid())
+        if (m_model && m_model->ID_Cycle_Safe(idle_name).valid())
             m_model->PlayCycle(idle_name);
-        if (m_model_2->ID_Cycle_Safe(idle_name).valid())
+        if (m_model_2 && m_model_2->ID_Cycle_Safe(idle_name).valid())
             m_model_2->PlayCycle(idle_name);
     }
     else
@@ -909,13 +918,13 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
         if (m_attached_items[0])
             m_attached_items[0]->m_parent_hud_item->on_a_hud_attach();
     }
-    m_model->dcast_PKinematics()->CalculateBones_Invalidate();
-    m_model->dcast_PKinematics()->CalculateBones(TRUE);
-    m_model_2->dcast_PKinematics()->CalculateBones_Invalidate();
-    m_model_2->dcast_PKinematics()->CalculateBones(TRUE);
+    m_model_kinematics->CalculateBones_Invalidate();
+    m_model_kinematics->CalculateBones(TRUE);
+    m_model_2_kinematics->CalculateBones_Invalidate();
+    m_model_2_kinematics->CalculateBones(TRUE);
 
-    m_model->dcast_RenderVisual()->MarkAsHot(true);
-    m_model_2->dcast_RenderVisual()->MarkAsHot(true);
+    m_model_kinematics->dcast_RenderVisual()->MarkAsHot(true);
+    m_model_2_kinematics->dcast_RenderVisual()->MarkAsHot(true);
 
     refresh_source_skeleton_merge();
 }

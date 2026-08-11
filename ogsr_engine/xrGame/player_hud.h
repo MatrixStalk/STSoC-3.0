@@ -436,7 +436,8 @@ public:
 
     void update_script_item();
 
-    IKinematicsAnimated* Model() { return m_model; }
+    IKinematics* Model() { return m_model_kinematics; }
+    IKinematicsAnimated* AnimatedModel() { return m_model; }
     const Fmatrix& XFORM() const { return m_transform; }
 
 private:
@@ -454,6 +455,7 @@ private:
     shared_str m_sect_name;
     Fmatrix m_attach_offset, m_attach_offset_2;
     Fmatrix m_transform, m_transform_2;
+    IKinematics *m_model_kinematics{}, *m_model_2_kinematics{};
     IKinematicsAnimated *m_model{}, *m_model_2{};
     IKinematics* m_source_skeletons[2]{};
     bool m_source_skeleton_mode{};
