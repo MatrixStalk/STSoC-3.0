@@ -53,7 +53,7 @@ void CPartition::load(IKinematics* V, LPCSTR model_name)
 u16 find_bone_id(vecBones* bones, shared_str nm)
 {
     for (u16 i = 0; i < (u16)bones->size(); i++)
-        if (bones->at(i)->name == nm)
+        if (_stricmp(bones->at(i)->name.c_str(), nm.c_str()) == 0)
             return i;
     return BI_NONE;
 }
