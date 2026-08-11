@@ -80,6 +80,33 @@ motions are retargeted to the selected hands mesh by name after animation
 evaluation. Embedded OGF animations and external OMF animations use the same
 runtime path.
 
+If the merged item skeleton contains a separate `Camera` bone, its animated
+rotation relative to the bind pose is applied to the first-person game camera.
+The bone translation is always ignored. The HUD camera itself is not rotated,
+so the relative motion authored between the weapon and `Camera` is preserved.
+
+## Procedural movement `.anm` layers
+
+Source HUD rigs use `[hud_movement_layers]` during ordinary idle-state movement
+as well as during weapon actions. These matrix animations are applied after the
+regular skeletal motion, so they do not replace firing, aiming, or reload clips.
+The legacy sinusoidal weapon bobbing is disabled while these Source movement
+layers are available, preventing the two movement effects from accumulating.
+
+Each layer accepts the following values:
+
+```ini
+; path, speed, power, blend_in_seconds, blend_out_seconds, pivot_bone
+movement_layer_3 = movement\walk.anm, 1.0, 0.50, 0.25, 0.30, lead_gun
+movement_layer_4 = movement\sprint_generic.anm, 0.8, 0.25, 0.22, 0.32, lead_gun
+```
+
+The transition weight uses a minimum-jerk S-curve. `lead_gun` remains valid for
+legacy rigs and maps to `ValveBiped.Bip01_Spine4` on a Source rig. The first
+three values remain compatible with old configurations; omitted transition
+times default to 0.4 seconds and an omitted pivot applies the animation around
+the HUD root.
+
 For merged Source skeletons, non-idle HUD aliases are treated as stop-at-end
 motions when the exported motion definition does not contain that flag. Idle
 aliases remain cyclic; `_start` and `_end` idle transitions stop normally. The

@@ -883,6 +883,19 @@ void CActor::UpdateCL()
     {
         trans.c.sub(Device.vCameraPosition);
         g_player_hud->update(trans);
+
+        // Source weapon animations may contain a separate Camera root. Apply
+        // only its bind-relative rotation to the first-person game camera;
+        // translation is discarded by player_hud::camera_bone_rotation().
+        if (Level().CurrentEntity() == this && cam_Active() == cam_FirstEye())
+        {
+            Fmatrix camera_rotation;
+            if (g_player_hud->camera_bone_rotation(camera_rotation))
+            {
+                Cameras().ApplyHudItemCameraRotation(camera_rotation);
+                Cameras().ApplyDevice(!!Level().Cameras().GetCamEffector(cefDemo));
+            }
+        }
     }
 
     {

@@ -120,6 +120,9 @@ struct movement_layer
     float blend_amount[2];
     bool active;
     float m_power;
+    float m_blend_in;
+    float m_blend_out;
+    shared_str m_pivot_bone;
     Fmatrix blend;
     u8 m_part{};
 
@@ -131,6 +134,8 @@ struct movement_layer
         blend_amount[1] = 0.f;
         active = false;
         m_power = 1.f;
+        m_blend_in = .4f;
+        m_blend_out = .4f;
     }
 
     ~movement_layer() { xr_delete(anm); }
@@ -374,6 +379,10 @@ public:
 
     void calc_transform(u16 attach_slot_idx, const Fmatrix& offset, Fmatrix& result, bool merged_skeleton = false);
     void tune(const Ivector& values);
+
+    // Returns the Source Camera bone rotation relative to its bind pose.
+    // Translation is deliberately discarded: this is a view rotation only.
+    bool camera_bone_rotation(Fmatrix& rotation) const;
 
     u32 motion_length(const motion_params& P, const motion_descr& M, const CMotionDef*& md, IKinematicsAnimated* itemModel, float speed);
     u32 motion_length(const shared_str& anim_name, const shared_str& hud_name, const CMotionDef*& md, float speed = 1.f);

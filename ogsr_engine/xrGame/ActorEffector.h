@@ -20,6 +20,7 @@ public:
     CActorCameraManager() : inherited(false) {}
     virtual ~CActorCameraManager() {}
     IC void hud_camera_Matrix(Fmatrix& M) { M.set(m_cam_info_hud.r, m_cam_info_hud.n, m_cam_info_hud.d, m_cam_info_hud.p); }
+    void ApplyHudItemCameraRotation(const Fmatrix& rotation);
 };
 
 using GET_KOEFF_FUNC = fastdelegate::FastDelegate<float()>;

@@ -417,6 +417,23 @@ void CActorCameraManager::UpdateCamEffectors()
     m_cam_info_hud.n.crossproduct(m_cam_info_hud.d, m_cam_info_hud.r);
 }
 
+void CActorCameraManager::ApplyHudItemCameraRotation(const Fmatrix& rotation)
+{
+    Fmatrix camera, rotated;
+    camera.set(m_cam_info.r, m_cam_info.n, m_cam_info.d, Fvector().set(0.f, 0.f, 0.f));
+    rotated.mul_43(camera, rotation);
+
+    // Preserve m_cam_info.p exactly. The Source Camera bone is allowed to
+    // rotate the view, but its animated translation must never move it.
+    m_cam_info.d.set(rotated.k).normalize_safe();
+    m_cam_info.n.set(rotated.j).normalize_safe();
+    m_cam_info.r.crossproduct(m_cam_info.n, m_cam_info.d).normalize_safe();
+    m_cam_info.n.crossproduct(m_cam_info.d, m_cam_info.r).normalize_safe();
+
+    // Do not modify m_cam_info_hud. Keeping the HUD on its original basis
+    // reproduces the weapon-to-Camera relative motion from the Source rig.
+}
+
 void cam_effector_sub(const SCamEffectorInfo& c1, const SCamEffectorInfo& c2, SCamEffectorInfo& dest)
 {
     dest.p.sub(c1.p, c2.p);

@@ -18,6 +18,7 @@ constexpr LPCSTR source_r_clavicle = "valvebiped.bip01_r_clavicle";
 constexpr LPCSTR source_r_thumb0 = "valvebiped.bip01_r_finger0";
 constexpr LPCSTR source_r_thumb01 = "valvebiped.bip01_r_finger01";
 constexpr LPCSTR source_r_thumb02 = "valvebiped.bip01_r_finger02";
+constexpr LPCSTR source_camera_bone = "camera";
 
 bool is_source_hud_skeleton(const IKinematics* skeleton)
 {
@@ -51,6 +52,9 @@ u16 hud_bone_id(const IKinematics* skeleton, LPCSTR bone_name)
         {"r_finger0", source_r_thumb0},
         {"r_finger01", source_r_thumb01},
         {"r_finger02", source_r_thumb02},
+        // Procedural Movement Animations uses this legacy HUD pivot. Source
+        // rigs rotate the complete arms from their common upper-body root.
+        {"lead_gun", source_root_bone},
     };
 
     for (const bone_alias& alias : aliases)
@@ -812,14 +816,37 @@ player_hud::player_hud()
             strconcat(sizeof(temp), temp, "movement_layer_", std::to_string(i).c_str());
             R_ASSERT2(pSettings->line_exist("hud_movement_layers", temp), make_string("Missing definition for [hud_movement_layers] %s", temp));
             LPCSTR layer_def = pSettings->r_string("hud_movement_layers", temp);
-            R_ASSERT2(_GetItemCount(layer_def) > 0, make_string("Wrong definition for [hud_movement_layers] %s", temp));
+            const int item_count = _GetItemCount(layer_def);
+            R_ASSERT2(item_count > 0, make_string("Wrong definition for [hud_movement_layers] %s", temp));
 
             _GetItem(layer_def, 0, tmp);
             anm->Load(tmp);
-            _GetItem(layer_def, 1, tmp);
-            anm->anm->Speed() = (atof(tmp) ? atof(tmp) : 1.f);
-            _GetItem(layer_def, 2, tmp);
-            anm->m_power = (atof(tmp) ? atof(tmp) : 1.f);
+
+            if (item_count > 1)
+            {
+                _GetItem(layer_def, 1, tmp);
+                anm->anm->Speed() = (atof(tmp) ? atof(tmp) : 1.f);
+            }
+            if (item_count > 2)
+            {
+                _GetItem(layer_def, 2, tmp);
+                anm->m_power = (atof(tmp) ? atof(tmp) : 1.f);
+            }
+            if (item_count > 3)
+            {
+                _GetItem(layer_def, 3, tmp);
+                anm->m_blend_in = _max(atof(tmp), EPS_S);
+            }
+            if (item_count > 4)
+            {
+                _GetItem(layer_def, 4, tmp);
+                anm->m_blend_out = _max(atof(tmp), EPS_S);
+            }
+            if (item_count > 5)
+            {
+                _GetItem(layer_def, 5, tmp);
+                anm->m_pivot_bone = tmp;
+            }
             m_movement_layers.push_back(anm);
         }
     }
@@ -1165,7 +1192,9 @@ void player_hud::update(const Fmatrix& cam_trans)
 
     if (need_update_collision_local)
     {
-        if (m_attached_items[0] && m_attached_items[0]->m_parent_hud_item->HudBobbingAllowed())
+        const bool procedural_source_movement =
+            m_source_skeleton_mode && !m_movement_layers.empty() && (m_attached_items[0] || m_attached_items[1]);
+        if (!procedural_source_movement && m_attached_items[0] && m_attached_items[0]->m_parent_hud_item->HudBobbingAllowed())
         {
             // m_bobbing привазан к айтему только что б получить zoom factor. Зумится может только основной предмет в руках потому можно считать только по нему
             m_attached_items[0]->m_parent_hud_item->m_bobbing->Update(m_attach_offset, m_attach_offset_2);
@@ -1257,8 +1286,15 @@ void player_hud::update(const Fmatrix& cam_trans)
     }
 
     bool need_blend[2];
-    need_blend[0] = ((script_anim_part == 0 || script_anim_part == 2) || (m_attached_items[0] && m_attached_items[0]->m_parent_hud_item->NeedBlendAnm()));
-    need_blend[1] = ((script_anim_part == 1 || script_anim_part == 2) || (m_attached_items[1] && m_attached_items[1]->m_parent_hud_item->NeedBlendAnm()));
+    // Source-style movement layers are procedural HUD overlays. They must be
+    // active during the weapon idle state as well, otherwise ordinary walking
+    // and running never reach the .anm layer. Keep the old state-dependent
+    // behaviour for legacy HUD rigs.
+    const bool source_movement = m_source_skeleton_mode && !m_movement_layers.empty() && (m_attached_items[0] || m_attached_items[1]);
+    need_blend[0] = source_movement || (script_anim_part == 0 || script_anim_part == 2) ||
+        (m_attached_items[0] && m_attached_items[0]->m_parent_hud_item->NeedBlendAnm());
+    need_blend[1] = source_movement || (script_anim_part == 1 || script_anim_part == 2) ||
+        (m_attached_items[1] && m_attached_items[1]->m_parent_hud_item->NeedBlendAnm());
 
     for (movement_layer* anm : m_movement_layers)
     {
@@ -1271,28 +1307,28 @@ void player_hud::update(const Fmatrix& cam_trans)
             {
                 if (need_blend[0])
                 {
-                    anm->blend_amount[0] += Device.fTimeDelta / .4f;
+                    anm->blend_amount[0] += Device.fTimeDelta / anm->m_blend_in;
 
                     if (!m_attached_items[1])
-                        anm->blend_amount[1] += Device.fTimeDelta / .4f;
+                        anm->blend_amount[1] += Device.fTimeDelta / anm->m_blend_in;
                     else if (!need_blend[1])
-                        anm->blend_amount[1] -= Device.fTimeDelta / .4f;
+                        anm->blend_amount[1] -= Device.fTimeDelta / anm->m_blend_out;
                 }
 
                 if (need_blend[1])
                 {
-                    anm->blend_amount[1] += Device.fTimeDelta / .4f;
+                    anm->blend_amount[1] += Device.fTimeDelta / anm->m_blend_in;
 
                     if (!m_attached_items[0])
-                        anm->blend_amount[0] += Device.fTimeDelta / .4f;
+                        anm->blend_amount[0] += Device.fTimeDelta / anm->m_blend_in;
                     else if (!need_blend[0])
-                        anm->blend_amount[0] -= Device.fTimeDelta / .4f;
+                        anm->blend_amount[0] -= Device.fTimeDelta / anm->m_blend_out;
                 }
             }
             else
             {
-                anm->blend_amount[0] -= Device.fTimeDelta / .4f;
-                anm->blend_amount[1] -= Device.fTimeDelta / .4f;
+                anm->blend_amount[0] -= Device.fTimeDelta / anm->m_blend_out;
+                anm->blend_amount[1] -= Device.fTimeDelta / anm->m_blend_out;
             }
 
             clamp(anm->blend_amount[0], 0.f, 1.f);
@@ -1307,20 +1343,31 @@ void player_hud::update(const Fmatrix& cam_trans)
             anm->anm->Update(Device.fTimeDelta);
         }
 
-        if (anm->blend_amount[0] == anm->blend_amount[1])
+        const auto apply_layer = [anm](Fmatrix& transform, const IKinematics* skeleton, const u8 part)
         {
-            Fmatrix blend = anm->XFORM(0);
-            m_transform.mulB_43(blend);
-            m_transform_2.mulB_43(blend);
-        }
-        else
-        {
-            if (anm->blend_amount[0] > 0.f)
-                m_transform.mulB_43(anm->XFORM(0));
+            Fmatrix layer_transform = anm->XFORM(part);
+            const u16 pivot_id =
+                anm->m_pivot_bone.size() ? hud_bone_id(skeleton, *anm->m_pivot_bone) : BI_NONE;
+            if (pivot_id == BI_NONE)
+            {
+                transform.mulB_43(layer_transform);
+                return;
+            }
 
-            if (anm->blend_amount[1] > 0.f)
-                m_transform_2.mulB_43(anm->XFORM(1));
-        }
+            const Fmatrix& pivot = skeleton->LL_GetTransform(pivot_id);
+            Fmatrix inverse_pivot;
+            inverse_pivot.invert(pivot);
+            Fmatrix around_pivot;
+            around_pivot.mul_43(pivot, layer_transform);
+            around_pivot.mulB_43(inverse_pivot);
+            transform.mulB_43(around_pivot);
+        };
+
+        if (anm->blend_amount[0] > 0.f)
+            apply_layer(m_transform, m_model_kinematics, 0);
+
+        if (anm->blend_amount[1] > 0.f)
+            apply_layer(m_transform_2, m_model_2_kinematics, 1);
     }
 
 
@@ -1845,6 +1892,36 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
     }
 }
 
+bool player_hud::camera_bone_rotation(Fmatrix& rotation) const
+{
+    rotation.identity();
+
+    // Slot zero is the authoritative Source animation for the complete weapon
+    // rig. refresh_source_skeleton_merge also falls back to the off-hand item
+    // here when no main item is attached.
+    IKinematics* source = m_source_skeletons[0];
+    if (!m_source_skeleton_mode || !source)
+        return false;
+
+    const u16 camera_bone_id = source->LL_BoneID(source_camera_bone);
+    if (camera_bone_id == BI_NONE)
+        return false;
+
+    const CBoneData& camera_data = source->LL_GetData(camera_bone_id);
+
+    // m2b_transform is inverse(global bind). The product is therefore the
+    // animated Camera delta. Rebuild it from a quaternion to remove both the
+    // animated translation and any numerical scale/shear.
+    Fmatrix camera_delta;
+    camera_delta.mul_43(source->LL_GetBoneInstance(camera_bone_id).mTransform, camera_data.m2b_transform);
+
+    Fquaternion camera_rotation;
+    camera_rotation.set(camera_delta);
+    rotation.rotation(camera_rotation);
+    rotation.c.set(0.f, 0.f, 0.f);
+    return true;
+}
+
 void player_hud::SourceBoneMergeCallback0(CBoneInstance* B)
 {
     static_cast<player_hud*>(B->callback_param())->copy_source_bone(0, B);
@@ -2236,10 +2313,12 @@ void player_hud::updateMovementLayerState()
 
     for (movement_layer* anm : m_movement_layers)
     {
-        anm->Stop(false);
+        if (anm)
+            anm->Stop(false);
     }
 
-    bool need_blend = (script_anim_part != u8(-1) 
+    const bool source_movement = m_source_skeleton_mode && !m_movement_layers.empty() && (m_attached_items[0] || m_attached_items[1]);
+    bool need_blend = (source_movement || script_anim_part != u8(-1)
             || (m_attached_items[0] && m_attached_items[0]->m_parent_hud_item->NeedBlendAnm()) 
             || (m_attached_items[1] && m_attached_items[1]->m_parent_hud_item->NeedBlendAnm()));
 
