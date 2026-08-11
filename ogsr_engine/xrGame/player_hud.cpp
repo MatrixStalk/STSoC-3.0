@@ -835,12 +835,12 @@ player_hud::player_hud()
             if (item_count > 3)
             {
                 _GetItem(layer_def, 3, tmp);
-                anm->m_blend_in = _max(atof(tmp), EPS_S);
+                anm->m_blend_in = _max(static_cast<float>(atof(tmp)), EPS_S);
             }
             if (item_count > 4)
             {
                 _GetItem(layer_def, 4, tmp);
-                anm->m_blend_out = _max(atof(tmp), EPS_S);
+                anm->m_blend_out = _max(static_cast<float>(atof(tmp)), EPS_S);
             }
             if (item_count > 5)
             {

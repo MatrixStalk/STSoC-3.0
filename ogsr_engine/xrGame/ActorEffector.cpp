@@ -411,17 +411,33 @@ void CActorCameraManager::UpdateCamEffectors()
     m_cam_info_hud = m_cam_info;
     inherited::UpdateCamEffectors();
 
+    // Process the Source Camera bone as a relative gameplay camera animator.
+    // The HUD basis above intentionally remains unaffected.
+    ApplyHudItemCameraRotation();
+
     m_cam_info_hud.d.normalize();
     m_cam_info_hud.n.normalize();
     m_cam_info_hud.r.crossproduct(m_cam_info_hud.n, m_cam_info_hud.d);
     m_cam_info_hud.n.crossproduct(m_cam_info_hud.d, m_cam_info_hud.r);
 }
 
-void CActorCameraManager::ApplyHudItemCameraRotation(const Fmatrix& rotation)
+void CActorCameraManager::SetHudItemCameraRotation(const Fmatrix* rotation)
 {
+    m_hud_item_camera_rotation_active = rotation != nullptr;
+    if (rotation)
+        m_hud_item_camera_rotation = *rotation;
+    else
+        m_hud_item_camera_rotation.identity();
+}
+
+void CActorCameraManager::ApplyHudItemCameraRotation()
+{
+    if (!m_hud_item_camera_rotation_active)
+        return;
+
     Fmatrix camera, rotated;
     camera.set(m_cam_info.r, m_cam_info.n, m_cam_info.d, Fvector().set(0.f, 0.f, 0.f));
-    rotated.mul_43(camera, rotation);
+    rotated.mul_43(camera, m_hud_item_camera_rotation);
 
     // Preserve m_cam_info.p exactly. The Source Camera bone is allowed to
     // rotate the view, but its animated translation must never move it.

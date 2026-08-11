@@ -9,18 +9,21 @@ class CActor;
 class CActorCameraManager : public CCameraManager
 {
     SCamEffectorInfo m_cam_info_hud;
+    Fmatrix m_hud_item_camera_rotation;
+    bool m_hud_item_camera_rotation_active{};
 
 protected:
     using inherited = CCameraManager;
 
     virtual void UpdateCamEffectors();
     virtual bool ProcessCameraEffector(CEffectorCam* eff);
+    void ApplyHudItemCameraRotation();
 
 public:
-    CActorCameraManager() : inherited(false) {}
+    CActorCameraManager() : inherited(false) { m_hud_item_camera_rotation.identity(); }
     virtual ~CActorCameraManager() {}
     IC void hud_camera_Matrix(Fmatrix& M) { M.set(m_cam_info_hud.r, m_cam_info_hud.n, m_cam_info_hud.d, m_cam_info_hud.p); }
-    void ApplyHudItemCameraRotation(const Fmatrix& rotation);
+    void SetHudItemCameraRotation(const Fmatrix* rotation);
 };
 
 using GET_KOEFF_FUNC = fastdelegate::FastDelegate<float()>;

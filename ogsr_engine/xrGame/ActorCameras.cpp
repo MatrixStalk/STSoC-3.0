@@ -13,6 +13,7 @@
 
 #include "SleepEffector.h"
 #include "ActorEffector.h"
+#include "player_hud.h"
 #include "level.h"
 #include "../xrCDB/cl_intersect.h"
 #include "../xr_3da/gamemtllib.h"
@@ -478,6 +479,14 @@ void CActor::cam_Update(float dt, float fFOV)
     float curr_inert = psCamInert;
     if (mstate_real & mcSprint)
         psCamInert = psSprintCamInert;
+
+    // Feed the animated Source Camera bone into the normal gameplay-camera
+    // effector pass. Its transform was evaluated with the HUD on the previous
+    // frame, like the current value of a continuously playing camera .anm.
+    Fmatrix hud_item_camera_rotation;
+    const bool use_hud_item_camera = Level().CurrentEntity() == this && cam_active == eacFirstEye && IsFocused() &&
+        g_player_hud && g_player_hud->camera_bone_rotation(hud_item_camera_rotation);
+    Cameras().SetHudItemCameraRotation(use_hud_item_camera ? &hud_item_camera_rotation : nullptr);
 
     // if (psActorFlags.test(AF_PSP)) // всегда true
     {

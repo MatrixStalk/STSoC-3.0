@@ -81,7 +81,9 @@ evaluation. Embedded OGF animations and external OMF animations use the same
 runtime path.
 
 If the merged item skeleton contains a separate `Camera` bone, its animated
-rotation relative to the bind pose is applied to the first-person game camera.
+rotation relative to the bind pose is processed as a first-person gameplay
+camera animator. It directly changes the actor camera direction used by the
+view and firing code, in the same camera-effector stage as camera `.anm` files.
 The bone translation is always ignored. The HUD camera itself is not rotated,
 so the relative motion authored between the weapon and `Camera` is preserved.
 
