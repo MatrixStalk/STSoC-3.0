@@ -352,6 +352,7 @@ void attachable_hud_item::setup_firedeps(firedeps& fd)
         m_item_transform.transform_dir(fd.vLastFD);
         if (m_measures.useCopFirePoint)
             m_parent_hud_item->CorrectDirFromWorldToHud(fd.vLastFD);
+        fd.vLastFD.normalize_safe();
         VERIFY(_valid(fd.vLastFD));
         VERIFY(_valid(fd.vLastFD));
 
@@ -411,6 +412,12 @@ void hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     if (is_16x9 && !pSettings->line_exist(sect_name, val_name))
         xr_strcpy(val_name, "hands_orientation");
     m_hands_attach[1] = READ_IF_EXISTS(pSettings, r_fvector3, sect_name, val_name, Fvector{});
+
+    strconcat(sizeof(val_name), val_name, "hud_scale", _prefix);
+    if (is_16x9 && !pSettings->line_exist(sect_name, val_name))
+        xr_strcpy(val_name, "hud_scale");
+    m_hud_scale = READ_IF_EXISTS(pSettings, r_float, sect_name, val_name, 1.f);
+    clamp(m_hud_scale, 0.001f, 100.f);
 
     if (!pSettings->line_exist(sect_name, "item_position") && pSettings->line_exist(sect_name, "position"))
         m_item_attach[0] = pSettings->r_fvector3(sect_name, "position");
@@ -1312,6 +1319,20 @@ void player_hud::update(const Fmatrix& cam_trans)
     }
 
 
+    const attachable_hud_item* scale_source = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
+    const float hud_scale = scale_source ? scale_source->m_measures.m_hud_scale : 1.f;
+    if (!fsimilar(hud_scale, 1.f))
+    {
+        // Uniformly scale both hands and every item attached to them around
+        // the HUD root. Keep the camera-space root position unchanged.
+        m_transform.i.mul(hud_scale);
+        m_transform.j.mul(hud_scale);
+        m_transform.k.mul(hud_scale);
+        m_transform_2.i.mul(hud_scale);
+        m_transform_2.j.mul(hud_scale);
+        m_transform_2.k.mul(hud_scale);
+    }
+
     if (m_attached_items[0])
         m_attached_items[0]->update(true);
 
@@ -1705,8 +1726,6 @@ void player_hud::clear_source_skeleton_merge()
 
     m_source_skeletons[0] = nullptr;
     m_source_skeletons[1] = nullptr;
-    m_source_bind_corrections[0].clear();
-    m_source_bind_corrections[1].clear();
 }
 
 void player_hud::refresh_source_skeleton_merge()
@@ -1749,7 +1768,6 @@ void player_hud::refresh_source_skeleton_merge()
         if (!source || !is_source_hud_skeleton(source))
             continue;
 
-        m_source_bind_corrections[target_idx].resize(target->LL_BoneCount());
         u16 merged_bones = 0;
         for (u16 target_bone_id = 0; target_bone_id < target->LL_BoneCount(); ++target_bone_id)
         {
@@ -1765,13 +1783,6 @@ void player_hud::refresh_source_skeleton_merge()
             target_bone.set_param(0, static_cast<float>(source_bone_id));
             target_bone.set_param(1, 0.f);
             target_bone.set_param(2, static_cast<float>(target_bone_id));
-
-            // source current * source inverse-bind * target bind gives the
-            // animated target transform without assuming identical bind poses.
-            Fmatrix target_bind;
-            target_bind.invert(target->LL_GetData(target_bone_id).m2b_transform);
-            m_source_bind_corrections[target_idx][target_bone_id].mul_43(
-                source->LL_GetData(source_bone_id).m2b_transform, target_bind);
             if (target_idx == 0)
             {
                 if (!xr_strcmp(bone_name, source_r_thumb0))
@@ -1799,14 +1810,34 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
 
     const u16 source_bone_id = static_cast<u16>(target_bone->get_param(0));
     const u16 target_bone_id = static_cast<u16>(target_bone->get_param(2));
-    if (source_bone_id < source->LL_BoneCount() && target_bone_id < m_source_bind_corrections[target_idx].size())
+    IKinematics* target = target_idx == 0 ? m_model_kinematics : m_model_2_kinematics;
+    if (target && source_bone_id < source->LL_BoneCount() && target_bone_id < target->LL_BoneCount())
     {
-        // Transfer the animated skinning delta instead of the absolute bone
-        // matrix. Source weapon and replaceable-hands meshes can use different
-        // bind transforms (notably Ulna/Wrist helpers), so copying the absolute
-        // matrix stretches the hands even when the bone names match.
-        target_bone->mTransform.mul_43(
-            source->LL_GetBoneInstance(source_bone_id).mTransform, m_source_bind_corrections[target_idx][target_bone_id]);
+        const CBoneData& source_data = source->LL_GetData(source_bone_id);
+        const CBoneData& target_data = target->LL_GetData(target_bone_id);
+
+        // Retarget the local animation delta and rebuild the target hierarchy.
+        // This preserves the hands mesh bind positions and bone lengths even
+        // when the weapon skeleton uses different proportions.
+        Fmatrix source_local;
+        if (const u16 source_parent_id = source_data.GetParentID(); source_parent_id != BI_NONE)
+        {
+            Fmatrix source_parent_inverse;
+            source_parent_inverse.invert(source->LL_GetBoneInstance(source_parent_id).mTransform);
+            source_local.mul_43(source_parent_inverse, source->LL_GetBoneInstance(source_bone_id).mTransform);
+        }
+        else
+            source_local.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
+
+        Fmatrix source_bind_inverse, local_delta, target_local;
+        source_bind_inverse.invert(source_data.bind_transform);
+        local_delta.mul_43(source_bind_inverse, source_local);
+        target_local.mul_43(target_data.bind_transform, local_delta);
+
+        if (const u16 target_parent_id = target_data.GetParentID(); target_parent_id != BI_NONE)
+            target_bone->mTransform.mul_43(target->LL_GetBoneInstance(target_parent_id).mTransform, target_local);
+        else
+            target_bone->mTransform.set(target_local);
     }
 
     // Preserve the existing procedural right-thumb adjustment after the

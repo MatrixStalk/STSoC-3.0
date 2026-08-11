@@ -20,7 +20,8 @@ hand equivalents do not have to exist in the item skeleton.
    `mag`, and similar roots). Every root branch is evaluated in model space;
    no destructive reparenting of already converted animation tracks is needed.
 3. Common ValveBiped bones may use different bind poses and numeric indices.
-   The runtime transfers the animated skinning delta to the hands bind pose.
+   The runtime retargets each local animation delta onto the hands bind pose,
+   preserving the hands skeleton positions, hierarchy and bone lengths.
 4. Put the complete weapon skeleton and its animations in the item OGF or its
    optional OMF. The replaceable hands OGF only needs the hands mesh and the
    ValveBiped skeleton. It may be a skeletal-rigid OGF without any animations.
@@ -45,6 +46,9 @@ orientation     = 0, 0, 0
 item_visual     = stsoc\ar15\reciever_m4_skeleton
 attach_place_idx = 0
 skeleton_merge  = true
+; Uniform scale for the complete HUD (both hands and attached items).
+; hud_scale_16x9 may override it for widescreen mode.
+hud_scale       = 1.0
 item_position   = 0, 0, 0
 item_orientation = 0, 0, 0
 anm_idle        = idle
@@ -70,7 +74,7 @@ path. In merge mode the item is placed in the HUD root coordinate system; the
 Changing `visual`/`visual_2` in the active actor HUD section replaces the hands
 mesh. The weapon animations are not copied into every hands model: the item
 skeleton is the animation master, and all common `ValveBiped.Bip01_*`
-transforms are copied to the selected hands mesh by name after animation
+motions are retargeted to the selected hands mesh by name after animation
 evaluation. Embedded OGF animations and external OMF animations use the same
 runtime path.
 
