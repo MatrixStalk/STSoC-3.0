@@ -39,7 +39,15 @@ void CKinematics::CalculateBones(BOOL bForceExact)
     Device.Statistic->Animation.Begin();
 #endif
 
-    Bone_Calculate(bones->at(iRoot), &Fidentity);
+    // OGF skeletons exported from Source may contain several independent root
+    // branches (for example hands, camera, weapon body and magazine). Calculate
+    // every branch from model space while retaining iRoot as the primary root
+    // for legacy APIs and root-motion queries.
+    for (const auto& bone : *bones)
+    {
+        if (bone->GetParentID() == BI_NONE)
+            Bone_Calculate(bone, &Fidentity);
+    }
 
 #ifdef DEBUG
     check_kinematics(this, dbg_name.c_str());

@@ -166,6 +166,8 @@ void player_hud_motion_container::load(
             else if (animatedHudItem && !has_separated_hands)
                 final_model = animatedHudItem;
 
+            R_ASSERT3(final_model, "No animated skeleton is available for HUD motions", sect.c_str());
+
             // and load all motions for it
 
             for (u32 i = 0; i <= 8; ++i)
@@ -712,7 +714,7 @@ u32 attachable_hud_item::anim_play(const shared_str& anm_name_b, BOOL bMixIn, co
         
         R_ASSERT3(M2.valid(), "model has no motion [idle] ", m_visual_name.c_str());
 
-        if (m_has_separated_hands)
+        if (m_has_separated_hands && !m_merge_skeleton)
         {
             u16 root_id = m_model->LL_GetBoneRoot();
             CBoneInstance& root_binst = m_model->LL_GetBoneInstance(root_id);
@@ -973,9 +975,9 @@ void player_hud::render_hud(u32 context_id, IRenderable* root)
 
     if (b_has_hands || script_anim_part != u8(-1))
     {
-        ::Render->add_Visual(context_id, root, m_model->dcast_RenderVisual(), m_transform);
+        ::Render->add_Visual(context_id, root, m_model_kinematics->dcast_RenderVisual(), m_transform);
 
-        ::Render->add_Visual(context_id, root, m_model_2->dcast_RenderVisual(), m_transform_2);
+        ::Render->add_Visual(context_id, root, m_model_2_kinematics->dcast_RenderVisual(), m_transform_2);
     }
 
     if (!script_override_item) // можно скрывать предметы в руках во время скриптовой анимаии, но выглядит кривовато
@@ -1139,13 +1141,15 @@ void player_hud::update(const Fmatrix& cam_trans)
     bool hasHands = (m_attached_items[0] && m_attached_items[0]->m_has_separated_hands) || (m_attached_items[1] && m_attached_items[1]->m_has_separated_hands);
     if (hasHands || script_anim_item_model)
     {
-        m_model->UpdateTracks();
-        m_model->dcast_PKinematics()->CalculateBones_Invalidate();
-        m_model->dcast_PKinematics()->CalculateBones(TRUE);
+        if (m_model)
+            m_model->UpdateTracks();
+        m_model_kinematics->CalculateBones_Invalidate();
+        m_model_kinematics->CalculateBones(TRUE);
 
-        m_model_2->UpdateTracks();
-        m_model_2->dcast_PKinematics()->CalculateBones_Invalidate();
-        m_model_2->dcast_PKinematics()->CalculateBones(TRUE);       
+        if (m_model_2)
+            m_model_2->UpdateTracks();
+        m_model_2_kinematics->CalculateBones_Invalidate();
+        m_model_2_kinematics->CalculateBones(TRUE);
     }
 
     for (script_layer* anm : m_script_layers)
@@ -1180,7 +1184,7 @@ void player_hud::update(const Fmatrix& cam_trans)
 
         if (anm->m_part == 0 || anm->m_part == 2)
         {
-            const IKinematics* K = m_model->dcast_PKinematics();
+            const IKinematics* K = m_model_kinematics;
             const u16 bone_id = K ? K->LL_BoneID(anm->m_pivot_bone) : static_cast<u16>(-1);
             if (bone_id != static_cast<u16>(-1))
             {
@@ -1198,7 +1202,7 @@ void player_hud::update(const Fmatrix& cam_trans)
 
         if (anm->m_part == 1 || anm->m_part == 2)
         {
-            const IKinematics* K = m_model_2->dcast_PKinematics();
+            const IKinematics* K = m_model_2_kinematics;
             const u16 bone_id = K ? K->LL_BoneID(anm->m_pivot_bone) : static_cast<u16>(-1);
             if (bone_id != static_cast<u16>(-1))
             {
@@ -1293,13 +1297,13 @@ void player_hud::update(const Fmatrix& cam_trans)
     // consumes the common Source-bone transforms through merge callbacks.
     if (m_source_skeletons[0])
     {
-        m_model->dcast_PKinematics()->CalculateBones_Invalidate();
-        m_model->dcast_PKinematics()->CalculateBones(TRUE);
+        m_model_kinematics->CalculateBones_Invalidate();
+        m_model_kinematics->CalculateBones(TRUE);
     }
     if (m_source_skeletons[1])
     {
-        m_model_2->dcast_PKinematics()->CalculateBones_Invalidate();
-        m_model_2->dcast_PKinematics()->CalculateBones(TRUE);
+        m_model_2_kinematics->CalculateBones_Invalidate();
+        m_model_2_kinematics->CalculateBones(TRUE);
     }
 
     if (script_anim_item_attached && script_anim_item_model)
@@ -1331,6 +1335,8 @@ u32 player_hud::anim_play(u16 part, const motion_params& P, const motion_descr& 
 
     if (hasHands && !mergeSkeleton)
     {
+        R_ASSERT2(m_model && m_model_2, "Legacy separated-hands animations require animated hands visuals");
+
         u16 part_id = u16(-1);
         if (attached_item(0) && attached_item(1))
             part_id = m_model->partitions().part_id((part == 0) ? "right_hand" : "left_hand");
@@ -1539,7 +1545,7 @@ void player_hud::calc_transform(u16 attach_slot_idx, const Fmatrix& offset, Fmat
     }
     else if (hasHands || script_anim_item_model)
     {
-        IKinematics* kin = (attach_slot_idx == 0) ? m_model->dcast_PKinematics() : m_model_2->dcast_PKinematics();
+        IKinematics* kin = (attach_slot_idx == 0) ? m_model_kinematics : m_model_2_kinematics;
         Fmatrix ancor_m = kin->LL_GetTransform(m_ancors.at(attach_slot_idx));
         result.mul((attach_slot_idx == 0) ? m_transform : m_transform_2, ancor_m);
         result.mulB_43(offset);
@@ -1581,6 +1587,9 @@ void player_hud::OnMovementChanged(ACTOR_DEFS::EMoveCommand cmd)
 // sync anim of other part to selected part (1 = sync to left hand anim; 2 = sync to right hand anim)
 void player_hud::re_sync_anim(u8 part)
 {
+    if (!m_model || !m_model_2)
+        return;
+
     u32 bc = part == 1 ? m_model_2->LL_PartBlendsCount(part) : m_model->LL_PartBlendsCount(part);
     for (u32 bidx = 0; bidx < bc; ++bidx)
     {
@@ -1614,9 +1623,9 @@ void player_hud::re_sync_anim(u8 part)
 
 void player_hud::GetLHandBoneOffsetPosDir(const shared_str& bone_name, Fvector& dest_pos, Fvector& dest_dir, const Fvector& offset)
 {
-    const u16 bone_id = m_model_2->dcast_PKinematics()->LL_BoneID(bone_name);
+    const u16 bone_id = m_model_2_kinematics->LL_BoneID(bone_name);
     ASSERT_FMT(bone_id != BI_NONE, "!![%s] bone [%s] not found in weapon [%s]", __FUNCTION__, bone_name.c_str(), m_sect_name.c_str());
-    Fmatrix& fire_mat = m_model_2->dcast_PKinematics()->LL_GetTransform(bone_id);
+    Fmatrix& fire_mat = m_model_2_kinematics->LL_GetTransform(bone_id);
     fire_mat.transform_tiny(dest_pos, offset);
     m_transform_2.transform_tiny(dest_pos);
     dest_pos.add(Device.vCameraPosition);
@@ -1626,10 +1635,10 @@ void player_hud::GetLHandBoneOffsetPosDir(const shared_str& bone_name, Fvector& 
 
 void player_hud::setup_thumb_callbacks()
 {
-    if (!m_model)
+    if (!m_model_kinematics)
         return;
 
-    IKinematics* hands = m_model->dcast_PKinematics();
+    IKinematics* hands = m_model_kinematics;
     const LPCSTR thumb0_name = m_source_skeleton_mode ? source_r_thumb0 : "r_finger0";
     const LPCSTR thumb01_name = m_source_skeleton_mode ? source_r_thumb01 : "r_finger01";
     const LPCSTR thumb02_name = m_source_skeleton_mode ? source_r_thumb02 : "r_finger02";
@@ -1648,8 +1657,8 @@ void player_hud::setup_thumb_callbacks()
 void player_hud::clear_source_skeleton_merge()
 {
     IKinematics* targets[] = {
-        m_model ? m_model->dcast_PKinematics() : nullptr,
-        m_model_2 ? m_model_2->dcast_PKinematics() : nullptr,
+        m_model_kinematics,
+        m_model_2_kinematics,
     };
 
     for (IKinematics* target : targets)
@@ -1685,13 +1694,24 @@ void player_hud::refresh_source_skeleton_merge()
         return item && item->m_merge_skeleton ? item->m_model : nullptr;
     };
 
+    IKinematics* main_source = item_skeleton(0);
+    IKinematics* offhand_source = item_skeleton(1);
+    IKinematics* script_source = script_anim_item_model ? script_anim_item_model->dcast_PKinematics() : nullptr;
+
     // The main item normally drives both hands. If a Source-rigged off-hand
     // item is present, its animation is authoritative for the left hand.
     IKinematics* sources[] = {
-        item_skeleton(0) ? item_skeleton(0) : item_skeleton(1),
-        item_skeleton(1) ? item_skeleton(1) : item_skeleton(0),
+        main_source ? main_source : offhand_source,
+        offhand_source ? offhand_source : main_source,
     };
-    IKinematics* targets[] = {m_model->dcast_PKinematics(), m_model_2->dcast_PKinematics()};
+    if (is_source_hud_skeleton(script_source))
+    {
+        if (script_anim_part == 0 || script_anim_part == 2)
+            sources[0] = script_source;
+        if (script_anim_part == 1 || script_anim_part == 2)
+            sources[1] = script_source;
+    }
+    IKinematics* targets[] = {m_model_kinematics, m_model_2_kinematics};
     const BoneCallback callbacks[] = {SourceBoneMergeCallback0, SourceBoneMergeCallback1};
 
     for (u16 target_idx = 0; target_idx < 2; ++target_idx)
@@ -1940,7 +1960,17 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR hud_section, LPCSTR anm_name, b
     script_anim_offset[1] = rrot;
     script_anim_part = hand;
 
-    player_hud_motion_container* pm = get_hand_motions(hud_section, script_anim_item_model);
+    const bool merge_script_skeleton = !m_model && script_anim_item_model && is_source_hud_skeleton(script_anim_item_model->dcast_PKinematics());
+    if (!m_model && !merge_script_skeleton)
+    {
+        Msg("! script motion [%s] requires an animated item_visual when rigid Source hands are active", anm_name);
+        m_bStopAtEndAnimIsRunning = true;
+        script_anim_end = Device.dwTimeGlobal;
+        return 0;
+    }
+
+    refresh_source_skeleton_merge();
+    player_hud_motion_container* pm = get_hand_motions(hud_section, script_anim_item_model, merge_script_skeleton);
     player_hud_motion* phm = pm->find_motion(anm_name);
 
     if (!phm)
@@ -1987,10 +2017,13 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR hud_section, LPCSTR anm_name, b
 
         R_ASSERT(M2.valid(), "model %s has no motion [idle] ", pSettings->r_string(hud_section, "item_visual"));
 
-        u16 root_id = script_anim_item_model->dcast_PKinematics()->LL_GetBoneRoot();
-        CBoneInstance& root_binst = script_anim_item_model->dcast_PKinematics()->LL_GetBoneInstance(root_id);
-        root_binst.set_callback_overwrite(TRUE);
-        root_binst.mTransform.identity();
+        if (!merge_script_skeleton)
+        {
+            u16 root_id = script_anim_item_model->dcast_PKinematics()->LL_GetBoneRoot();
+            CBoneInstance& root_binst = script_anim_item_model->dcast_PKinematics()->LL_GetBoneInstance(root_id);
+            root_binst.set_callback_overwrite(TRUE);
+            root_binst.mTransform.identity();
+        }
 
         u16 pc = script_anim_item_model->partitions().count();
         for (u16 pid = 0; pid < pc; ++pid)
@@ -2004,7 +2037,7 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR hud_section, LPCSTR anm_name, b
         script_anim_item_model->dcast_PKinematics()->CalculateBones_Invalidate();
     }
 
-    if (hand == 0) // right hand
+    if (!merge_script_skeleton && hand == 0) // right hand
     {
         CBlend* B = m_model->PlayCycle(0, M.mid, bMixIn);
         B->speed *= speed;
@@ -2013,7 +2046,7 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR hud_section, LPCSTR anm_name, b
         B->speed *= speed;
         B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
     }
-    else if (hand == 1) // left hand
+    else if (!merge_script_skeleton && hand == 1) // left hand
     {
         CBlend* B = m_model_2->PlayCycle(0, M.mid, bMixIn);
         B->speed *= speed;
@@ -2022,7 +2055,7 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR hud_section, LPCSTR anm_name, b
         B->speed *= speed;
         B->timeCurrent = CalculateMotionStartSeconds(phm->params.start_k, B->timeTotal);
     }
-    else if (hand == 2) // both hands
+    else if (!merge_script_skeleton && hand == 2) // both hands
     {
         CBlend* B = m_model->PlayCycle(0, M.mid, bMixIn);
         B->speed *= speed;
@@ -2039,7 +2072,8 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR hud_section, LPCSTR anm_name, b
     }
 
     const CMotionDef* md;
-    u32 length = motion_length(phm->params, M, md, m_model, speed);
+    IKinematicsAnimated* motion_model = merge_script_skeleton ? script_anim_item_model : m_model;
+    u32 length = motion_length(phm->params, M, md, motion_model, speed);
 
     if (length > 0)
     {
@@ -2062,6 +2096,7 @@ void player_hud::script_anim_stop()
     script_anim_part = u8(-1);
     script_anim_item_model = nullptr;
     script_override_item = false;
+    refresh_source_skeleton_merge();
 
     updateMovementLayerState();
 
@@ -2088,7 +2123,8 @@ u32 player_hud::motion_length_script(LPCSTR hud_section, LPCSTR anm_name, float 
         ::Render->hud_loading = false;
     }
 
-    player_hud_motion_container* pm = get_hand_motions(hud_section, animatedHudItem);
+    const bool merge_skeleton = !m_model && animatedHudItem && is_source_hud_skeleton(animatedHudItem->dcast_PKinematics());
+    player_hud_motion_container* pm = get_hand_motions(hud_section, animatedHudItem, merge_skeleton);
     if (!pm)
         return 0;
 
@@ -2100,7 +2136,7 @@ u32 player_hud::motion_length_script(LPCSTR hud_section, LPCSTR anm_name, float 
     }
 
     const CMotionDef* md;
-    return motion_length(phm->params, phm->m_animations[0], md, m_model, speed);
+    return motion_length(phm->params, phm->m_animations[0], md, merge_skeleton ? animatedHudItem : m_model, speed);
 }
 
 void player_hud::update_script_item()
@@ -2233,7 +2269,7 @@ float player_hud::SetBlendAnmTime(LPCSTR name, float time)
 }
 
 
-player_hud_motion_container* player_hud::get_hand_motions(LPCSTR section, IKinematicsAnimated* animatedHudItem)
+player_hud_motion_container* player_hud::get_hand_motions(LPCSTR section, IKinematicsAnimated* animatedHudItem, bool merge_skeleton)
 {
     for (hand_motions& phm : _m_hand_motions)
     {
@@ -2243,7 +2279,7 @@ player_hud_motion_container* player_hud::get_hand_motions(LPCSTR section, IKinem
 
     hand_motions& res = _m_hand_motions.emplace_back();
     res.section = section;
-    res.pm.load(true, false, m_model, animatedHudItem, section);
+    res.pm.load(true, merge_skeleton, m_model, animatedHudItem, section);
 
     return &res.pm;
 }

@@ -997,7 +997,7 @@ bool CMissile::g_ThrowPointParams(Fvector& FirePos, Fvector& FireDir)
     Fmatrix hi_trans;
     if (isCopHands)
     {
-        hi_model = smart_cast<IKinematics*>(g_player_hud->Model());
+        hi_model = g_player_hud->Model();
         hi_trans = g_player_hud->XFORM();
     }
     else

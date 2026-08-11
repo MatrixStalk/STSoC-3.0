@@ -1,7 +1,7 @@
 # Source HUD skeleton
 
 The HUD can use replaceable hands meshes driven by animations stored in a
-Source-rigged item OGF/OMF. The feature is detected automatically when both
+Source-rigged item OGF (or in an external OMF). The feature is detected automatically when both
 models contain these bones:
 
 - `ValveBiped.Bip01_Spine4`
@@ -16,14 +16,14 @@ hand equivalents do not have to exist in the item skeleton.
 
 1. Keep the ValveBiped bone names from the reference SMD files. X-Ray stores
    them in lower case internally, so name case in an LTX file is not important.
-2. X-Ray OGF supports one skeleton root. Reparent the independent Source roots
-   (`Camera`, `body`, `mag`, and similar roots) to one common dummy root during
-   conversion. Do the same for every OGF and its OMF.
+2. The engine accepts several independent roots in one OGF (`Camera`, `body`,
+   `mag`, and similar roots). Every root branch is evaluated in model space;
+   no destructive reparenting of already converted animation tracks is needed.
 3. Common ValveBiped bones in the item and hands OGF must have the same bind
    pose. Their numeric indices do not have to match.
-4. Put the complete weapon skeleton and its animations in the item OGF/OMF.
-   The replaceable hands OGF only needs the hands mesh, the ValveBiped skeleton,
-   and a minimal `idle` motion so it is exported as an animated skeleton.
+4. Put the complete weapon skeleton and its animations in the item OGF or its
+   optional OMF. The replaceable hands OGF only needs the hands mesh and the
+   ValveBiped skeleton. It may be a skeletal-rigid OGF without any animations.
 5. Export weapon geometry without an embedded arms mesh. The separate hands
    visual is rendered by the actor HUD and receives the item pose at runtime.
 
@@ -53,6 +53,8 @@ path. In merge mode the item is placed in the HUD root coordinate system; the
 `item_position` and `item_orientation` values should normally remain zero.
 
 Changing `visual`/`visual_2` in the active actor HUD section replaces the hands
-mesh. The weapon OMF is not loaded into every hands model: the item skeleton is
-the animation master, and all common `ValveBiped.Bip01_*` transforms are copied
-to the selected hands mesh by name after animation evaluation.
+mesh. The weapon animations are not copied into every hands model: the item
+skeleton is the animation master, and all common `ValveBiped.Bip01_*`
+transforms are copied to the selected hands mesh by name after animation
+evaluation. Embedded OGF animations and external OMF animations use the same
+runtime path.

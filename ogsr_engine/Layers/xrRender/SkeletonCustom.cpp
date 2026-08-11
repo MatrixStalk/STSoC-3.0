@@ -310,8 +310,10 @@ void CKinematics::Load(const char* N, IReader* data, const u32 dwFlags)
         if (!P.c_str() || !P[0])
         {
             // no parent - this is root bone
-            R_ASSERT(BI_NONE == iRoot);
-            iRoot = static_cast<u16>(i);
+            if (iRoot == BI_NONE)
+                iRoot = static_cast<u16>(i);
+            else
+                MsgDbg("Skeleton [%s] has an additional root bone [%s]", N, B->name.c_str());
             B->SetParentID(BI_NONE);
             continue;
         }
@@ -359,7 +361,11 @@ void CKinematics::Load(const char* N, IReader* data, const u32 dwFlags)
             }
         }
         // calculate model to bone converting matrix
-        (*bones)[LL_GetBoneRoot()]->CalculateM2B(Fidentity);
+        for (const auto& B : *bones)
+        {
+            if (B->GetParentID() == BI_NONE)
+                B->CalculateM2B(Fidentity);
+        }
         IKD->close();
     }
 
@@ -627,7 +633,11 @@ IC static void RecursiveBindTransform(CKinematics* K, xr_vector<Fmatrix>& matric
 void CKinematics::LL_GetBindTransform(xr_vector<Fmatrix>& matrices)
 {
     matrices.resize(LL_BoneCount());
-    RecursiveBindTransform(this, matrices, iRoot, Fidentity);
+    for (u16 bone_id = 0; bone_id < LL_BoneCount(); ++bone_id)
+    {
+        if (LL_GetData(bone_id).GetParentID() == BI_NONE)
+            RecursiveBindTransform(this, matrices, bone_id, Fidentity);
+    }
 }
 
 void BuildMatrix(Fmatrix& mView, const float invsz, const Fvector norm, const Fvector& from)
