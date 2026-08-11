@@ -19,13 +19,16 @@ hand equivalents do not have to exist in the item skeleton.
 2. The engine accepts several independent roots in one OGF (`Camera`, `body`,
    `mag`, and similar roots). Every root branch is evaluated in model space;
    no destructive reparenting of already converted animation tracks is needed.
-3. Common ValveBiped bones in the item and hands OGF must have the same bind
-   pose. Their numeric indices do not have to match.
+3. Common ValveBiped bones may use different bind poses and numeric indices.
+   The runtime transfers the animated skinning delta to the hands bind pose.
 4. Put the complete weapon skeleton and its animations in the item OGF or its
    optional OMF. The replaceable hands OGF only needs the hands mesh and the
    ValveBiped skeleton. It may be a skeletal-rigid OGF without any animations.
 5. Export weapon geometry without an embedded arms mesh. The separate hands
    visual is rendered by the actor HUD and receives the item pose at runtime.
+6. Make sure every exported motion retains its complete frame range. A named
+   one-frame motion is only a static pose and cannot reproduce the Source SMD
+   animation.
 
 ## LTX example
 
@@ -46,6 +49,8 @@ item_position   = 0, 0, 0
 item_orientation = 0, 0, 0
 anm_idle        = idle
 anm_idle_empty  = idle_empty
+anm_idle_aim    = idle_2
+anm_idle_aim_empty = idle_empty_2
 anm_show        = draw_empty
 anm_show_empty  = draw_empty
 anm_hide        = holster
@@ -53,6 +58,7 @@ anm_hide_empty  = holster_empty
 anm_reload      = reload
 anm_reload_empty = reload_empty
 anm_shots       = fire_01
+anm_shoot_aim   = fire_sights
 anm_shot_l      = fire_empty
 ```
 

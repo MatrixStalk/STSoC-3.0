@@ -1705,6 +1705,8 @@ void player_hud::clear_source_skeleton_merge()
 
     m_source_skeletons[0] = nullptr;
     m_source_skeletons[1] = nullptr;
+    m_source_bind_corrections[0].clear();
+    m_source_bind_corrections[1].clear();
 }
 
 void player_hud::refresh_source_skeleton_merge()
@@ -1747,6 +1749,7 @@ void player_hud::refresh_source_skeleton_merge()
         if (!source || !is_source_hud_skeleton(source))
             continue;
 
+        m_source_bind_corrections[target_idx].resize(target->LL_BoneCount());
         u16 merged_bones = 0;
         for (u16 target_bone_id = 0; target_bone_id < target->LL_BoneCount(); ++target_bone_id)
         {
@@ -1761,6 +1764,14 @@ void player_hud::refresh_source_skeleton_merge()
             CBoneInstance& target_bone = target->LL_GetBoneInstance(target_bone_id);
             target_bone.set_param(0, static_cast<float>(source_bone_id));
             target_bone.set_param(1, 0.f);
+            target_bone.set_param(2, static_cast<float>(target_bone_id));
+
+            // source current * source inverse-bind * target bind gives the
+            // animated target transform without assuming identical bind poses.
+            Fmatrix target_bind;
+            target_bind.invert(target->LL_GetData(target_bone_id).m2b_transform);
+            m_source_bind_corrections[target_idx][target_bone_id].mul_43(
+                source->LL_GetData(source_bone_id).m2b_transform, target_bind);
             if (target_idx == 0)
             {
                 if (!xr_strcmp(bone_name, source_r_thumb0))
@@ -1787,8 +1798,16 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
         return;
 
     const u16 source_bone_id = static_cast<u16>(target_bone->get_param(0));
-    if (source_bone_id < source->LL_BoneCount())
-        target_bone->mTransform.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
+    const u16 target_bone_id = static_cast<u16>(target_bone->get_param(2));
+    if (source_bone_id < source->LL_BoneCount() && target_bone_id < m_source_bind_corrections[target_idx].size())
+    {
+        // Transfer the animated skinning delta instead of the absolute bone
+        // matrix. Source weapon and replaceable-hands meshes can use different
+        // bind transforms (notably Ulna/Wrist helpers), so copying the absolute
+        // matrix stretches the hands even when the bone names match.
+        target_bone->mTransform.mul_43(
+            source->LL_GetBoneInstance(source_bone_id).mTransform, m_source_bind_corrections[target_idx][target_bone_id]);
+    }
 
     // Preserve the existing procedural right-thumb adjustment after the
     // animation pose has been copied from the Source skeleton.

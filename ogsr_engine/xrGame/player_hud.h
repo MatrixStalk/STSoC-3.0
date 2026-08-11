@@ -460,6 +460,7 @@ private:
     IKinematics *m_model_kinematics{}, *m_model_2_kinematics{};
     IKinematicsAnimated *m_model{}, *m_model_2{};
     IKinematics* m_source_skeletons[2]{};
+    xr_vector<Fmatrix> m_source_bind_corrections[2];
     bool m_source_skeleton_mode{};
     xr_vector<u16> m_ancors;
     attachable_hud_item* m_attached_items[2]{};
