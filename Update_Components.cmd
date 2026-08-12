@@ -1,6 +1,3 @@
-@echo off
-python .github\apply_local_retarget.py
-
 RD /s /q 3rd_party\Src\DirectXTex\DirectXTex
 git clone --branch mar2025 --depth 1 https://github.com/microsoft/DirectXTex.git 3rd_party/Src/DirectXTex/DirectXTex
 
