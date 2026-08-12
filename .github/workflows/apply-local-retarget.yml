@@ -1,0 +1,189 @@
+name: Apply local-space Source retarget
+
+on:
+  push:
+    branches:
+      - fix/source-hud-retarget
+    paths:
+      - .github/workflows/apply-local-retarget.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-build-commit:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          ref: fix/source-hud-retarget
+          fetch-depth: 0
+
+      - name: Apply local-space basis retarget
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('ogsr_engine/xrGame/player_hud.cpp')
+          s = path.read_text(encoding='utf-8')
+
+          old = '''        // bind_transform is parent-local, while m2b_transform is the inverse
+        // of the complete model-space bind transform (see CBoneData::CalculateM2B).
+        // Retarget in model space so differences in bone roll/local axes are
+        // handled by the bind bases instead of reusing source-local rotations.
+        Fmatrix source_bind_world, target_bind_world;
+        source_bind_world.invert(source_data.m2b_transform);
+        target_bind_world.invert(target_data.m2b_transform);
+
+        const Fmatrix& source_world = source->LL_GetBoneInstance(source_bone_id).mTransform;
+
+        // Extract the animated model-space delta from the Source bind pose,
+        // then apply that motion to the Target bind pose. The order is
+        // SourceAnim * inverse(SourceBind) * TargetBind, which preserves the
+        // target bind basis for rigs with different bone roll/local axes.
+        Fmatrix source_world_delta, desired_target_world;
+        source_world_delta.mul_43(source_world, source_data.m2b_transform);
+        desired_target_world.mul_43(source_world_delta, target_bind_world);
+
+        // Convert the corrected world orientation back through the *current*
+        // target parent. This makes every child inherit the already-retargeted
+        // clavicle/upper-arm pose instead of accumulating source-rig axis errors.
+        Fmatrix target_local;
+        if (const u16 target_parent_id = target_data.GetParentID(); target_parent_id != BI_NONE)
+        {
+            Fmatrix target_parent_inverse;
+            target_parent_inverse.invert(target->LL_GetBoneInstance(target_parent_id).mTransform);
+            target_local.mul_43(target_parent_inverse, desired_target_world);
+        }
+        else
+        {
+            target_local.set(desired_target_world);
+        }
+
+        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
+        const bool is_merge_root = target_bone_name && !xr_strcmp(target_bone_name, source_root_bone);
+
+        if (!is_merge_root)
+        {
+            // Source SMDs store a translation at every joint, which also encodes
+            // source bone length/proportions. Keep only the corrected orientation
+            // and always retain the replacement hands skeleton's local offset.
+            target_local.c.set(target_data.bind_transform.c);
+        }
+
+        // Rebuild model-space transform through the target hierarchy. Keeping the
+        // merge root's corrected translation preserves authored whole-arm motion;
+        // descendants retain target bone lengths while using corrected bind axes.
+        if (const u16 target_parent_id = target_data.GetParentID(); target_parent_id != BI_NONE)
+            target_bone->mTransform.mul_43(target->LL_GetBoneInstance(target_parent_id).mTransform, target_local);
+        else
+            target_bone->mTransform.set(target_local);
+'''
+
+          new = '''        const u16 source_parent_id = source_data.GetParentID();
+        const u16 target_parent_id = target_data.GetParentID();
+
+        // Recover the animated Source transform in parent-local space first.
+        // mTransform is model-space (parent * local), so using the current Source
+        // parent here removes parent motion exactly once instead of baking it into
+        // every descendant as the previous world-space retarget did.
+        Fmatrix source_local;
+        if (source_parent_id != BI_NONE)
+        {
+            Fmatrix source_parent_inverse;
+            source_parent_inverse.invert(source->LL_GetBoneInstance(source_parent_id).mTransform);
+            source_local.mul_43(source_parent_inverse, source->LL_GetBoneInstance(source_bone_id).mTransform);
+        }
+        else
+        {
+            source_local.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
+        }
+
+        // Animation delta in the Source parent's coordinate system.
+        Fmatrix source_bind_inverse, source_delta;
+        source_bind_inverse.invert(source_data.bind_transform);
+        source_delta.mul_43(source_local, source_bind_inverse);
+        source_delta.c.set(0.f, 0.f, 0.f);
+
+        // The Source and replacement-hands parents may have different bind axes
+        // (bone roll). Convert the rotational delta between those coordinate
+        // systems by conjugation: Q * D * inverse(Q), where Q maps Source-parent
+        // coordinates into Target-parent coordinates.
+        Fmatrix source_parent_bind_world, target_parent_bind_world;
+        source_parent_bind_world.identity();
+        target_parent_bind_world.identity();
+        if (source_parent_id != BI_NONE)
+            source_parent_bind_world.invert(source->LL_GetData(source_parent_id).m2b_transform);
+        if (target_parent_id != BI_NONE)
+            target_parent_bind_world.invert(target->LL_GetData(target_parent_id).m2b_transform);
+
+        // Rotation-only parent bases. Translations must not participate in a
+        // change-of-basis for angular motion.
+        source_parent_bind_world.c.set(0.f, 0.f, 0.f);
+        target_parent_bind_world.c.set(0.f, 0.f, 0.f);
+
+        Fmatrix target_parent_bind_inverse, source_to_target_basis, target_to_source_basis;
+        target_parent_bind_inverse.invert(target_parent_bind_world);
+        source_to_target_basis.mul_43(target_parent_bind_inverse, source_parent_bind_world);
+        target_to_source_basis.invert(source_to_target_basis);
+
+        Fmatrix corrected_delta_tmp, corrected_delta;
+        corrected_delta_tmp.mul_43(source_to_target_basis, source_delta);
+        corrected_delta.mul_43(corrected_delta_tmp, target_to_source_basis);
+        corrected_delta.c.set(0.f, 0.f, 0.f);
+
+        // Apply the corrected angular motion to the replacement skeleton's own
+        // bind pose. This preserves its local axes and authored proportions.
+        Fmatrix target_local;
+        target_local.mul_43(corrected_delta, target_data.bind_transform);
+
+        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
+        const bool is_merge_root = target_bone_name && !xr_strcmp(target_bone_name, source_root_bone);
+
+        if (is_merge_root)
+        {
+            // Keep authored whole-arm translation from the Source root, expressed
+            // relative to its bind pose. Descendants always keep Target offsets.
+            Fvector root_translation_delta = source_local.c;
+            root_translation_delta.sub(source_data.bind_transform.c);
+            target_local.c.set(target_data.bind_transform.c);
+            target_local.c.add(root_translation_delta);
+        }
+        else
+        {
+            // Never transfer Source joint offsets/bone lengths to replacement hands.
+            target_local.c.set(target_data.bind_transform.c);
+        }
+
+        // Rebuild model space strictly through the already-retargeted Target parent.
+        if (target_parent_id != BI_NONE)
+            target_bone->mTransform.mul_43(target->LL_GetBoneInstance(target_parent_id).mTransform, target_local);
+        else
+            target_bone->mTransform.set(target_local);
+'''
+
+          if old not in s:
+              raise SystemExit('current world-space retarget block not found; refusing to patch')
+
+          path.write_text(s.replace(old, new, 1), encoding='utf-8')
+
+      - name: Update Components
+        shell: cmd
+        run: Update_Components.cmd
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v3
+
+      - name: Build Release x64
+        shell: cmd
+        run: msbuild STSoC-Engine.sln /t:Rebuild /p:Configuration=Release /p:Platform=x64
+
+      - name: Commit verified retarget
+        shell: pwsh
+        run: |
+          git config user.name "KishtimGuy"
+          git config user.email "103826442+MatrixStalk@users.noreply.github.com"
+          git rm .github/workflows/apply-local-retarget.yml
+          git add ogsr_engine/xrGame/player_hud.cpp
+          git commit -m "[ci build] retarget Source HUD rotations in parent-local bind space"
+          git push origin HEAD:fix/source-hud-retarget
