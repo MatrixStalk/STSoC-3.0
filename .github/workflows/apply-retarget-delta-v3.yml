@@ -1,0 +1,46 @@
+name: Apply retarget delta v3
+
+on:
+  push:
+    branches: [fix/source-hud-retarget]
+    paths: [.github/workflows/apply-retarget-delta-v3.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+          ref: fix/source-hud-retarget
+
+      - name: Patch retarget
+        shell: python
+        run: |
+          from pathlib import Path
+
+          path = Path('ogsr_engine/xrGame/player_hud.cpp')
+          s = path.read_text(encoding='utf-8')
+
+          old = '''        // TargetBindWorld * inverse(SourceBindWorld) converts an absolute source\n        // model-space pose into the corresponding target bind basis. At the\n        // source bind pose this evaluates exactly to TargetBindWorld.\n        Fmatrix bind_basis_correction, desired_target_world;\n        bind_basis_correction.mul_43(target_bind_world, source_data.m2b_transform);\n        desired_target_world.mul_43(bind_basis_correction, source_world);\n'''
+
+          new = '''        // Extract the animated model-space delta from the Source bind pose,\n        // then apply that motion to the Target bind pose. The order is\n        // SourceAnim * inverse(SourceBind) * TargetBind, which preserves the\n        // target bind basis for rigs with different bone roll/local axes.\n        Fmatrix source_world_delta, desired_target_world;\n        source_world_delta.mul_43(source_world, source_data.m2b_transform);\n        desired_target_world.mul_43(source_world_delta, target_bind_world);\n'''
+
+          if old not in s:
+              raise SystemExit('retarget block not found; refusing to patch')
+
+          s = s.replace(old, new, 1)
+          path.write_text(s, encoding='utf-8')
+          Path('.github/workflows/apply-retarget-delta-v3.yml').unlink()
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "KishtimGuy"
+          git config user.email "103826442+MatrixStalk@users.noreply.github.com"
+          git add ogsr_engine/xrGame/player_hud.cpp .github/workflows/apply-retarget-delta-v3.yml
+          git commit -m "[ci build] apply Source bind delta before target bind"
+          git push origin HEAD:fix/source-hud-retarget
