@@ -168,6 +168,8 @@ CCameraManager::~CCameraManager()
 {
     for (auto& it : m_EffectorsCam)
         xr_delete(it);
+    for (auto& it : m_EffectorsCam_added_deffered)
+        xr_delete(it);
 
     for (auto& it : m_EffectorsPP)
         xr_delete(it);
@@ -180,6 +182,14 @@ CEffectorCam* CCameraManager::GetCamEffector(ECamEffectorType type)
         {
             return it;
         }
+
+    // An effector added during gameplay is promoted at the end of the camera
+    // update. Make it visible immediately so several shots processed in one
+    // frame accumulate in one recoil spring instead of replacing each other.
+    for (auto& it : m_EffectorsCam_added_deffered)
+        if (it->eType == type)
+            return it;
+
     return nullptr;
 }
 
@@ -191,21 +201,30 @@ CEffectorCam* CCameraManager::AddCamEffector(CEffectorCam* ef)
 
 void CCameraManager::UpdateDeffered()
 {
-    auto it = m_EffectorsCam_added_deffered.begin();
-    auto it_e = m_EffectorsCam_added_deffered.end();
-    for (; it != it_e; ++it)
+    while (!m_EffectorsCam_added_deffered.empty())
     {
-        RemoveCamEffector((*it)->eType);
+        CEffectorCam* effector = m_EffectorsCam_added_deffered.front();
+        m_EffectorsCam_added_deffered.pop_front();
 
-        if ((*it)->AbsolutePositioning())
-            m_EffectorsCam.push_front(*it);
+        // Remove only the active predecessor here. Other deferred effectors
+        // must remain queued so the historical "last added wins" order is
+        // preserved when several equal types are added in one update.
+        for (auto it = m_EffectorsCam.begin(); it != m_EffectorsCam.end(); ++it)
+            if ((*it)->eType == effector->eType)
+            {
+                OnEffectorReleased(*it);
+                xr_delete(*it);
+                m_EffectorsCam.erase(it);
+                break;
+            }
+
+        if (effector->AbsolutePositioning())
+            m_EffectorsCam.push_front(effector);
         else
-            m_EffectorsCam.push_back(*it);
+            m_EffectorsCam.push_back(effector);
 
-        OnEffectorAdded(*it);
+        OnEffectorAdded(effector);
     }
-
-    m_EffectorsCam_added_deffered.clear();
 }
 
 void CCameraManager::RemoveCamEffector(ECamEffectorType type)
@@ -218,6 +237,14 @@ void CCameraManager::RemoveCamEffector(ECamEffectorType type)
             m_EffectorsCam.erase(it);
             return;
         }
+
+    for (auto it = m_EffectorsCam_added_deffered.begin(); it != m_EffectorsCam_added_deffered.end(); ++it)
+        if ((*it)->eType == type)
+        {
+            xr_delete(*it);
+            m_EffectorsCam_added_deffered.erase(it);
+            return;
+        }
 }
 
 void CCameraManager::RemoveAllCamEffector()
@@ -225,6 +252,11 @@ void CCameraManager::RemoveAllCamEffector()
     while (!m_EffectorsCam.empty())
     {
         RemoveCamEffector(m_EffectorsCam.back()->eType);
+    }
+    while (!m_EffectorsCam_added_deffered.empty())
+    {
+        xr_delete(m_EffectorsCam_added_deffered.back());
+        m_EffectorsCam_added_deffered.pop_back();
     }
 }
 
@@ -545,6 +577,16 @@ void CCameraManager::RemoveCamEffector(CEffectorCam* ef)
         {
             OnEffectorReleased(cam);
             m_EffectorsCam.erase(it);
+            return;
+        }
+    }
+
+    for (auto it = m_EffectorsCam_added_deffered.begin(); it != m_EffectorsCam_added_deffered.end(); ++it)
+    {
+        if (*it == ef)
+        {
+            xr_delete(*it);
+            m_EffectorsCam_added_deffered.erase(it);
             return;
         }
     }

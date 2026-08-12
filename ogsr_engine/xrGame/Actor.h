@@ -671,6 +671,7 @@ public:
     virtual void on_weapon_hide(CWeapon* weapon);
     Fvector weapon_recoil_delta_angle();
     Fvector weapon_recoil_last_delta();
+    bool weapon_recoil_hud_transform(Fmatrix& transform);
 
 protected:
     virtual void update_camera(CCameraShotEffector* effector);

@@ -158,9 +158,26 @@ void CActor::on_weapon_shot_start(CWeapon* weapon)
     if (!effector)
     {
         effector = (CCameraShotEffector*)Cameras().AddCamEffector(
-            xr_new<CCameraShotEffector>(weapon->camMaxAngle, weapon->camRelaxSpeed, weapon->camMaxAngleHorz, weapon->camStepAngleHorz, weapon->camDispertionFrac));
+            xr_new<CCameraShotEffector>(weapon->camMaxAngle, weapon->camRelaxSpeed, weapon->camMaxAngleHorz, weapon->camStepAngleHorz,
+                weapon->camDispertionFrac, &weapon->modernRecoil));
     }
     R_ASSERT(effector);
+
+    effector->SetActor(this);
+
+    if (effector->UsesModernRecoil())
+    {
+        float state_multiplier = weapon->IsZoomed() ? weapon->modernRecoil.zoom_multiplier : 1.f;
+        if (mstate_real & mcCrouch)
+            state_multiplier *= weapon->modernRecoil.crouch_multiplier;
+
+        // Legacy recoil grows linearly for the entire magazine. Modern recoil
+        // reaches its sustained-fire level after the opening shots instead.
+        const int shot_index = _max(weapon->ShotsFired() - 1, 0);
+        const float opening_shot_growth = float(_min(shot_index, 3));
+        effector->Shot(weapon->camDispersion + weapon->camDispersionInc * opening_shot_growth, state_multiplier);
+        return;
+    }
 
     if (pWM)
     {
@@ -177,7 +194,6 @@ void CActor::on_weapon_shot_start(CWeapon* weapon)
         }
     };
 
-    effector->SetActor(this);
     effector->Shot(weapon->camDispersion + weapon->camDispersionInc * float(weapon->ShotsFired()));
 
     if (pWM)
@@ -194,6 +210,12 @@ void CActor::on_weapon_shot_stop(CWeapon* weapon)
 {
     //---------------------------------------------
     CCameraShotEffector* effector = smart_cast<CCameraShotEffector*>(Cameras().GetCamEffector(eCEShot));
+    if (effector && effector->UsesModernRecoil())
+    {
+        effector->StopShooting();
+        return;
+    }
+
     if (effector && effector->IsActive())
     {
         if (effector->IsSingleShot())
@@ -206,7 +228,15 @@ void CActor::on_weapon_shot_stop(CWeapon* weapon)
 void CActor::on_weapon_hide(CWeapon* weapon)
 {
     CCameraShotEffector* effector = smart_cast<CCameraShotEffector*>(Cameras().GetCamEffector(eCEShot));
-    if (effector && !effector->IsActive())
+    if (!effector)
+        return;
+
+    if (effector->UsesModernRecoil())
+    {
+        effector->Clear();
+        Cameras().RemoveCamEffector(eCEShot);
+    }
+    else if (!effector->IsActive())
         effector->Clear();
 }
 
@@ -230,4 +260,16 @@ Fvector CActor::weapon_recoil_last_delta()
         effector->GetLastDelta(result);
 
     return (result);
+}
+
+bool CActor::weapon_recoil_hud_transform(Fmatrix& transform)
+{
+    transform.identity();
+
+    CCameraShotEffector* effector = smart_cast<CCameraShotEffector*>(Cameras().GetCamEffector(eCEShot));
+    if (!effector || !effector->UsesModernRecoil() || !effector->IsActive())
+        return false;
+
+    effector->GetHudRecoil(transform);
+    return true;
 }

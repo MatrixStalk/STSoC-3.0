@@ -123,3 +123,46 @@ default can be overridden per alias, for example:
 anm_inspect_stop_at_end = true
 anm_custom_loop_stop_at_end = false
 ```
+
+## Modern recoil
+
+Player weapons use a two-spring recoil model. The camera spring changes the
+actual view/fire direction; the faster HUD spring adds receiver and stock
+movement without replacing authored firing motions. Existing recoil values
+(`cam_dispersion`, `cam_dispersion_inc`, `cam_max_angle`, and horizontal limits)
+remain the base force and safety limits. NPC shooting keeps the legacy model.
+
+All new values are optional:
+
+```ini
+cam_recoil_modern            = true
+cam_recoil_frequency         = 18.0
+cam_recoil_damping           = 0.78
+cam_recoil_impulse           = 0.55
+cam_recoil_return_delay      = 0.075
+cam_recoil_return_speed      = 7.5
+cam_recoil_max_pitch         = 8.0
+cam_recoil_max_yaw           = 3.0
+cam_recoil_vertical_random   = 0.10
+cam_recoil_horizontal        = 0.32
+cam_recoil_horizontal_random = 0.45
+cam_recoil_direction_change  = 0.22
+cam_recoil_roll              = 0.08
+cam_recoil_first_shot        = 1.12
+cam_recoil_burst_growth      = 0.035
+cam_recoil_burst_limit       = 1.32
+cam_recoil_burst_reset       = 0.20
+cam_recoil_zoom_k            = 0.72
+cam_recoil_crouch_k          = 0.82
+
+hud_recoil_kick              = 0.018
+hud_recoil_up                = 0.0045
+hud_recoil_pitch             = 1.15
+hud_recoil_yaw               = 0.35
+hud_recoil_roll              = 0.45
+hud_recoil_frequency         = 23.0
+hud_recoil_damping           = 0.66
+```
+
+HUD positions use HUD metres; HUD rotation values use degrees. Set
+`cam_recoil_modern = false` in a weapon section to restore its legacy recoil.

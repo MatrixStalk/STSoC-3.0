@@ -1112,6 +1112,7 @@
     <ClInclude Include="physic_item.h" />
     <ClInclude Include="ShootingObject.h" />
     <ClInclude Include="Weapon.h" />
+    <ClInclude Include="WeaponRecoil.h" />
     <ClInclude Include="WeaponAmmo.h" />
     <ClInclude Include="WeaponCustomPistol.h" />
     <ClInclude Include="WeaponPistol.h" />

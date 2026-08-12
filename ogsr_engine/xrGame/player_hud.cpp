@@ -1374,6 +1374,18 @@ void player_hud::update(const Fmatrix& cam_trans)
         }
     }
 
+    // Camera recoil controls the real aim direction. A separate, faster spring
+    // supplies the mechanical receiver/stock kick without disturbing weapon
+    // skeletal animations or the Source hands merge.
+    if (CActor* actor = Actor())
+    {
+        Fmatrix recoil_transform;
+        if (actor->weapon_recoil_hud_transform(recoil_transform))
+        {
+            m_transform.mulB_43(recoil_transform);
+            m_transform_2.mulB_43(recoil_transform);
+        }
+    }
 
     const attachable_hud_item* scale_source = m_attached_items[0] ? m_attached_items[0] : m_attached_items[1];
     const float hud_scale = scale_source ? scale_source->m_measures.m_hud_scale : 1.f;

@@ -1,6 +1,8 @@
 // Weapon.h: interface for the CWeapon class.
 #pragma once
 
+#include "WeaponRecoil.h"
+
 #include "WeaponAmmo.h"
 #include "PhysicsShell.h"
 #include "PHShellCreator.h"
@@ -413,6 +415,7 @@ public:
     float camDispertionFrac;
     float camMaxAngleHorz;
     float camStepAngleHorz;
+    SModernRecoilParams modernRecoil;
 
     float dof_transition_time{};
     static float dof_zoom_effect, dof_reload_effect;

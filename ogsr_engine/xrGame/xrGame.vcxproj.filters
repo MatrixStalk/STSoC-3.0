@@ -4158,6 +4158,9 @@
     <ClInclude Include="EffectorShot.h">
       <Filter>Core\Client\Effectors\Weapon</Filter>
     </ClInclude>
+    <ClInclude Include="WeaponRecoil.h">
+      <Filter>Core\Client\Effectors\Weapon</Filter>
+    </ClInclude>
     <ClInclude Include="EffectorShotX.h">
       <Filter>Core\Client\Effectors\Weapon</Filter>
     </ClInclude>
