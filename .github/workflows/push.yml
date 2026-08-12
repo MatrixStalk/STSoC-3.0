@@ -7,7 +7,52 @@ on:
     types:
       - created
 
+permissions:
+  contents: write
+
 jobs:
+  patch-retarget:
+    if: "github.event_name == 'push' && github.actor != 'github-actions[bot]' && github.event.head_commit.message == 'chore: run retarget delta patch'"
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: fix/source-hud-retarget
+        fetch-depth: 0
+    - name: Apply matrix order fix
+      shell: python
+      run: |
+        from pathlib import Path
+        p = Path('ogsr_engine/xrGame/player_hud.cpp')
+        s = p.read_text(encoding='utf-8')
+        old = '''        // TargetBindWorld * inverse(SourceBindWorld) converts an absolute source
+        // model-space pose into the corresponding target bind basis. At the
+        // source bind pose this evaluates exactly to TargetBindWorld.
+        Fmatrix bind_basis_correction, desired_target_world;
+        bind_basis_correction.mul_43(target_bind_world, source_data.m2b_transform);
+        desired_target_world.mul_43(bind_basis_correction, source_world);
+'''
+        new = '''        // Extract the animated model-space delta from the Source bind pose,
+        // then apply that motion to the Target bind pose. The order is
+        // SourceAnim * inverse(SourceBind) * TargetBind, which preserves the
+        // target bind basis for rigs with different bone roll/local axes.
+        Fmatrix source_world_delta, desired_target_world;
+        source_world_delta.mul_43(source_world, source_data.m2b_transform);
+        desired_target_world.mul_43(source_world_delta, target_bind_world);
+'''
+        if old not in s:
+            raise SystemExit('retarget block not found; refusing to patch')
+        p.write_text(s.replace(old, new, 1), encoding='utf-8')
+    - name: Restore workflow and commit
+      run: |
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+        git checkout c83e838efdd8f5caf157967b5f311b169a7e390b -- .github/workflows/push.yml
+        git rm -f .github/workflows/retarget-delta-fix.yml
+        git add ogsr_engine/xrGame/player_hud.cpp .github/workflows/push.yml
+        git commit -m "[ci build] apply Source bind delta before target bind"
+        git push origin HEAD:fix/source-hud-retarget
+
   build:
     if: "contains(github.event.head_commit.message, '[ci build]') || github.event_name == 'release'"
     runs-on: windows-2022
