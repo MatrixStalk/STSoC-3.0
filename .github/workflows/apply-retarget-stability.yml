@@ -1,0 +1,36 @@
+name: Apply retarget stability fix
+on:
+  push:
+    branches: [fix/source-hud-retarget]
+    paths: [.github/workflows/apply-retarget-stability.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+          ref: fix/source-hud-retarget
+      - name: Patch retarget
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('ogsr_engine/xrGame/player_hud.cpp')
+          s = p.read_text(encoding='utf-8')
+          old = '''        Fmatrix target_local;\n        target_local.mul_43(rotation_delta, target_data.bind_transform);\n        target_local.c.set(target_data.bind_transform.c);\n\n        // Spine4 is the logical arm root used by the HUD merge. Preserve its\n        // authored local translation delta so whole-hand motion is not lost;\n        // all descendants retain target bone lengths.\n        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);\n'''
+          new = '''        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);\n        const bool is_clavicle = target_bone_name &&\n            (!xr_strcmp(target_bone_name, source_l_clavicle) || !xr_strcmp(target_bone_name, source_r_clavicle));\n\n        // Preserve the old exact-merge behaviour when both rigs really have the\n        // same local bind transform. This avoids regressing weapons whose Source\n        // and hands skeletons were already authored one-to-one.\n        const Fmatrix& sb = source_data.bind_transform;\n        const Fmatrix& tb = target_data.bind_transform;\n        const bool same_bind =\n            fsimilar(sb.i.x, tb.i.x, 1e-4f) && fsimilar(sb.i.y, tb.i.y, 1e-4f) && fsimilar(sb.i.z, tb.i.z, 1e-4f) &&\n            fsimilar(sb.j.x, tb.j.x, 1e-4f) && fsimilar(sb.j.y, tb.j.y, 1e-4f) && fsimilar(sb.j.z, tb.j.z, 1e-4f) &&\n            fsimilar(sb.k.x, tb.k.x, 1e-4f) && fsimilar(sb.k.y, tb.k.y, 1e-4f) && fsimilar(sb.k.z, tb.k.z, 1e-4f) &&\n            fsimilar(sb.c.x, tb.c.x, 1e-4f) && fsimilar(sb.c.y, tb.c.y, 1e-4f) && fsimilar(sb.c.z, tb.c.z, 1e-4f);\n\n        Fmatrix target_local;\n        if (same_bind)\n        {\n            // Same rig: copy the animated local pose verbatim. Retarget math is\n            // unnecessary here and can introduce visible shoulder errors.\n            target_local.set(source_local);\n        }\n        else if (is_clavicle)\n        {\n            // Clavicles define the basis for the entire arm chain. Map the full\n            // animated local pose from the source bind basis into the target bind\n            // basis, but keep the target rig's authored shoulder position.\n            Fmatrix bind_correction;\n            bind_correction.mul_43(target_data.bind_transform, source_bind_inverse);\n            target_local.mul_43(bind_correction, source_local);\n            target_local.c.set(target_data.bind_transform.c);\n        }\n        else\n        {\n            // For mismatched descendants transfer animation rotation only and\n            // retain target translations so bone lengths/proportions stay intact.\n            target_local.mul_43(rotation_delta, target_data.bind_transform);\n            target_local.c.set(target_data.bind_transform.c);\n        }\n\n        // Spine4 is the logical arm root used by the HUD merge. Preserve its\n        // authored local translation delta so whole-hand motion is not lost;\n        // all descendants retain target bone lengths.\n'''
+          if old not in s:
+              raise SystemExit('Expected retarget block not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s, encoding='utf-8')
+          Path('.github/workflows/apply-retarget-stability.yml').unlink()
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "KishtimGuy"
+          git config user.email "103826442+MatrixStalk@users.noreply.github.com"
+          git add ogsr_engine/xrGame/player_hud.cpp .github/workflows/apply-retarget-stability.yml
+          git commit -m "[ci build] stabilize Source HUD retarget clavicles"
+          git push origin HEAD:fix/source-hud-retarget
