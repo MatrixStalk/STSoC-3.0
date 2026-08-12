@@ -20,8 +20,9 @@ jobs:
           fetch-depth: 0
 
       - name: Apply local-space basis retarget
-        shell: python
+        shell: bash
         run: |
+          python - <<'PY'
           from pathlib import Path
 
           path = Path('ogsr_engine/xrGame/player_hud.cpp')
@@ -166,6 +167,7 @@ jobs:
               raise SystemExit('current world-space retarget block not found; refusing to patch')
 
           path.write_text(s.replace(old, new, 1), encoding='utf-8')
+          PY
 
       - name: Update Components
         shell: cmd
