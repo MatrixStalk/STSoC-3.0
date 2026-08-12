@@ -41,7 +41,7 @@ jobs:
         set APPVEYOR_REPO_NAME=${{ github.repository }}
         set CONFIGURATION_GA=${{ matrix.Configuration }}
         
-        msbuild Engine.sln /t:Rebuild /p:Configuration=${{ matrix.ConfigurationReal }} /p:Platform=${{ matrix.Platform }}
+        msbuild STSoC-Engine.sln /t:Rebuild /p:Configuration=${{ matrix.ConfigurationReal }} /p:Platform=${{ matrix.Platform }}
     - name: Prepare artifacts
       shell: cmd
       run: |
