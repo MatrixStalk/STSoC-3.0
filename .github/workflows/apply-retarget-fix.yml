@@ -1,0 +1,55 @@
+name: Apply retarget fix
+
+on:
+  push:
+    branches:
+      - fix/source-hud-retarget
+    paths:
+      - .github/workflows/apply-retarget-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+          ref: fix/source-hud-retarget
+
+      - name: Apply matrix-order correction
+        shell: pwsh
+        run: |
+          $path = 'ogsr_engine/xrGame/player_hud.cpp'
+          $content = Get-Content -LiteralPath $path -Raw
+
+          $replacements = @(
+              @('source_delta.mul_43(source_bind_inverse, source_local);', 'source_delta.mul_43(source_local, source_bind_inverse);'),
+              @('target_local.mul_43(target_data.bind_transform, rotation_delta);', 'target_local.mul_43(rotation_delta, target_data.bind_transform);'),
+              @('Fvector translation_delta = source_delta.c;', 'Fvector translation_delta = source_local.c;'),
+              @('target_data.bind_transform.transform_dir(translation_delta);', 'translation_delta.sub(source_data.bind_transform.c);')
+          )
+
+          foreach ($pair in $replacements) {
+              if (-not $content.Contains($pair[0])) {
+                  throw "Expected retarget expression not found: $($pair[0])"
+              }
+              $content = $content.Replace($pair[0], $pair[1])
+          }
+
+          [System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))
+
+          # This workflow is only a one-shot patch applicator. Remove it in the
+          # same commit that carries the actual engine fix.
+          Remove-Item -LiteralPath '.github/workflows/apply-retarget-fix.yml'
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "KishtimGuy"
+          git config user.email "103826442+MatrixStalk@users.noreply.github.com"
+          git add ogsr_engine/xrGame/player_hud.cpp .github/workflows/apply-retarget-fix.yml
+          git commit -m "[ci build] fix Source HUD retarget matrix order"
+          git push origin HEAD:fix/source-hud-retarget
