@@ -2,10 +2,8 @@ name: Apply clavicle retarget fix
 
 on:
   push:
-    branches:
-      - fix/source-hud-retarget
-    paths:
-      - .github/workflows/apply-clavicle-retarget-fix.yml
+    branches: [fix/source-hud-retarget]
+    paths: [.github/workflows/apply-clavicle-retarget-fix.yml]
 
 permissions:
   contents: write
@@ -18,15 +16,13 @@ jobs:
         with:
           fetch-depth: 0
           ref: fix/source-hud-retarget
-
-      - name: Apply clavicle bind-space correction
-        shell: pwsh
+      - name: Apply clavicle correction
+        shell: python
         run: |
-          $path = 'ogsr_engine/xrGame/player_hud.cpp'
-          $content = Get-Content -LiteralPath $path -Raw
-
-          $old = @'
-        Fmatrix target_local;
+          from pathlib import Path
+          p = Path('ogsr_engine/xrGame/player_hud.cpp')
+          s = p.read_text(encoding='utf-8')
+          old = '''        Fmatrix target_local;
         target_local.mul_43(rotation_delta, target_data.bind_transform);
         target_local.c.set(target_data.bind_transform.c);
 
@@ -34,10 +30,8 @@ jobs:
         // authored local translation delta so whole-hand motion is not lost;
         // all descendants retain target bone lengths.
         LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
-'@
-
-          $new = @'
-        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
+'''
+          new = '''        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
         const bool is_clavicle = target_bone_name &&
             (!xr_strcmp(target_bone_name, source_l_clavicle) || !xr_strcmp(target_bone_name, source_r_clavicle));
 
@@ -62,17 +56,11 @@ jobs:
         // Spine4 is the logical arm root used by the HUD merge. Preserve its
         // authored local translation delta so whole-hand motion is not lost;
         // all descendants retain target bone lengths.
-'@
-
-          if (-not $content.Contains($old)) {
-              throw 'Expected target_local retarget block not found.'
-          }
-
-          $content = $content.Replace($old, $new)
-          [System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))
-
-          Remove-Item -LiteralPath '.github/workflows/apply-clavicle-retarget-fix.yml'
-
+'''
+          if old not in s:
+              raise SystemExit('Expected target_local retarget block not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          Path('.github/workflows/apply-clavicle-retarget-fix.yml').unlink()
       - name: Commit fix
         shell: bash
         run: |
