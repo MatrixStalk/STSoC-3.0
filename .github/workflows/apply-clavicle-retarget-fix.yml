@@ -1,0 +1,83 @@
+name: Apply clavicle retarget fix
+
+on:
+  push:
+    branches:
+      - fix/source-hud-retarget
+    paths:
+      - .github/workflows/apply-clavicle-retarget-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+          ref: fix/source-hud-retarget
+
+      - name: Apply clavicle bind-space correction
+        shell: pwsh
+        run: |
+          $path = 'ogsr_engine/xrGame/player_hud.cpp'
+          $content = Get-Content -LiteralPath $path -Raw
+
+          $old = @'
+        Fmatrix target_local;
+        target_local.mul_43(rotation_delta, target_data.bind_transform);
+        target_local.c.set(target_data.bind_transform.c);
+
+        // Spine4 is the logical arm root used by the HUD merge. Preserve its
+        // authored local translation delta so whole-hand motion is not lost;
+        // all descendants retain target bone lengths.
+        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
+'@
+
+          $new = @'
+        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
+        const bool is_clavicle = target_bone_name &&
+            (!xr_strcmp(target_bone_name, source_l_clavicle) || !xr_strcmp(target_bone_name, source_r_clavicle));
+
+        Fmatrix target_local;
+        if (is_clavicle)
+        {
+            // Clavicles are especially sensitive to bind-axis differences between
+            // otherwise compatible ValveBiped rigs. Map the complete local pose
+            // through source bind space into target bind space, but keep the
+            // replacement hands mesh's authored clavicle translation.
+            Fmatrix bind_correction;
+            bind_correction.mul_43(target_data.bind_transform, source_bind_inverse);
+            target_local.mul_43(bind_correction, source_local);
+            target_local.c.set(target_data.bind_transform.c);
+        }
+        else
+        {
+            target_local.mul_43(rotation_delta, target_data.bind_transform);
+            target_local.c.set(target_data.bind_transform.c);
+        }
+
+        // Spine4 is the logical arm root used by the HUD merge. Preserve its
+        // authored local translation delta so whole-hand motion is not lost;
+        // all descendants retain target bone lengths.
+'@
+
+          if (-not $content.Contains($old)) {
+              throw 'Expected target_local retarget block not found.'
+          }
+
+          $content = $content.Replace($old, $new)
+          [System.IO.File]::WriteAllText($path, $content, [System.Text.UTF8Encoding]::new($false))
+
+          Remove-Item -LiteralPath '.github/workflows/apply-clavicle-retarget-fix.yml'
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "KishtimGuy"
+          git config user.email "103826442+MatrixStalk@users.noreply.github.com"
+          git add ogsr_engine/xrGame/player_hud.cpp .github/workflows/apply-clavicle-retarget-fix.yml
+          git commit -m "[ci build] fix Source clavicle retarget bind axes"
+          git push origin HEAD:fix/source-hud-retarget
