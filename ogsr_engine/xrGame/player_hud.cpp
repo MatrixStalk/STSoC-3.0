@@ -68,11 +68,6 @@ bool is_source_arm_bone(LPCSTR bone_name)
     return bone_name && !strncmp(bone_name, "valvebiped.bip01_", xr_strlen("valvebiped.bip01_"));
 }
 
-bool is_source_arm_helper_bone(LPCSTR bone_name)
-{
-    return bone_name && (strstr(bone_name, "_ulna") || strstr(bone_name, "_wrist"));
-}
-
 } // namespace
 
 
@@ -1097,7 +1092,6 @@ u32 player_hud::motion_length(const motion_params& P, const motion_descr& M, con
         CMotion* motion = model->LL_GetRootMotion(M.mid);
 
         auto fStartFromTime = CalculateMotionStartSeconds(P.start_k, motion->GetLength());
-
         if (speed >= 0.0f)
             return iFloor(0.5f + 1000.f * (motion->GetLength() - fStartFromTime) / (md->Speed() * speed) * P.stop_k);
         else
@@ -1547,7 +1541,6 @@ void player_hud::attach_item(CHudItem* item)
     {
         if (m_attached_items[item_idx])
             m_attached_items[item_idx]->m_parent_hud_item->on_b_hud_detach();
-
         m_attached_items[item_idx] = pi;
         pi->m_parent_hud_item = item;
 
@@ -1832,12 +1825,12 @@ void player_hud::refresh_source_skeleton_merge()
         for (u16 target_bone_id = 0; target_bone_id < target->LL_BoneCount(); ++target_bone_id)
         {
             LPCSTR bone_name = target->LL_BoneName(target_bone_id);
-            if (!is_source_arm_bone(bone_name) || is_source_arm_helper_bone(bone_name))
+            if (!is_source_arm_bone(bone_name))
                 continue;
 
             const u16 source_bone_id = source->LL_BoneID(bone_name);
             if (source_bone_id == BI_NONE)
-                continue; // Optional Ulna/Wrist helpers may only exist in the mesh.
+                continue; // Optional mesh helper bones can exist only in the hands skeleton.
 
             CBoneInstance& target_bone = target->LL_GetBoneInstance(target_bone_id);
             target_bone.set_param(0, static_cast<float>(source_bone_id));
@@ -1876,15 +1869,55 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
         const CBoneData& source_data = source->LL_GetData(source_bone_id);
         const CBoneData& target_data = target->LL_GetData(target_bone_id);
 
-        // Retarget in model space. m2b_transform is the inverse global bind
-        // matrix, so the complete expression is:
-        //   source animated * inverse(source bind) * target bind
-        // At the source bind pose it resolves exactly to target bind. This is
-        // also independent of different parent-local offsets and bone lengths.
-        Fmatrix target_bind, animated_delta;
-        target_bind.invert(target_data.m2b_transform);
-        animated_delta.mul_43(source_data.m2b_transform, target_bind);
-        target_bone->mTransform.mul_43(source->LL_GetBoneInstance(source_bone_id).mTransform, animated_delta);
+        // Convert the source pose to a parent-local transform first. Retargeting
+        // the global skinning matrix directly also transfers the source rig's
+        // proportions, which bends/stretches a replacement hands mesh whenever
+        // its forearm, wrist or finger lengths differ even slightly.
+        Fmatrix source_local;
+        if (const u16 source_parent_id = source_data.GetParentID(); source_parent_id != BI_NONE)
+        {
+            Fmatrix source_parent_inverse;
+            source_parent_inverse.invert(source->LL_GetBoneInstance(source_parent_id).mTransform);
+            source_local.mul_43(source_parent_inverse, source->LL_GetBoneInstance(source_bone_id).mTransform);
+        }
+        else
+        {
+            source_local.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
+        }
+
+        // Remove the source bind pose. Source SMD tracks often contain a
+        // translation for every joint even when that translation merely stores
+        // bone length. For ordinary arm descendants we transfer only the
+        // rotational delta and keep the target skeleton's bind translation.
+        Fmatrix source_bind_inverse, source_delta;
+        source_bind_inverse.invert(source_data.bind_transform);
+        source_delta.mul_43(source_bind_inverse, source_local);
+
+        Fquaternion delta_rotation;
+        delta_rotation.set(source_delta);
+        Fmatrix rotation_delta;
+        rotation_delta.rotation(delta_rotation);
+        rotation_delta.c.set(0.f, 0.f, 0.f);
+
+        Fmatrix target_local;
+        target_local.mul_43(target_data.bind_transform, rotation_delta);
+        target_local.c.set(target_data.bind_transform.c);
+
+        // Spine4 is the logical arm root used by the HUD merge. Preserve its
+        // authored local translation delta so whole-hand motion is not lost;
+        // all descendants retain target bone lengths.
+        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
+        if (target_bone_name && !xr_strcmp(target_bone_name, source_root_bone))
+        {
+            Fvector translation_delta = source_delta.c;
+            target_data.bind_transform.transform_dir(translation_delta);
+            target_local.c.add(translation_delta);
+        }
+
+        if (const u16 target_parent_id = target_data.GetParentID(); target_parent_id != BI_NONE)
+            target_bone->mTransform.mul_43(target->LL_GetBoneInstance(target_parent_id).mTransform, target_local);
+        else
+            target_bone->mTransform.set(target_local);
     }
 
     // Preserve the existing procedural right-thumb adjustment after the
@@ -2147,7 +2180,6 @@ u32 player_hud::script_anim_play(u8 hand, LPCSTR hud_section, LPCSTR anm_name, b
 
             if (false) // randomAnim
                 rnd_idx2 = (u8)Random.randI(phm->m_additional_animations.size());
-
             motion_descr& additional = phm->m_additional_animations[rnd_idx2];
 
             if (bDebug)
