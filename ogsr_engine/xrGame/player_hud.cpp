@@ -68,6 +68,10 @@ bool is_source_arm_bone(LPCSTR bone_name)
     return bone_name && !strncmp(bone_name, "valvebiped.bip01_", xr_strlen("valvebiped.bip01_"));
 }
 
+bool is_source_arm_helper_bone(LPCSTR bone_name) 
+{ 
+    return bone_name && (strstr(bone_name, "_ulna") || strstr(bone_name, "_wrist")); 
+}
 
 } // namespace
 
@@ -1828,7 +1832,7 @@ void player_hud::refresh_source_skeleton_merge()
         for (u16 target_bone_id = 0; target_bone_id < target->LL_BoneCount(); ++target_bone_id)
         {
             LPCSTR bone_name = target->LL_BoneName(target_bone_id);
-            if (!is_source_arm_bone(bone_name))
+            if(!is_source_arm_bone(bone_name) || is_source_arm_helper_bone(bone_name))
                 continue;
 
             const u16 source_bone_id = source->LL_BoneID(bone_name);
@@ -1872,44 +1876,15 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
         const CBoneData& source_data = source->LL_GetData(source_bone_id);
         const CBoneData& target_data = target->LL_GetData(target_bone_id);
 
-        Fmatrix source_local;
-        if (const u16 source_parent_id = source_data.GetParentID(); source_parent_id != BI_NONE)
-        {
-            Fmatrix source_parent_inverse;
-            source_parent_inverse.invert(source->LL_GetBoneInstance(source_parent_id).mTransform);
-            source_local.mul_43(source_parent_inverse, source->LL_GetBoneInstance(source_bone_id).mTransform);
-        }
-        else
-        {
-            source_local.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
-        }
-
-        Fmatrix source_bind_inverse, source_delta;
-        source_bind_inverse.invert(source_data.bind_transform);
-        source_delta.mul_43(source_local, source_bind_inverse);
-
-        Fquaternion delta_rotation;
-        delta_rotation.set(source_delta);
-        Fmatrix rotation_delta;
-        rotation_delta.rotation(delta_rotation);
-        rotation_delta.c.set(0.f, 0.f, 0.f);
-
-        Fmatrix target_local;
-        target_local.mul_43(rotation_delta, target_data.bind_transform);
-        target_local.c.set(target_data.bind_transform.c);
-
-        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
-        if (target_bone_name && !xr_strcmp(target_bone_name, source_root_bone))
-        {
-            Fvector translation_delta = source_local.c;
-            translation_delta.sub(source_data.bind_transform.c);
-            target_local.c.add(translation_delta);
-        }
-
-        if (const u16 target_parent_id = target_data.GetParentID(); target_parent_id != BI_NONE)
-            target_bone->mTransform.mul_43(target->LL_GetBoneInstance(target_parent_id).mTransform, target_local);
-        else
-            target_bone->mTransform.set(target_local);
+        // Retarget in model space. m2b_transform is the inverse global bind
+        // matrix, so the complete expression is:
+        //   source animated * inverse(source bind) * target bind
+        // At the source bind pose it resolves exactly to target bind. This is
+        // also independent of different parent-local offsets and bone lengths.
+        Fmatrix target_bind, animated_delta;
+        target_bind.invert(target_data.m2b_transform);
+        animated_delta.mul_43(source_data.m2b_transform, target_bind);
+        target_bone->mTransform.mul_43(source->LL_GetBoneInstance(source_bone_id).mTransform, animated_delta);
     }
 
     if (target_idx == 0)
