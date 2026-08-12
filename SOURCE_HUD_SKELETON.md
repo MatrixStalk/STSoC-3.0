@@ -10,9 +10,10 @@ models contain these bones:
 
 Bone matching is name-based. Bone indices may differ, and optional mesh bones
 such as `ValveBiped.Bip01_L_Ulna`, `ValveBiped.Bip01_L_Wrist` and their right
-hand equivalents do not have to exist in the item skeleton. These helper bones
-keep the hands mesh bind transforms and follow their retargeted parent instead
-of consuming potentially synthetic weapon animation tracks.
+hand equivalents do not have to exist in the item skeleton. If a helper exists
+in both skeletons it is retargeted like any other common ValveBiped bone; if it
+only exists in the hands mesh it keeps its bind transform and follows its
+retargeted parent.
 
 ## Conversion requirements
 
@@ -21,9 +22,11 @@ of consuming potentially synthetic weapon animation tracks.
 2. The engine accepts several independent roots in one OGF (`Camera`, `body`,
    `mag`, and similar roots). Every root branch is evaluated in model space;
    no destructive reparenting of already converted animation tracks is needed.
-3. Common ValveBiped bones may use different bind poses and numeric indices.
-   The runtime transfers the animation in model space using both inverse bind
-   matrices, preserving the hands skeleton positions and bone lengths.
+3. Common ValveBiped bones may use different bind poses, proportions and numeric
+   indices. The runtime converts each source pose to parent-local space, removes
+   the source bind pose, transfers the rotational animation delta onto the hands
+   bind pose, and keeps the hands bind translation/bone length. `Spine4`, the
+   logical HUD arm root, also keeps its authored translation delta.
 4. Put the complete weapon skeleton and its animations in the item OGF or its
    optional OMF. The replaceable hands OGF only needs the hands mesh and the
    ValveBiped skeleton. It may be a skeletal-rigid OGF without any animations.
