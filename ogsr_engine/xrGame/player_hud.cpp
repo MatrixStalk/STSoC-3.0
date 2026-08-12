@@ -1899,14 +1899,49 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
         rotation_delta.rotation(delta_rotation);
         rotation_delta.c.set(0.f, 0.f, 0.f);
 
+        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
+        const bool is_clavicle = target_bone_name &&
+            (!xr_strcmp(target_bone_name, source_l_clavicle) || !xr_strcmp(target_bone_name, source_r_clavicle));
+
+        // Preserve the old exact-merge behaviour when both rigs really have the
+        // same local bind transform. This avoids regressing weapons whose Source
+        // and hands skeletons were already authored one-to-one.
+        const Fmatrix& sb = source_data.bind_transform;
+        const Fmatrix& tb = target_data.bind_transform;
+        const bool same_bind =
+            fsimilar(sb.i.x, tb.i.x, 1e-4f) && fsimilar(sb.i.y, tb.i.y, 1e-4f) && fsimilar(sb.i.z, tb.i.z, 1e-4f) &&
+            fsimilar(sb.j.x, tb.j.x, 1e-4f) && fsimilar(sb.j.y, tb.j.y, 1e-4f) && fsimilar(sb.j.z, tb.j.z, 1e-4f) &&
+            fsimilar(sb.k.x, tb.k.x, 1e-4f) && fsimilar(sb.k.y, tb.k.y, 1e-4f) && fsimilar(sb.k.z, tb.k.z, 1e-4f) &&
+            fsimilar(sb.c.x, tb.c.x, 1e-4f) && fsimilar(sb.c.y, tb.c.y, 1e-4f) && fsimilar(sb.c.z, tb.c.z, 1e-4f);
+
         Fmatrix target_local;
-        target_local.mul_43(rotation_delta, target_data.bind_transform);
-        target_local.c.set(target_data.bind_transform.c);
+        if (same_bind)
+        {
+            // Same rig: copy the animated local pose verbatim. Retarget math is
+            // unnecessary here and can introduce visible shoulder errors.
+            target_local.set(source_local);
+        }
+        else if (is_clavicle)
+        {
+            // Clavicles define the basis for the entire arm chain. Map the full
+            // animated local pose from the source bind basis into the target bind
+            // basis, but keep the target rig's authored shoulder position.
+            Fmatrix bind_correction;
+            bind_correction.mul_43(target_data.bind_transform, source_bind_inverse);
+            target_local.mul_43(bind_correction, source_local);
+            target_local.c.set(target_data.bind_transform.c);
+        }
+        else
+        {
+            // For mismatched descendants transfer animation rotation only and
+            // retain target translations so bone lengths/proportions stay intact.
+            target_local.mul_43(rotation_delta, target_data.bind_transform);
+            target_local.c.set(target_data.bind_transform.c);
+        }
 
         // Spine4 is the logical arm root used by the HUD merge. Preserve its
         // authored local translation delta so whole-hand motion is not lost;
         // all descendants retain target bone lengths.
-        LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
         if (target_bone_name && !xr_strcmp(target_bone_name, source_root_bone))
         {
             Fvector translation_delta = source_local.c;
