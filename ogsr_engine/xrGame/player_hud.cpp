@@ -1891,7 +1891,7 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
         // rotational delta and keep the target skeleton's bind translation.
         Fmatrix source_bind_inverse, source_delta;
         source_bind_inverse.invert(source_data.bind_transform);
-        source_delta.mul_43(source_bind_inverse, source_local);
+        source_delta.mul_43(source_local, source_bind_inverse);
 
         Fquaternion delta_rotation;
         delta_rotation.set(source_delta);
@@ -1900,7 +1900,7 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
         rotation_delta.c.set(0.f, 0.f, 0.f);
 
         Fmatrix target_local;
-        target_local.mul_43(target_data.bind_transform, rotation_delta);
+        target_local.mul_43(rotation_delta, target_data.bind_transform);
         target_local.c.set(target_data.bind_transform.c);
 
         // Spine4 is the logical arm root used by the HUD merge. Preserve its
@@ -1909,8 +1909,8 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
         LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
         if (target_bone_name && !xr_strcmp(target_bone_name, source_root_bone))
         {
-            Fvector translation_delta = source_delta.c;
-            target_data.bind_transform.transform_dir(translation_delta);
+            Fvector translation_delta = source_local.c;
+            translation_delta.sub(source_data.bind_transform.c);
             target_local.c.add(translation_delta);
         }
 
