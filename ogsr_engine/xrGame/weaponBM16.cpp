@@ -46,7 +46,7 @@ void CWeaponBM16::OnShot()
     }
     else
     {
-        PlaySound(*m_pSndShotCurrent, get_LastFP(), true);
+        PlaySoundShot();
 
         Fvector vel;
         PHGetLinearVell(vel);

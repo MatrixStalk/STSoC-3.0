@@ -29,6 +29,8 @@ CWeaponKnife::~CWeaponKnife()
 {
     HUD_SOUND::DestroySound(m_sndShot);
     HUD_SOUND::DestroySound(sndItemOn);
+    HUD_SOUND::DestroySound(sndShow);
+    HUD_SOUND::DestroySound(sndHide);
 }
 
 void CWeaponKnife::Load(LPCSTR section)
@@ -39,6 +41,9 @@ void CWeaponKnife::Load(LPCSTR section)
     fWallmarkSize = pSettings->r_float(section, "wm_size");
 
     HUD_SOUND::LoadSound(section, "snd_shoot", m_sndShot, ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING));
+
+    HUD_SOUND::LoadSound(section, "snd_draw", sndShow);
+    HUD_SOUND::LoadSound(section, "snd_holster", sndHide);
 
     if (pSettings->line_exist(section, "snd_item_on"))
         HUD_SOUND::LoadSound(section, "snd_item_on", sndItemOn);
@@ -243,6 +248,7 @@ void CWeaponKnife::switch2_Idle()
 
 void CWeaponKnife::switch2_Hiding()
 {
+    PlaySound(sndHide, Position());
     FireEnd();
     VERIFY(GetState() == eHiding);
     PlayHUDMotion({"anim_hide", "anm_hide"}, true, GetState());
@@ -256,6 +262,7 @@ void CWeaponKnife::switch2_Hidden()
 
 void CWeaponKnife::switch2_Showing()
 {
+    PlaySound(sndShow, Position());
     VERIFY(GetState() == eShowing);
     PlayHUDMotion({"anim_draw", "anm_show"}, false, GetState());
 }

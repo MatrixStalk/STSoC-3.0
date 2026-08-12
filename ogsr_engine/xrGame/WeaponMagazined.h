@@ -3,6 +3,7 @@
 #include "weapon.h"
 #include "hudsound.h"
 #include "ai_sounds.h"
+#include <ik_calculate_data.h>
 
 class ENGINE_API CMotionDef;
 
@@ -32,7 +33,7 @@ protected:
     HUD_SOUND sndAimStart, sndAimEnd;
     HUD_SOUND sndItemOn;
     //звук текущего выстрела
-    HUD_SOUND* m_pSndShotCurrent;
+    shared_str m_sSndShotCurrent;
 	HUD_SOUND sndBore;
 	HUD_SOUND sndBoreEmpty;
 
@@ -66,6 +67,7 @@ protected:
     virtual void switch2_Showing();
 
     virtual void OnShot();
+    virtual void PlaySoundShot();
 
     virtual void OnEmptyClick();
 
@@ -219,6 +221,10 @@ protected:
     virtual void net_Relcase(CObject* object);
 
     bool ScopeRespawn(PIItem);
+
+    // Alundaio: LAYERED_SND_SHOOT
+    HUD_SOUND_COLLECTION_LAYERED m_layered_sounds;
+    //-Alundaio
 
     virtual void OnMotionMark(u32 state, const motion_marks& M) override;
     int CheckAmmoBeforeReload(u32& v_ammoType);

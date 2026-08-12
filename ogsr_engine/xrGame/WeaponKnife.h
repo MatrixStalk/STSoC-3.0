@@ -11,7 +11,10 @@ private:
 protected:
     HUD_SOUND m_sndShot;
     HUD_SOUND sndItemOn;
-
+    HUD_SOUND sndShow;
+    HUD_SOUND sndHide;
+    ESoundTypes m_eSoundShow;
+    ESoundTypes m_eSoundHide;
     bool m_attackStart;
     bool m_attackMotionMarksAvailable;
 

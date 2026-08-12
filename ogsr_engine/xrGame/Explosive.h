@@ -14,6 +14,7 @@
 #include "DamageSource.h"
 #include "wallmark_manager.h"
 #include "ParticlesObject.h"
+#include "hudsound.h"
 class IRender_Light;
 DEFINE_VECTOR(CPhysicsShellHolder*, BLASTED_OBJECTS_V, BLASTED_OBJECTS_I);
 class CExplosive : public IDamageSource
@@ -85,6 +86,8 @@ protected:
     CWalmarkManager m_wallmark_manager;
     // ID персонажа который иницировал действие
     u16 m_iCurrentParentID;
+
+    HUD_SOUND_COLLECTION_LAYERED m_layered_sounds;
 
     // bool						m_bReadyToExplode;
     Fvector m_vExplodePos;
