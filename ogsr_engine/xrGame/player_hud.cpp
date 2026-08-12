@@ -1879,12 +1879,13 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
 
         const Fmatrix& source_world = source->LL_GetBoneInstance(source_bone_id).mTransform;
 
-        // TargetBindWorld * inverse(SourceBindWorld) converts an absolute source
-        // model-space pose into the corresponding target bind basis. At the
-        // source bind pose this evaluates exactly to TargetBindWorld.
-        Fmatrix bind_basis_correction, desired_target_world;
-        bind_basis_correction.mul_43(target_bind_world, source_data.m2b_transform);
-        desired_target_world.mul_43(bind_basis_correction, source_world);
+        // Extract the animated model-space delta from the Source bind pose,
+        // then apply that motion to the Target bind pose. The order is
+        // SourceAnim * inverse(SourceBind) * TargetBind, which preserves the
+        // target bind basis for rigs with different bone roll/local axes.
+        Fmatrix source_world_delta, desired_target_world;
+        source_world_delta.mul_43(source_world, source_data.m2b_transform);
+        desired_target_world.mul_43(source_world_delta, target_bind_world);
 
         // Convert the corrected world orientation back through the *current*
         // target parent. This makes every child inherit the already-retargeted
