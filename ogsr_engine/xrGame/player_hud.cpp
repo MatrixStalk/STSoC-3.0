@@ -73,6 +73,38 @@ bool is_source_arm_helper_bone(LPCSTR bone_name)
     return bone_name && (strstr(bone_name, "_ulna") || strstr(bone_name, "_wrist")); 
 }
 
+bool same_source_bind_transform(const Fmatrix& left, const Fmatrix& right)
+{
+    // Source exporters introduce small bind-pose drift even for rigs made from
+    // the same reference skeleton. Glock-sized axis changes are much larger.
+    constexpr float bind_epsilon = 0.1f;
+    return left.i.similar(right.i, bind_epsilon) && left.j.similar(right.j, bind_epsilon) &&
+        left.k.similar(right.k, bind_epsilon) && left.c.similar(right.c, bind_epsilon);
+}
+
+bool source_bind_chain_needs_retarget(IKinematics* source, IKinematics* target, u16 source_bone, u16 target_bone)
+{
+    const u32 max_chain_depth = u32(source->LL_BoneCount()) + u32(target->LL_BoneCount());
+    for (u32 depth = 0; depth < max_chain_depth; ++depth)
+    {
+        if (xr_strcmp(source->LL_BoneName(source_bone), target->LL_BoneName(target_bone)) ||
+            !same_source_bind_transform(source->LL_GetData(source_bone).bind_transform, target->LL_GetData(target_bone).bind_transform))
+            return true;
+
+        const u16 source_parent = source->LL_GetData(source_bone).GetParentID();
+        const u16 target_parent = target->LL_GetData(target_bone).GetParentID();
+        if (source_parent == BI_NONE || target_parent == BI_NONE)
+            return source_parent != target_parent;
+        if (source_parent >= source->LL_BoneCount() || target_parent >= target->LL_BoneCount())
+            return true;
+
+        source_bone = source_parent;
+        target_bone = target_parent;
+    }
+
+    return true;
+}
+
 } // namespace
 
 
@@ -1829,6 +1861,7 @@ void player_hud::refresh_source_skeleton_merge()
             continue;
 
         u16 merged_bones = 0;
+        u16 retargeted_bones = 0;
         for (u16 target_bone_id = 0; target_bone_id < target->LL_BoneCount(); ++target_bone_id)
         {
             LPCSTR bone_name = target->LL_BoneName(target_bone_id);
@@ -1843,6 +1876,16 @@ void player_hud::refresh_source_skeleton_merge()
             target_bone.set_param(0, static_cast<float>(source_bone_id));
             target_bone.set_param(1, 0.f);
             target_bone.set_param(2, static_cast<float>(target_bone_id));
+            const bool own_bind_differs =
+                !same_source_bind_transform(source->LL_GetData(source_bone_id).bind_transform, target->LL_GetData(target_bone_id).bind_transform);
+            const bool retarget_bind_chain = own_bind_differs || source_bind_chain_needs_retarget(source, target, source_bone_id, target_bone_id);
+
+            // 0: fully compatible chain, preserve the exact model-space path.
+            // 1: this bone has a different bind pose and needs conversion.
+            // 2: this bone is compatible, but must follow a converted parent.
+            const u16 retarget_mode = own_bind_differs ? 1 : (retarget_bind_chain ? 2 : 0);
+            target_bone.set_param(3, static_cast<float>(retarget_mode));
+            retargeted_bones += retarget_mode != 0;
             if (target_idx == 0)
             {
                 if (!xr_strcmp(bone_name, source_r_thumb0))
@@ -1857,8 +1900,8 @@ void player_hud::refresh_source_skeleton_merge()
         }
 
         m_source_skeletons[target_idx] = source;
-        MsgDbg("HUD Source skeleton merge: [%s] drives [%s], %u bones matched by name", source->getDebugName().c_str(), target->getDebugName().c_str(),
-            merged_bones);
+        MsgDbg("HUD Source skeleton merge: [%s] drives [%s], %u bones matched by name, %u bind-corrected", source->getDebugName().c_str(),
+            target->getDebugName().c_str(), merged_bones, retargeted_bones);
     }
 }
 
@@ -1875,16 +1918,82 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
     {
         const CBoneData& source_data = source->LL_GetData(source_bone_id);
         const CBoneData& target_data = target->LL_GetData(target_bone_id);
+        const u16 source_parent_id = source_data.GetParentID();
+        const u16 target_parent_id = target_data.GetParentID();
 
-        // Retarget in model space. m2b_transform is the inverse global bind
-        // matrix, so the complete expression is:
-        //   source animated * inverse(source bind) * target bind
-        // At the source bind pose it resolves exactly to target bind. This is
-        // also independent of different parent-local offsets and bone lengths.
-        Fmatrix target_bind, animated_delta;
-        target_bind.invert(target_data.m2b_transform);
-        animated_delta.mul_43(source_data.m2b_transform, target_bind);
-        target_bone->mTransform.mul_43(source->LL_GetBoneInstance(source_bone_id).mTransform, animated_delta);
+        // Preserve the old exact path for weapons whose complete ancestor bind
+        // chain is identical to the hands rig. This keeps already compatible
+        // models bit-for-bit equivalent to the original skeleton merge.
+        const u16 retarget_mode = static_cast<u16>(target_bone->get_param(3));
+        if (retarget_mode == 0)
+        {
+            Fmatrix target_bind, animated_delta;
+            target_bind.invert(target_data.m2b_transform);
+            animated_delta.mul_43(source_data.m2b_transform, target_bind);
+            target_bone->mTransform.mul_43(source->LL_GetBoneInstance(source_bone_id).mTransform, animated_delta);
+        }
+        else
+        {
+            const bool source_has_parent = source_parent_id != BI_NONE && source_parent_id < source->LL_BoneCount();
+            const bool target_has_parent = target_parent_id != BI_NONE && target_parent_id < target->LL_BoneCount();
+            bool compatible_parent_chain = !source_has_parent && !target_has_parent;
+
+            if (source_has_parent && target_has_parent &&
+                !xr_strcmp(source->LL_BoneName(source_parent_id), target->LL_BoneName(target_parent_id)))
+                compatible_parent_chain = true;
+
+            if (compatible_parent_chain)
+            {
+                Fmatrix source_local;
+                if (source_has_parent)
+                {
+                    Fmatrix source_parent_inv;
+                    source_parent_inv.invert(source->LL_GetBoneInstance(source_parent_id).mTransform);
+                    source_local.mul_43(source_parent_inv, source->LL_GetBoneInstance(source_bone_id).mTransform);
+                }
+                else
+                    source_local.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
+
+                // Apply only the animated local rotation to the target bind pose.
+                // Target translations are kept intact, so a weapon rig with other
+                // arm lengths cannot stretch or collapse the hands mesh.
+                Fmatrix source_bind_inv, local_delta, target_local;
+                source_bind_inv.invert(source_data.bind_transform);
+                local_delta.mul_43(source_bind_inv, source_local);
+                local_delta.c.set(0.f, 0.f, 0.f);
+                target_local.mul_43(target_data.bind_transform, local_delta);
+                target_local.c.set(target_data.bind_transform.c);
+
+                if (target_has_parent)
+                    target_bone->mTransform.mul_43(target->LL_GetBoneInstance(target_parent_id).mTransform, target_local);
+                else
+                    target_bone->mTransform.set(target_local);
+
+                // Hands are end effectors: keep the corrected target-hand
+                // orientation and proportions, but place the palm at the exact
+                // point authored in the weapon animation. This restores the
+                // two-handed pistol grip without importing weapon bone lengths.
+                LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
+                if (retarget_mode == 1 && target_bone_name && strstr(target_bone_name, "_hand"))
+                {
+                    Fmatrix target_bind, animated_delta, model_space_retarget;
+                    target_bind.invert(target_data.m2b_transform);
+                    animated_delta.mul_43(source_data.m2b_transform, target_bind);
+                    model_space_retarget.mul_43(source->LL_GetBoneInstance(source_bone_id).mTransform, animated_delta);
+                    target_bone->mTransform.c.set(model_space_retarget.c);
+                }
+            }
+            else
+            {
+                // A helper bone or a different hierarchy breaks the local chain.
+                // Rebase this bone independently in model space, then descendants
+                // with matching parents can continue local bind-space retargeting.
+                Fmatrix target_bind, animated_delta;
+                target_bind.invert(target_data.m2b_transform);
+                animated_delta.mul_43(source_data.m2b_transform, target_bind);
+                target_bone->mTransform.mul_43(source->LL_GetBoneInstance(source_bone_id).mTransform, animated_delta);
+            }
+        }
     }
 
     if (target_idx == 0)
