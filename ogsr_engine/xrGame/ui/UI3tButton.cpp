@@ -9,26 +9,28 @@
 
 #include "StdAfx.h"
 #include "UI3tButton.h"
+#include "UIControlConfig.h"
 #include "UIXmlInit.h"
 
 CUI3tButton::CUI3tButton()
 {
     m_bTextureEnable = false;
-    m_bUseTextColor[D] = true;
-    m_bUseTextColor[H] = false;
-    m_bUseTextColor[T] = false;
+    m_bUseTextColor[D] = UIControlConfig::ReadBool("button", "use_disabled_text_color", true);
+    m_bUseTextColor[H] = UIControlConfig::ReadBool("button", "use_highlighted_text_color", false);
+    m_bUseTextColor[T] = UIControlConfig::ReadBool("button", "use_pressed_text_color", false);
 
-    m_dwTextColor[E] = 0xFFFFFFFF;
-    m_dwTextColor[D] = 0xFFAAAAAA;
-    m_dwTextColor[H] = 0xFFFFFFFF;
-    m_dwTextColor[T] = 0xFFFFFFFF;
+    m_dwTextColor[E] = UIControlConfig::ReadColor("button:text_enabled", 0xFFFFFFFF);
+    m_dwTextColor[D] = UIControlConfig::ReadColor("button:text_disabled", 0xFFAAAAAA);
+    m_dwTextColor[H] = UIControlConfig::ReadColor("button:text_highlighted", 0xFFFFFFFF);
+    m_dwTextColor[T] = UIControlConfig::ReadColor("button:text_pressed", 0xFFFFFFFF);
 
     AttachChild(&m_background);
     AttachChild(&m_hint);
 
-    m_bEnableTextHighlighting = false;
+    m_bEnableTextHighlighting = UIControlConfig::ReadBool("button", "text_highlighting", false);
     m_bCheckMode = false;
-    SetPushOffset(Fvector2().set(0.0f, 0.0f));
+    SetPushOffset(Fvector2().set(UIControlConfig::ReadFloat("button", "push_offset_x", 0.f),
+                                 UIControlConfig::ReadFloat("button", "push_offset_y", 0.f)));
 }
 
 CUI3tButton::~CUI3tButton() {}

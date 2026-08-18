@@ -168,7 +168,7 @@ void CUIArtefactDetectorElite::Draw()
         if (1 /* r.in(pos)*/)
         {
             (*it).pStatic->SetWndPos(pos);
-            (*it).pStatic->Draw();
+            (*it).pStatic->DrawWithAnimation();
         }
     }
 

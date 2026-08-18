@@ -2016,7 +2016,7 @@ void CWeapon::OnDrawUI()
         if (UseScopeTexture() && !IsRotatingToZoom())
         {
             m_UIScope->Update();
-            m_UIScope->Draw();
+            m_UIScope->DrawWithAnimation();
         }
     }
 }

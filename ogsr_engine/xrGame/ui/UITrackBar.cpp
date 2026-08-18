@@ -3,16 +3,13 @@
 #include "UITrackBar.h"
 #include "UIFrameLineWnd.h"
 #include "UI3tButton.h"
+#include "UIControlConfig.h"
 #include "UITextureMaster.h"
 #include "..\..\xr_3da\xr_input.h"
 
-#define DEF_CONTROL_HEIGHT 21
-#define FRAME_LINE_TEXTURE "ui_slider_e"
-#define FRAME_LINE_TEXTURE_D "ui_slider_d"
-#define SLIDER_TEXTURE "ui_slider_button"
-
 CUITrackBar::CUITrackBar() : m_f_min(0), m_f_max(1), m_f_val(0), m_f_back_up(0), m_f_step(0.01f), m_b_is_float(true), m_b_invert(false)
 {
+    m_f_step = UIControlConfig::ReadFloat("track_bar", "step", .1f);
     m_pFrameLine = xr_new<CUIFrameLineWnd>();
     AttachChild(m_pFrameLine);
     m_pFrameLine->SetAutoDelete(true);
@@ -46,22 +43,25 @@ void CUITrackBar::Init(float x, float y, float width, float height)
     string128 buf;
     float item_height;
     float item_width;
-    CUIWindow::Init(x, y, width, DEF_CONTROL_HEIGHT);
+    const LPCSTR frame_texture = UIControlConfig::ReadString("track_bar", "frame_texture", "ui_slider_e");
+    const LPCSTR frame_disabled_texture = UIControlConfig::ReadString("track_bar", "frame_disabled_texture", "ui_slider_d");
+    const LPCSTR thumb_texture = UIControlConfig::ReadString("track_bar", "thumb_texture", "ui_slider_button");
+    CUIWindow::Init(x, y, width, UIControlConfig::ReadFloat("track_bar", "height", 21.f));
 
-    item_height = CUITextureMaster::GetTextureHeight(strconcat(sizeof(buf), buf, FRAME_LINE_TEXTURE, "_b"));
+    item_height = CUITextureMaster::GetTextureHeight(strconcat(sizeof(buf), buf, frame_texture, "_b"));
     m_pFrameLine->Init(0, (height - item_height) / 2, width, item_height);
-    m_pFrameLine->InitTexture(FRAME_LINE_TEXTURE);
+    m_pFrameLine->InitTexture(frame_texture);
     m_pFrameLine_d->Init(0, (height - item_height) / 2, width, item_height);
-    m_pFrameLine_d->InitTexture(FRAME_LINE_TEXTURE_D);
+    m_pFrameLine_d->InitTexture(frame_disabled_texture);
 
-    strconcat(sizeof(buf), buf, SLIDER_TEXTURE, "_e");
+    strconcat(sizeof(buf), buf, thumb_texture, "_e");
     item_width = CUITextureMaster::GetTextureWidth(buf);
     item_height = CUITextureMaster::GetTextureHeight(buf);
 
     item_width *= UI()->get_current_kx();
 
     m_pSlider->Init(0, (height - item_height) / 2, item_width, item_height);
-    m_pSlider->InitTexture(SLIDER_TEXTURE);
+    m_pSlider->InitTexture(thumb_texture);
 }
 
 void CUITrackBar::SetCurrentValue()

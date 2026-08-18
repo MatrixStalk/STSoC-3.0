@@ -132,9 +132,14 @@ void CDialogHolder::AddDialogToRender(CUIWindow* pDialog)
 {
     dlgItem itm(pDialog);
     xr_vector<dlgItem>::iterator it = std::find(m_dialogsToRender.begin(), m_dialogsToRender.end(), itm);
-    if ((it == m_dialogsToRender.end()) || (it != m_dialogsToRender.end() && (*it).enabled == false))
+    if (it == m_dialogsToRender.end())
     {
         m_dialogsToRender.push_back(itm);
+        pDialog->Show(true);
+    }
+    else
+    {
+        (*it).enabled = true;
         pDialog->Show(true);
     }
 }
@@ -147,8 +152,8 @@ void CDialogHolder::RemoveDialogToRender(CUIWindow* pDialog)
     {
         (*it).wnd->Show(false);
         (*it).wnd->Enable(false);
-        (*it).enabled = false;
-        m_dialogsToRender.erase(it);
+        if (!(*it).wnd->IsAnimating())
+            (*it).enabled = false;
     }
 }
 
@@ -157,8 +162,8 @@ void CDialogHolder::DoRenderDialogs()
     xr_vector<dlgItem>::iterator it = m_dialogsToRender.begin();
     for (; it != m_dialogsToRender.end(); ++it)
     {
-        if ((*it).enabled && (*it).wnd->IsShown())
-            (*it).wnd->Draw();
+        if ((*it).enabled && (*it).wnd->IsVisibleForRender())
+            (*it).wnd->DrawWithAnimation();
     }
 }
 
@@ -229,8 +234,13 @@ void CDialogHolder::OnFrame()
     }
 
     for (auto& it : m_dialogsToRender)
-        if (it.enabled && it.wnd->IsEnabled())
+    {
+        if (it.enabled && it.wnd->IsVisibleForRender())
             it.wnd->Update();
+
+        if (it.enabled && !it.wnd->IsShown() && !it.wnd->IsAnimating())
+            it.enabled = false;
+    }
 }
 
 void CDialogHolder::shedule_Update(u32 dt)

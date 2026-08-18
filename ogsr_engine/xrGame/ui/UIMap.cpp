@@ -294,7 +294,7 @@ void CUIGlobalMap::DrawText()
 
         for (auto& ms : m->GetChildWndList())
         {
-            ms->Draw();
+            ms->DrawWithAnimation();
         }
     }
 }

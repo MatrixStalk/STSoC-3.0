@@ -20,6 +20,7 @@ public:
 
     virtual void Init(float x, float y, float width, float height);
     virtual void InitTexture(LPCSTR tex_name);
+    void SetUseXmlSize(bool value) { m_useXmlSize = value; }
     virtual void SetTextX(float x)
     { /*do nothing*/
     }
@@ -36,5 +37,6 @@ public:
 
 private:
     bool b_backup_val{};
+    bool m_useXmlSize{true};
     CUIWindow* m_pDependControl;
 };

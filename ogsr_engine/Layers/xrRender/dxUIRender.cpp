@@ -33,7 +33,21 @@ void dxUIRender::SetAlphaRef(int aref)
 
 void dxUIRender::SetScissor(Irect* rect)
 {
-    RCache.set_Scissor(rect);
+    Irect animated_rect;
+    Irect* render_rect = rect;
+    if (rect && (!fis_zero(m_animationOffset.x) || !fis_zero(m_animationOffset.y)))
+    {
+        animated_rect = *rect;
+        const int offset_x = iFloor(m_animationOffset.x);
+        const int offset_y = iFloor(m_animationOffset.y);
+        animated_rect.x1 += offset_x;
+        animated_rect.x2 += offset_x;
+        animated_rect.y1 += offset_y;
+        animated_rect.y2 += offset_y;
+        render_rect = &animated_rect;
+    }
+
+    RCache.set_Scissor(render_rect);
     RCache.StateManager.OverrideScissoring(rect ? true : false, TRUE);
 }
 
@@ -57,6 +71,10 @@ LPCSTR dxUIRender::UpdateShaderName(LPCSTR tex_name, LPCSTR sh_name)
 
 void dxUIRender::PushPoint(float x, float y, float z, u32 C, float u, float v)
 {
+    x += m_animationOffset.x;
+    y += m_animationOffset.y;
+    C = subst_alpha(C, static_cast<u32>(color_get_A(C) * m_animationAlpha));
+
     //.	VERIFY(m_PointType==pttLIT);
     switch (m_PointType)
     {

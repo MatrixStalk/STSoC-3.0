@@ -5,6 +5,7 @@
 #include "stdafx.h"
 #include ".\uicheckbutton.h"
 #include "../HUDManager.h"
+#include "UIControlConfig.h"
 #include "UILines.h"
 
 CUICheckButton::CUICheckButton(void)
@@ -47,14 +48,16 @@ void CUICheckButton::Undo()
 void CUICheckButton::Init(float x, float y, float width, float height)
 {
     CUI3tButton::Init(x, y, width, height);
-    InitTexture("ui_checker");
+    InitTexture(UIControlConfig::ReadString("check_button", "texture", "ui_checker"));
 }
 
 void CUICheckButton::InitTexture(LPCSTR tex_name)
 {
     CUI3tButton::InitTexture(tex_name);
     Frect r = m_background.GetE()->GetStaticItem()->GetOriginalRect();
-    CUI3tButton::SetTextX(r.width());
-    CUI3tButton::Init(GetWndPos().x, GetWndPos().y, GetWidth(), r.height() - 5);
-    m_pLines->Init(GetWndPos().x, GetWndPos().y, GetWidth(), m_background.GetE()->GetStaticItem()->GetRect().height());
+    CUI3tButton::SetTextX(r.width() + UIControlConfig::ReadFloat("check_button", "text_offset", 0.f));
+    const float control_height = m_useXmlSize ? GetHeight() :
+                                               r.height() + UIControlConfig::ReadFloat("check_button", "height_adjust", -5.f);
+    CUI3tButton::Init(GetWndPos().x, GetWndPos().y, GetWidth(), control_height);
+    m_pLines->Init(GetWndPos().x, GetWndPos().y, GetWidth(), control_height);
 }

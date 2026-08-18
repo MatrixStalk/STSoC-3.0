@@ -248,7 +248,7 @@ template <class T>
 void CUIInteractiveBackground<T>::Draw()
 {
     if (m_stateCurrent)
-        m_stateCurrent->Draw();
+        m_stateCurrent->DrawWithAnimation();
 }
 
 template <class T>

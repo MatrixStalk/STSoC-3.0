@@ -434,7 +434,7 @@ void CUIPdaWnd::PdaContentsChanged(pda_section::part type, bool flash, bool forc
 void draw_sign(CUIStatic* s, Fvector2& pos)
 {
     s->SetWndPos(pos);
-    s->Draw();
+    s->DrawWithAnimation();
 }
 
 void CUIPdaWnd::DrawUpdatedSections()

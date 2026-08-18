@@ -1,21 +1,22 @@
 #include "stdafx.h"
 #include "UIListBox.h"
 #include "UIListBoxItem.h"
+#include "UIControlConfig.h"
 #include "UIScrollBar.h"
 
 CUIListBox::CUIListBox()
 {
     m_flags.set(eItemsSelectabe, TRUE);
 
-    m_def_item_height = 20;
+    m_def_item_height = UIControlConfig::ReadFloat("list_box", "item_height", 20.f);
     m_last_selection = -1;
-    m_text_color = 0xff000000;
-    m_text_color_s = 0xff000000;
+    m_text_color = UIControlConfig::ReadColor("list_box:text_color", 0xff000000);
+    m_text_color_s = UIControlConfig::ReadColor("list_box:selected_text_color", 0xff000000);
     m_text_al = CGameFont::alLeft;
 
-    m_bImmediateSelection = false;
+    m_bImmediateSelection = UIControlConfig::ReadBool("list_box", "immediate_selection", false);
 
-    SetFixedScrollBar(false);
+    SetFixedScrollBar(UIControlConfig::ReadBool("list_box", "fixed_scrollbar", false));
     Init();
 }
 
@@ -47,7 +48,9 @@ CUIListBoxItem* CUIListBox::AddItem(LPCSTR text)
         return NULL;
 
     CUIListBoxItem* pItem = xr_new<CUIListBoxItem>();
-    pItem->Init(0, 0, this->GetDesiredChildWidth() - 5, m_def_item_height);
+    pItem->Init(0, 0,
+                this->GetDesiredChildWidth() - UIControlConfig::ReadFloat("list_box", "item_right_margin", 5.f),
+                m_def_item_height);
     if (!m_selection_texture)
         pItem->InitDefault();
     else

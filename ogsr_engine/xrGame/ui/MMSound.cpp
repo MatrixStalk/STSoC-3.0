@@ -117,3 +117,17 @@ void CMMSound::SetMusic(const char* filename)
 
     music_Play();
 }
+
+void CUIMMSound::Init(CUIXml& xml_doc, LPCSTR path)
+{
+    m_sound.Init(xml_doc, path);
+    m_sound.music_Play();
+}
+
+void CUIMMSound::Update()
+{
+    m_sound.music_Update();
+    CUIWindow::Update();
+}
+
+void CUIMMSound::SetMusic(const char* filename) { m_sound.SetMusic(filename); }

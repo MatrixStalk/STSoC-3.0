@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "UIScrollView.h"
 #include "UIScrollBar.h"
+#include "UIControlConfig.h"
 #include "../ui_base.h"
 #include "../UICursor.h"
 #include "..\..\xr_3da\xr_input.h"
@@ -12,8 +13,11 @@ CUIScrollView::CUIScrollView()
     m_vertInterval = 0.0f;
     m_upIndent = 0.0f;
     m_downIndent = 0.0f;
+    m_scrollSmoothing = clampr(UIControlConfig::ReadFloat("scroll_view", "smoothing", .3f), 0.f, 1.f);
+    m_scrollStepDivisor = _max(1, UIControlConfig::ReadInt("scroll_view", "step_divisor", 10));
+    m_shiftWheelMultiplier = _max(1, UIControlConfig::ReadInt("scroll_view", "shift_wheel_multiplier", 3));
     m_flags.zero();
-    SetFixedScrollBar(true);
+    SetFixedScrollBar(UIControlConfig::ReadBool("scroll_view", "always_show_scroll", true));
     m_pad = NULL;
     m_VScrollBar = NULL;
 }
@@ -61,7 +65,7 @@ void CUIScrollView::Init()
         m_VScrollBar->Init(GetWndSize().x, 0.0f, GetWndSize().y, false);
     m_VScrollBar->SetWndPos(m_VScrollBar->GetWndPos().x - m_VScrollBar->GetWndSize().x, m_VScrollBar->GetWndPos().y);
     m_VScrollBar->SetWindowName("scroll_v");
-    m_VScrollBar->SetStepSize(_max(1, iFloor(GetHeight() / 10)));
+    m_VScrollBar->SetStepSize(_max(1, iFloor(GetHeight() / m_scrollStepDivisor)));
     m_VScrollBar->SetPageSize(iFloor(GetHeight()));
     m_VScrollBar->Show(false);
 }
@@ -99,7 +103,7 @@ void CUIScrollView::Update()
         RecalcSize();
 
     const Fvector2 w_pos = m_pad->GetWndPos();
-    m_pad->SetWndPos(w_pos.x, m_targetScrollPosition * 0.3 + w_pos.y * 0.7);
+    m_pad->SetWndPos(w_pos.x, m_targetScrollPosition * m_scrollSmoothing + w_pos.y * (1.f - m_scrollSmoothing));
 
     inherited::Update();
 }
@@ -199,7 +203,7 @@ void CUIScrollView::Draw()
         (*it)->GetAbsoluteRect(item_rect);
         if (visible_rect.intersected(item_rect))
         {
-            (*it)->Draw();
+            (*it)->DrawWithAnimation();
             bDone = true;
         }
         else if (bDone)
@@ -208,7 +212,7 @@ void CUIScrollView::Draw()
     UI()->PopScissor();
 
     if (NeedShowScrollBar())
-        m_VScrollBar->Draw();
+        m_VScrollBar->DrawWithAnimation();
 }
 
 bool CUIScrollView::NeedShowScrollBar() { return m_flags.test(eFixedScrollBar) || GetHeight() < m_pad->GetHeight(); }
@@ -234,19 +238,15 @@ bool CUIScrollView::OnMouse(float x, float y, EUIMessages mouse_action)
     case WINDOW_MOUSE_WHEEL_UP:
         m_VScrollBar->TryScrollDec();
         if (with_shift)
-        {
-            m_VScrollBar->TryScrollDec();
-            m_VScrollBar->TryScrollDec();
-        }
+            for (int i = 1; i < m_shiftWheelMultiplier; ++i)
+                m_VScrollBar->TryScrollDec();
         return true;
         break;
     case WINDOW_MOUSE_WHEEL_DOWN:
         m_VScrollBar->TryScrollInc();
         if (with_shift)
-        {
-            m_VScrollBar->TryScrollInc();
-            m_VScrollBar->TryScrollInc();
-        }
+            for (int i = 1; i < m_shiftWheelMultiplier; ++i)
+                m_VScrollBar->TryScrollInc();
         return true;
         break;
     case WINDOW_MOUSE_MOVE:

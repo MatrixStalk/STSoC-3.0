@@ -1,17 +1,18 @@
 #include "stdafx.h"
 #include "uiscrollbar.h"
 #include "UI3tButton.h"
+#include "UIControlConfig.h"
 #include "UIScrollBox.h"
 #include "UIXmlInit.h"
 #include "UITextureMaster.h"
 
 CUIScrollBar::CUIScrollBar()
 {
-    m_iMinPos = 1;
-    m_iMaxPos = 1;
-    m_iPageSize = 0;
-    m_iStepSize = 1;
-    m_iScrollPos = 0;
+    m_iMinPos = UIControlConfig::ReadInt("scroll_bar", "min", 1);
+    m_iMaxPos = UIControlConfig::ReadInt("scroll_bar", "max", 1);
+    m_iPageSize = UIControlConfig::ReadInt("scroll_bar", "page_size", 0);
+    m_iStepSize = UIControlConfig::ReadInt("scroll_bar", "step", 1);
+    m_iScrollPos = UIControlConfig::ReadInt("scroll_bar", "position", 0);
     m_b_enabled = true;
     m_DecButton = xr_new<CUI3tButton>();
     m_DecButton->SetAutoDelete(true);
@@ -33,7 +34,10 @@ void CUIScrollBar::Init(float x, float y, float length, bool bIsHorizontal, LPCS
     CUIXml xml_doc;
     R_ASSERT(xml_doc.Init(CONFIG_PATH, UI_PATH, "scroll_bar.xml"));
 
-    float height = xml_doc.ReadAttribFlt(profile, 0, "height", 16);
+    if (!profile || !profile[0])
+        profile = UIControlConfig::ReadString("scroll_bar", "profile", "default");
+
+    float height = xml_doc.ReadAttribFlt(profile, 0, "height", UIControlConfig::ReadFloat("scroll_bar", "height", 16.f));
 
     m_bIsHorizontal = bIsHorizontal;
 

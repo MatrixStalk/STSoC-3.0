@@ -90,9 +90,9 @@ void CUIZoneMap::Init()
 
 void CUIZoneMap::Render()
 {
-    m_clipFrame->Draw();
-    m_background->Draw();
-    m_compass->Draw();
+    m_clipFrame->DrawWithAnimation();
+    m_background->DrawWithAnimation();
+    m_compass->DrawWithAnimation();
 }
 
 void CUIZoneMap::SetHeading(float angle) const

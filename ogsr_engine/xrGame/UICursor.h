@@ -9,6 +9,8 @@ class CUICursor : public pureRender
 {
     bool bVisible{};
     Fvector2 vPos{}, vPrevPos{};
+    Fvector2 m_hotspot{};
+    float m_sensitivity{1.f};
     std::unique_ptr<CUIStatic> m_static;
 
     void InitInternal();

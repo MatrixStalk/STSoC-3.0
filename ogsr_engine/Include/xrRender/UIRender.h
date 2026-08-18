@@ -37,6 +37,11 @@ public:
     virtual void SetShader(IUIShader& shader) = 0;
     virtual void SetAlphaRef(int aref) = 0;
 
+    virtual void SetAnimationAlpha(float alpha) = 0;
+    virtual float GetAnimationAlpha() const = 0;
+    virtual void SetAnimationOffset(float x, float y) = 0;
+    virtual Fvector2 GetAnimationOffset() const = 0;
+
     virtual void SetScissor(Irect* rect = nullptr) = 0;
     virtual void GetActiveTextureResolution(Fvector2& res) = 0;
 

@@ -192,7 +192,7 @@ bool SDrawStaticStruct::IsActual()
 void SDrawStaticStruct::Draw()
 {
     if (m_static && m_static->IsShown())
-        m_static->Draw();
+        m_static->DrawWithAnimation();
 }
 
 void SDrawStaticStruct::Update()

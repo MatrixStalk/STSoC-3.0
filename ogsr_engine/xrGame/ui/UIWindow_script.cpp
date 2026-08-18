@@ -7,6 +7,7 @@
 #include "../GamePersistent.h"
 #include "UILabel.h"
 #include "UIMMShniaga.h"
+#include "MMSound.h"
 #include "UITextureMaster.h"
 #include "UIScrollView.h"
 #include "UIIconParams.h"
@@ -115,7 +116,20 @@ void CUIWindow::script_register(lua_State* L)
                   .def("Enable", &CUIWindow::Enable)
                   .def("IsEnabled", &CUIWindow::IsEnabled)
                   .def("Show", &CUIWindow::Show)
+                  .def("ShowImmediate", &CUIWindow::ShowImmediate)
                   .def("IsShown", &CUIWindow::IsShown)
+                  .def("IsAnimating", &CUIWindow::IsAnimating)
+                  .def("SetAnimationPreset", &CUIWindow::SetAnimationPreset)
+                  .def("SetAnimationPresets", &CUIWindow::SetAnimationPresets)
+                  .def("SetAnimationTimes", &CUIWindow::SetAnimationTimes)
+                  .def("SetAnimationDelay", &CUIWindow::SetAnimationDelay)
+                  .def("SetAnimationDistance", &CUIWindow::SetAnimationDistance)
+                  .def("SetMotionEffect", &CUIWindow::SetMotionEffect)
+                  .def("SetMotionMouseStrength", &CUIWindow::SetMotionMouseStrength)
+                  .def("SetMotionAutoStrength", &CUIWindow::SetMotionAutoStrength)
+                  .def("SetMotionSpeed", &CUIWindow::SetMotionSpeed)
+                  .def("SetMotionSmoothing", &CUIWindow::SetMotionSmoothing)
+                  .def("SetMotionPhase", &CUIWindow::SetMotionPhase)
                   .def("SetFont", &CUIWindow::SetFont)
                   .def("GetFont", &CUIWindow::GetFont)
 
@@ -170,6 +184,8 @@ void CUIWindow::script_register(lua_State* L)
               class_<CUIMMShniaga, CUIWindow>("CUIMMShniaga")
                   .def("SetVisibleMagnifier", &CUIMMShniaga::SetVisibleMagnifier)
                   .def("SetMusic", [](CUIMMShniaga* self, const char* filename) { self->m_sound->SetMusic(filename); }),
+
+              class_<CUIMMSound, CUIWindow>("CUIMMSound").def("SetMusic", &CUIMMSound::SetMusic),
 
               class_<CUIScrollView, CUIWindow>("CUIScrollView")
                   .def(constructor<>())

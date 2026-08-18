@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<controls>
+	<!-- Global defaults. Attributes in a window's own XML take priority. -->
+	<button push_offset_x="0" push_offset_y="0" text_highlighting="0"
+		use_disabled_text_color="1" use_highlighted_text_color="0" use_pressed_text_color="0">
+		<text_enabled a="255" r="255" g="255" b="255"/>
+		<text_disabled a="255" r="170" g="170" b="170"/>
+		<text_highlighted a="255" r="255" g="255" b="255"/>
+		<text_pressed a="255" r="255" g="255" b="255"/>
+	</button>
+
+	<check_button texture="ui_checker" use_xml_size="1" stretch="0"
+		text_offset="0" height_adjust="-5"/>
+
+	<track_bar height="21" frame_texture="ui_slider_e"
+		frame_disabled_texture="ui_slider_d" thumb_texture="ui_slider_button"
+		step="0.1" integer="0" invert="0"/>
+
+	<list item_height="30" active_background="0" scroll_profile="default"
+		always_show_scroll="0" always_hide_scroll="0" flip_vertical="0">
+		<text_color a="255" r="255" g="255" b="255"/>
+	</list>
+
+	<list_box item_height="20" item_right_margin="5" default_texture="ui_listline"
+		immediate_selection="0" fixed_scrollbar="0" enabled_alpha="255" disabled_alpha="128">
+		<text_color a="255" r="0" g="0" b="0"/>
+		<selected_text_color a="255" r="0" g="0" b="0"/>
+	</list_box>
+
+	<scroll_bar profile="default" height="16" min="1" max="1" page_size="0" step="1" position="0"/>
+
+	<scroll_view right_indent="0" left_indent="0" top_indent="0" bottom_indent="0"
+		vertical_interval="0" inverse_direction="0" scroll_profile="default"
+		flip_vertical="0" always_show_scroll="1" can_select="0"
+		smoothing="0.3" step_divisor="10" shift_wheel_multiplier="3"/>
+
+	<combo_box height="23" list_length="4" list_extra_height="1"
+		frame_texture="ui_cb_linetext_e" frame_highlight_texture="ui_cb_linetext_h"
+		list_line_texture="ui_cb_listline_b" selection_texture="ui_cb_listline"
+		list_frame_texture="ui_cb_listbox" always_show_scroll="1">
+		<text_enabled a="255" r="0" g="255" b="0"/>
+		<text_disabled a="255" r="170" g="170" b="170"/>
+	</combo_box>
+</controls>

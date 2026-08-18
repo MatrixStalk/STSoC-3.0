@@ -9,12 +9,10 @@
 
 #include "StdAfx.h"
 #include "UIComboBox.h"
+#include "UIControlConfig.h"
 #include "UITextureMaster.h"
 #include "UIScrollBar.h"
 #include <dinput.h>
-
-#define CB_HEIGHT 23.0f
-#define BTN_SIZE 23.0f
 
 CUIComboBox::CUIComboBox()
 {
@@ -30,7 +28,8 @@ CUIComboBox::CUIComboBox()
     m_bInited = false;
     m_eState = LIST_FONDED;
 
-    m_textColor[0] = 0xff00ff00;
+    m_textColor[0] = UIControlConfig::ReadColor("combo_box:text_enabled", 0xff00ff00);
+    m_textColor[1] = UIControlConfig::ReadColor("combo_box:text_disabled", 0xffaaaaaa);
 }
 
 CUIComboBox::~CUIComboBox() {}
@@ -45,33 +44,37 @@ void CUIComboBox::Init(float x, float y, float width)
 {
     m_bInited = true;
     if (0 == m_iListHeight)
-        m_iListHeight = 4;
+        m_iListHeight = UIControlConfig::ReadInt("combo_box", "list_length", 4);
+
+    const float height = UIControlConfig::ReadFloat("combo_box", "height", 23.f);
 
     //.	width								-= BTN_SIZE;
 
-    CUIWindow::Init(x, y, width, CB_HEIGHT);
+    CUIWindow::Init(x, y, width, height);
     // Frame Line
-    m_frameLine.Init(0, 0, width, CB_HEIGHT);
-    m_frameLine.InitEnabledState("ui_cb_linetext_e"); // horizontal by default
-    m_frameLine.InitHighlightedState("ui_cb_linetext_h");
+    m_frameLine.Init(0, 0, width, height);
+    m_frameLine.InitEnabledState(UIControlConfig::ReadString("combo_box", "frame_texture", "ui_cb_linetext_e")); // horizontal by default
+    m_frameLine.InitHighlightedState(UIControlConfig::ReadString("combo_box", "frame_highlight_texture", "ui_cb_linetext_h"));
 
     // Edit Box on left side of frame line
-    m_text.Init(0, 0, width, CB_HEIGHT);
+    m_text.Init(0, 0, width, height);
     m_text.SetTextColor(m_textColor[0]);
     m_text.Enable(false);
     // Button on right side of frame line
     //.	m_btn.Init							("ui_cb_button", width, 0, BTN_SIZE, BTN_SIZE);
 
     // height of list equal to height of ONE element
-    float item_height = CUITextureMaster::GetTextureHeight("ui_cb_listline_b");
-    m_list.Init(0, CB_HEIGHT, width, item_height * m_iListHeight + 1); // to fix issue with 1px scroll - add 1 px to height
+    const LPCSTR list_line_texture = UIControlConfig::ReadString("combo_box", "list_line_texture", "ui_cb_listline_b");
+    float item_height = CUITextureMaster::GetTextureHeight(list_line_texture);
+    m_list.Init(0, height, width,
+                item_height * m_iListHeight + UIControlConfig::ReadFloat("combo_box", "list_extra_height", 1.f));
     m_list.Init();
     m_list.SetTextColor(m_textColor[0]);
-    m_list.SetSelectionTexture("ui_cb_listline");
+    m_list.SetSelectionTexture(UIControlConfig::ReadString("combo_box", "selection_texture", "ui_cb_listline"));
     m_list.SetItemHeight(item_height);
     // frame(texture) for list
-    m_frameWnd.Init(0, CB_HEIGHT, width, m_list.GetItemHeight() * m_iListHeight);
-    m_frameWnd.InitTexture("ui_cb_listbox");
+    m_frameWnd.Init(0, height, width, m_list.GetItemHeight() * m_iListHeight);
+    m_frameWnd.InitTexture(UIControlConfig::ReadString("combo_box", "list_frame_texture", "ui_cb_listbox"));
 
     m_list.Show(false);
     m_frameWnd.Show(false);

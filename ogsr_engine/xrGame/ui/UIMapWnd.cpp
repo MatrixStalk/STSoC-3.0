@@ -353,7 +353,7 @@ void CUIMapWnd::SetTargetMap(CUICustomMap* m, const Fvector2& pos, bool bZoomIn)
 void CUIMapWnd::Draw()
 {
     inherited::Draw();
-    m_text_hint->Draw();
+    m_text_hint->DrawWithAnimation();
     if (m_hint->GetOwner())
         m_hint->Draw_();
 }

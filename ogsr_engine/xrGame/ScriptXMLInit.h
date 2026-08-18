@@ -26,6 +26,7 @@ class CUIAnimatedStatic;
 class CUIArtefactPanel;
 class CUITrackBar;
 class CUIMMShniaga;
+class CUIMMSound;
 class CUIScrollView;
 class CUIProgressBar;
 
@@ -40,6 +41,7 @@ public:
 
     void ParseFile(LPCSTR xml_file);
     void ParseShTexInfo(LPCSTR xml_file);
+    bool NodeExist(LPCSTR path);
 
     void InitWindow(LPCSTR path, int index, CUIWindow* pWnd);
     void InitAutoStaticGroup(LPCSTR path, CUIWindow* pWnd);
@@ -62,6 +64,7 @@ public:
     CUITabControl* InitTab(LPCSTR path, CUIWindow* parent);
     CUITrackBar* InitTrackBar(LPCSTR path, CUIWindow* parent);
     CUIMMShniaga* InitMMShniaga(LPCSTR path, CUIWindow* parent);
+    CUIMMSound* InitMMSound(LPCSTR path, CUIWindow* parent);
     CUIWindow* InitKeyBinding(LPCSTR path, CUIWindow* parent);
     CUIScrollView* InitScrollView(LPCSTR path, CUIWindow* parent);
     CUIProgressBar* InitProgressBar(LPCSTR path, CUIWindow* parent);

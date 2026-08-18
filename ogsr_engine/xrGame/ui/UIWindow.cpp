@@ -34,6 +34,35 @@ BOOL g_show_wnd_rect = FALSE;
 BOOL g_show_wnd_rect2 = FALSE;
 BOOL g_show_wnd_rect_text = FALSE;
 
+namespace
+{
+bool g_bypass_window_animations = false;
+
+Fvector2 animation_offset(CUIWindow::EAnimationPreset preset, float distance)
+{
+    Fvector2 result{};
+    switch (preset)
+    {
+    case CUIWindow::EAnimationPreset::SlideLeft: result.x = -distance; break;
+    case CUIWindow::EAnimationPreset::SlideRight: result.x = distance; break;
+    case CUIWindow::EAnimationPreset::SlideUp: result.y = -distance; break;
+    case CUIWindow::EAnimationPreset::SlideDown: result.y = distance; break;
+    default: break;
+    }
+    return result;
+}
+
+float animation_curve(CUIWindow::EAnimationPreset preset, float value)
+{
+    value = clampr(value, 0.f, 1.f);
+    if (preset == CUIWindow::EAnimationPreset::Fade)
+        return value;
+
+    // Smootherstep keeps the first and last frames free of visible jumps.
+    return value * value * value * (value * (value * 6.f - 15.f) + 10.f);
+}
+} // namespace
+
 void clean_wnd_rects() { DRender->DestroyDebugShader(IDebugRender::dbgShaderWindow); }
 
 static void add_rect_to_draw(const Frect& r, const shared_str& windowName) { g_wnds_rects.emplace_back(windowName, r); }
@@ -105,7 +134,7 @@ CUIWindow::CUIWindow()
     m_pKeyboardCapturer = NULL;
     SetWndRect(0, 0, 0, 0);
     m_bAutoDelete = false;
-    Show(true);
+    SetVisible(true);
     Enable(true);
     m_bCursorOverWindow = false;
     m_bCursorOverWindowChanged = false;
@@ -163,14 +192,16 @@ void CUIWindow::Draw()
 {
     for (WINDOW_LIST_it it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
     {
-        if (!(*it)->IsShown())
+        if (!(*it)->IsVisibleForRender())
             continue;
 
         if ((*it)->GetCustomDraw())
             continue;
 
-        (*it)->Draw();
+        (*it)->DrawWithAnimation();
     }
+
+    m_wasDrawn = true;
 
     if (g_show_wnd_rect2)
     {
@@ -180,10 +211,46 @@ void CUIWindow::Draw()
     }
 }
 
+void CUIWindow::DrawWithAnimation()
+{
+    if (g_bypass_window_animations)
+    {
+        Draw();
+        m_wasDrawn = true;
+        return;
+    }
+
+    const float previous_alpha = UIRender->GetAnimationAlpha();
+    const Fvector2 previous_offset = UIRender->GetAnimationOffset();
+    UIRender->SetAnimationAlpha(_min(previous_alpha, m_animationAlpha));
+    UIRender->SetAnimationOffset(previous_offset.x + m_animationOffset.x + m_motionOffset.x,
+                                 previous_offset.y + m_animationOffset.y + m_motionOffset.y);
+    Draw();
+    UIRender->SetAnimationAlpha(previous_alpha);
+    UIRender->SetAnimationOffset(previous_offset.x, previous_offset.y);
+    m_wasDrawn = true;
+}
+
+void CUIWindow::DrawWithoutAnimation()
+{
+    const bool previous_bypass = g_bypass_window_animations;
+    const float previous_alpha = UIRender->GetAnimationAlpha();
+    const Fvector2 previous_offset = UIRender->GetAnimationOffset();
+
+    g_bypass_window_animations = true;
+    UIRender->SetAnimationAlpha(1.f);
+    UIRender->SetAnimationOffset(0.f, 0.f);
+    Draw();
+    UIRender->SetAnimationAlpha(previous_alpha);
+    UIRender->SetAnimationOffset(previous_offset.x, previous_offset.y);
+    g_bypass_window_animations = previous_bypass;
+    m_wasDrawn = true;
+}
+
 void CUIWindow::Draw(float x, float y)
 {
     SetWndPos(x, y);
-    Draw();
+    DrawWithAnimation();
 }
 
 bool CUIWindow::CapturesFocusToo() { return GetMouseCapturer() ? GetMouseCapturer()->CapturesFocusToo() : true; }
@@ -242,9 +309,227 @@ void CUIWindow::CommitFocus(bool focus_lost)
 
 void CUIWindow::Update()
 {
+    UpdateAnimation();
+    UpdateMotion();
+
     for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
-        if ((*it)->IsShown())
+        if ((*it)->IsVisibleForRender())
             (*it)->Update();
+}
+
+CUIWindow::EMotionEffect CUIWindow::ParseMotionEffect(LPCSTR effect)
+{
+    if (!effect || !effect[0] || 0 == xr_strcmp(effect, "none"))
+        return EMotionEffect::None;
+    if (0 == xr_strcmp(effect, "parallax"))
+        return EMotionEffect::Parallax;
+    if (0 == xr_strcmp(effect, "panorama"))
+        return EMotionEffect::Panorama;
+
+    Msg("! Unknown UI motion effect [%s], using [none]", effect);
+    return EMotionEffect::None;
+}
+
+void CUIWindow::SetMotionEffect(LPCSTR effect)
+{
+    m_motionEffect = ParseMotionEffect(effect);
+
+    switch (m_motionEffect)
+    {
+    case EMotionEffect::Parallax:
+        m_motionMouseStrength.set(8.f, 5.f);
+        m_motionAutoStrength.set(1.2f, .8f);
+        m_motionSpeed = .35f;
+        m_motionSmoothing = 8.f;
+        break;
+    case EMotionEffect::Panorama:
+        m_motionMouseStrength.set(14.f, 7.f);
+        m_motionAutoStrength.set(8.f, 2.5f);
+        m_motionSpeed = .1f;
+        m_motionSmoothing = 4.f;
+        break;
+    default:
+        m_motionMouseStrength.set(0.f, 0.f);
+        m_motionAutoStrength.set(0.f, 0.f);
+        m_motionSpeed = 0.f;
+        m_motionOffset.set(0.f, 0.f);
+        break;
+    }
+}
+
+void CUIWindow::SetMotionMouseStrength(float x, float y) { m_motionMouseStrength.set(x, y); }
+void CUIWindow::SetMotionAutoStrength(float x, float y) { m_motionAutoStrength.set(x, y); }
+void CUIWindow::SetMotionSpeed(float cycles_per_second) { m_motionSpeed = _max(cycles_per_second, 0.f); }
+void CUIWindow::SetMotionSmoothing(float smoothing) { m_motionSmoothing = _max(smoothing, 0.f); }
+void CUIWindow::SetMotionPhase(float degrees) { m_motionPhase = degrees; }
+
+void CUIWindow::UpdateMotion()
+{
+    if (m_motionEffect == EMotionEffect::None)
+    {
+        m_motionOffset.set(0.f, 0.f);
+        return;
+    }
+
+    const Fvector2 cursor = GetUICursor()->GetCursorPosition();
+    const float cursor_x = clampr(cursor.x / (UI_BASE_WIDTH * .5f) - 1.f, -1.f, 1.f);
+    const float cursor_y = clampr(cursor.y / (UI_BASE_HEIGHT * .5f) - 1.f, -1.f, 1.f);
+    const float phase = m_motionPhase * (PI / 180.f);
+    const float angle = Device.dwTimeContinual * .001f * m_motionSpeed * PI_MUL_2 + phase;
+
+    Fvector2 target;
+    target.x = -cursor_x * m_motionMouseStrength.x + _sin(angle) * m_motionAutoStrength.x;
+    target.y = -cursor_y * m_motionMouseStrength.y + _cos(angle * .83f + phase) * m_motionAutoStrength.y;
+
+    const float dt = clampr(Device.fTimeDelta, 0.f, .1f);
+    const float blend = m_motionSmoothing > 0.f ? 1.f - expf(-m_motionSmoothing * dt) : 1.f;
+    m_motionOffset.x += (target.x - m_motionOffset.x) * blend;
+    m_motionOffset.y += (target.y - m_motionOffset.y) * blend;
+}
+
+CUIWindow::EAnimationPreset CUIWindow::ParseAnimationPreset(LPCSTR preset)
+{
+    if (!preset || !preset[0] || 0 == xr_strcmp(preset, "curve_fade") || 0 == xr_strcmp(preset, "curve-fade"))
+        return EAnimationPreset::CurveFade;
+    if (0 == xr_strcmp(preset, "none") || 0 == xr_strcmp(preset, "instant"))
+        return EAnimationPreset::None;
+    if (0 == xr_strcmp(preset, "fade"))
+        return EAnimationPreset::Fade;
+    if (0 == xr_strcmp(preset, "slide_left") || 0 == xr_strcmp(preset, "slide-left"))
+        return EAnimationPreset::SlideLeft;
+    if (0 == xr_strcmp(preset, "slide_right") || 0 == xr_strcmp(preset, "slide-right"))
+        return EAnimationPreset::SlideRight;
+    if (0 == xr_strcmp(preset, "slide_up") || 0 == xr_strcmp(preset, "slide-up"))
+        return EAnimationPreset::SlideUp;
+    if (0 == xr_strcmp(preset, "slide_down") || 0 == xr_strcmp(preset, "slide-down"))
+        return EAnimationPreset::SlideDown;
+
+    Msg("! Unknown UI animation preset [%s], using [curve_fade]", preset);
+    return EAnimationPreset::CurveFade;
+}
+
+void CUIWindow::SetAnimationPreset(LPCSTR preset) { SetAnimationPresets(preset, preset); }
+
+void CUIWindow::SetAnimationPresets(LPCSTR show_preset, LPCSTR hide_preset)
+{
+    m_showAnimation = ParseAnimationPreset(show_preset);
+    m_hideAnimation = ParseAnimationPreset(hide_preset);
+
+    if (m_animationState == EAnimationState::Showing && fis_zero(m_animationAlpha))
+        m_animationStartOffset = m_animationOffset = animation_offset(m_showAnimation, m_animationDistance);
+
+    if ((m_requestedVisible && m_showAnimation == EAnimationPreset::None) || (!m_requestedVisible && m_hideAnimation == EAnimationPreset::None))
+        ShowImmediate(m_requestedVisible);
+}
+
+void CUIWindow::SetAnimationTimes(float show_time_ms, float hide_time_ms)
+{
+    m_showAnimationTime = _max(show_time_ms, 0.f);
+    m_hideAnimationTime = _max(hide_time_ms, 0.f);
+}
+
+void CUIWindow::SetAnimationDelay(float delay_ms) { m_animationDelay = _max(delay_ms, 0.f); }
+
+void CUIWindow::SetAnimationDistance(float distance)
+{
+    m_animationDistance = _max(distance, 0.f);
+    if (m_animationState == EAnimationState::Showing && !m_animationStarted)
+        m_animationStartOffset = m_animationOffset = animation_offset(m_showAnimation, m_animationDistance);
+}
+
+void CUIWindow::ShowImmediate(bool status)
+{
+    m_requestedVisible = status;
+    m_animationState = EAnimationState::Idle;
+    m_animationStarted = false;
+    m_animationAlpha = status ? 1.f : 0.f;
+    m_animationOffset.set(0.f, 0.f);
+    SetVisible(status);
+    Enable(status);
+}
+
+void CUIWindow::Show(bool status)
+{
+    if (status == m_requestedVisible)
+    {
+        if (status)
+        {
+            SetVisible(true);
+            Enable(true);
+        }
+        return;
+    }
+
+    // Layout code commonly hides optional tabs before their first frame. Those
+    // windows must never flash while the interface is being assembled.
+    if (!status && !m_wasDrawn)
+    {
+        ShowImmediate(false);
+        return;
+    }
+
+    StartAnimation(status);
+}
+
+void CUIWindow::StartAnimation(bool show)
+{
+    m_requestedVisible = show;
+    Enable(show);
+
+    const EAnimationPreset preset = show ? m_showAnimation : m_hideAnimation;
+    const float duration = show ? m_showAnimationTime : m_hideAnimationTime;
+    if (preset == EAnimationPreset::None || fis_zero(duration))
+    {
+        ShowImmediate(show);
+        return;
+    }
+
+    SetVisible(true);
+    m_animationState = show ? EAnimationState::Showing : EAnimationState::Hiding;
+    m_animationStarted = false;
+    m_animationStartAlpha = m_animationAlpha;
+    m_animationStartOffset = m_animationOffset;
+
+    if (show && fis_zero(m_animationStartAlpha))
+        m_animationStartOffset = m_animationOffset = animation_offset(preset, m_animationDistance);
+
+    m_animationTargetOffset = show ? Fvector2{} : animation_offset(preset, m_animationDistance);
+}
+
+void CUIWindow::UpdateAnimation()
+{
+    if (m_animationState == EAnimationState::Idle)
+        return;
+
+    const EAnimationPreset preset = m_animationState == EAnimationState::Showing ? m_showAnimation : m_hideAnimation;
+    const float duration = m_animationState == EAnimationState::Showing ? m_showAnimationTime : m_hideAnimationTime;
+
+    if (!m_animationStarted)
+    {
+        m_animationStartTime = Device.dwTimeContinual;
+        m_animationStarted = true;
+    }
+
+    const float elapsed = static_cast<float>(Device.dwTimeContinual - m_animationStartTime);
+    if (elapsed < m_animationDelay)
+        return;
+
+    const float progress = duration > 0.f ? (elapsed - m_animationDelay) / duration : 1.f;
+    const float curve = animation_curve(preset, progress);
+    const float target_alpha = m_animationState == EAnimationState::Showing ? 1.f : 0.f;
+    m_animationAlpha = m_animationStartAlpha + (target_alpha - m_animationStartAlpha) * curve;
+    m_animationOffset.x = m_animationStartOffset.x + (m_animationTargetOffset.x - m_animationStartOffset.x) * curve;
+    m_animationOffset.y = m_animationStartOffset.y + (m_animationTargetOffset.y - m_animationStartOffset.y) * curve;
+
+    if (progress < 1.f)
+        return;
+
+    const bool shown = m_animationState == EAnimationState::Showing;
+    m_animationState = EAnimationState::Idle;
+    m_animationStarted = false;
+    m_animationAlpha = shown ? 1.f : 0.f;
+    m_animationOffset.set(0.f, 0.f);
+    SetVisible(shown);
 }
 
 void CUIWindow::AttachChild(CUIWindow* pChild, bool bottom)

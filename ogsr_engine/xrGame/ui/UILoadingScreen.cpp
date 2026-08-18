@@ -75,7 +75,11 @@ void UILoadingScreen::Update(const int stagesCompleted, const int stagesTotal)
     }
 
     CUIWindow::Update();
-    Draw();
+
+    // LoadDraw runs outside the regular UI frame loop. Bypass the animation
+    // wrapper for this entire tree so early loading stages cannot inherit a
+    // zero alpha or offset from an unfinished menu transition.
+    DrawWithoutAnimation();
 }
 
 void UILoadingScreen::ForceFinish()
@@ -156,6 +160,8 @@ void UILoadingScreen::SetStageTip()
     }
 }
 
-void UILoadingScreen::Show(bool status) { CUIWindow::Show(status); }
+// The loading screen is driven outside the regular UI update loop, so it must
+// remain immediate. Regular windows animate through CUIWindow::Show().
+void UILoadingScreen::Show(bool status) { CUIWindow::ShowImmediate(status); }
 
 bool UILoadingScreen::IsShown() { return CUIWindow::IsShown(); }

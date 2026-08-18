@@ -95,8 +95,8 @@ bool CUI::Render()
     {
         if (GameIndicatorsShown())
         {
-            UIMainIngameWnd->Draw();
-            m_pMessagesWnd->Draw();
+            UIMainIngameWnd->DrawWithAnimation();
+            m_pMessagesWnd->DrawWithAnimation();
         }
         // Оставил рендер новостей под этим условием чтобы при скриптовом скрытии ui сообщения продолжали быть видны,
         // а при скрытии с клавиатуры - нет. Способ кривоватый но посмотрим, мб и так пойдет.
@@ -105,10 +105,10 @@ bool CUI::Render()
             if (auto gSP = smart_cast<CUIGameSP*>(HUD().GetUI()->UIGame()))
             {
                 if (!gSP->PdaMenu->GetVisible())
-                    m_pMessagesWnd->Draw();
+                    m_pMessagesWnd->DrawWithAnimation();
             }
             else
-                m_pMessagesWnd->Draw();
+                m_pMessagesWnd->DrawWithAnimation();
         }
     }
 

@@ -17,13 +17,39 @@ end
 
 function main_menu:InitControls()
 	self:Init(0, 0, 1024, 768)			  
+	self:SetAnimationPreset("curve_fade")
+	self:SetAnimationTimes(520, 220)
+	self:SetAnimationDelay(180)
+
 	local xml = CScriptXmlInit()
 	xml:ParseFile("ui_mm_main.xml")
 
 	xml:InitStatic("back_movie", self)
 	xml:InitStatic("background", self)
 	xml:InitStatic("fire_movie", self)
-	self.shniaga = xml:InitMMShniaga("shniaga_wnd", self)
+	self.menu_sound = xml:InitMMSound("menu_sound", self)
+
+	local main_menu_path
+	if level.present() then
+		if db.actor and not db.actor:alive() then
+			main_menu_path = "menu_main_single_dead"
+		else
+			main_menu_path = "menu_main_single"
+		end
+	elseif has_valid_last_save() then
+		main_menu_path = "menu_main_last_save"
+	else
+		main_menu_path = "menu_main"
+	end
+
+	self.main_buttons = self:InitButtonMenu(xml, main_menu_path, {
+		"btn_new_game", "btn_ret", "btn_lastsave", "btn_load", "btn_save",
+		"btn_options", "btn_credits", "btn_quit_to_mm", "btn_quit"
+	})
+	self.new_game_buttons = self:InitButtonMenu(xml, "menu_new_game", {
+		"btn_novice", "btn_stalker", "btn_veteran", "btn_master", "btn_new_back"
+	})
+	self:SetButtonMenu(self.main_buttons)
 
 	self.message_box = CUIMessageBoxEx()
 	self:Register(self.message_box, "msg_box")	
@@ -33,11 +59,58 @@ function main_menu:InitControls()
 	ver:SetTextColor(255, 255, 0, 0)
 end
 
-function main_menu:Show(...)
-	self.shniaga:SetVisibleMagnifier(...)
+function main_menu:InitButtonMenu(xml, path, button_names)
+	if not xml:NodeExist(path) then
+		return nil
+	end
+
+	local menu = CUIWindow()
+	xml:InitWindow(path, 0, menu)
+	menu:SetAutoDelete(true)
+	self:AttachChild(menu)
+
+	for _, name in ipairs(button_names) do
+		local button_path = path .. ":" .. name
+		if xml:NodeExist(button_path) then
+			local button = xml:Init3tButton(button_path, menu)
+			self:Register(button, name)
+		end
+	end
+
+	menu:Show(false)
+	return menu
+end
+
+function main_menu:SetButtonMenu(menu)
+	if self.current_button_menu then
+		self.current_button_menu:Show(false)
+	end
+
+	self.current_button_menu = menu
+	if self.current_button_menu then
+		self.current_button_menu:Show(true)
+	end
+end
+
+function main_menu:Show(visible)
+	if self.current_button_menu then
+		self.current_button_menu:Show(visible)
+	end
+end
+
+function main_menu:OnButton_new_game_clicked()
+	if self.new_game_buttons then
+		self:SetButtonMenu(self.new_game_buttons)
+	end
+end
+
+function main_menu:OnButton_new_back_clicked()
+	self:SetButtonMenu(self.main_buttons)
 end
 
 function main_menu:InitCallBacks()
+	self:AddCallback("btn_new_game", ui_events.BUTTON_CLICKED, self.OnButton_new_game_clicked, self)
+	self:AddCallback("btn_new_back", ui_events.BUTTON_CLICKED, self.OnButton_new_back_clicked, self)
 	-- new game
 	self:Connect("btn_novice",  ui_events.BUTTON_CLICKED, self.StartGame, self, "gd_novice")
 	self:Connect("btn_stalker", ui_events.BUTTON_CLICKED, self.StartGame, self, "gd_stalker")
@@ -163,6 +236,11 @@ function main_menu:OnKeyboard(dik, keyboard_action)
 	CUIScriptWnd.OnKeyboard(self, dik, keyboard_action)
 
 	if keyboard_action == ui_events.WINDOW_KEY_PRESSED then
+		if dik_to_bind(dik) == key_bindings.kQUIT and self.current_button_menu == self.new_game_buttons then
+			self:SetButtonMenu(self.main_buttons)
+			return true
+		end
+
 		if dik_to_bind(dik) == key_bindings.kQUIT then
 			if level.present() and db.actor_proxy.online and db.actor:alive() then
 				self:close_and_delete_menu()

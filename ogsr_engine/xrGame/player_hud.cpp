@@ -14,16 +14,95 @@ namespace
 {
 constexpr LPCSTR source_root_bone = "valvebiped.bip01_spine4";
 constexpr LPCSTR source_l_clavicle = "valvebiped.bip01_l_clavicle";
+constexpr LPCSTR source_l_upperarm = "valvebiped.bip01_l_upperarm";
+constexpr LPCSTR source_l_forearm = "valvebiped.bip01_l_forearm";
+constexpr LPCSTR source_l_hand = "valvebiped.bip01_l_hand";
 constexpr LPCSTR source_r_clavicle = "valvebiped.bip01_r_clavicle";
+constexpr LPCSTR source_r_upperarm = "valvebiped.bip01_r_upperarm";
+constexpr LPCSTR source_r_forearm = "valvebiped.bip01_r_forearm";
+constexpr LPCSTR source_r_hand = "valvebiped.bip01_r_hand";
 constexpr LPCSTR source_r_thumb0 = "valvebiped.bip01_r_finger0";
 constexpr LPCSTR source_r_thumb01 = "valvebiped.bip01_r_finger01";
 constexpr LPCSTR source_r_thumb02 = "valvebiped.bip01_r_finger02";
 constexpr LPCSTR source_camera_bone = "camera";
 
+u16 source_motion_bone_id(const IKinematics* skeleton, LPCSTR valve_bone_name)
+{
+    if (!skeleton || !valve_bone_name)
+        return BI_NONE;
+
+    // Some Source HUD exports retain ValveBiped bones as non-deforming leaf
+    // markers while the actual animated hierarchy is named Base Human*. Use
+    // the real hierarchy for connected local-space retargeting. The marker
+    // transforms are consumed separately as arm IK landmarks.
+    const bool base_human_rig = skeleton->LL_BoneID("base humanlcollarbone") != BI_NONE &&
+        skeleton->LL_BoneID("base humanrcollarbone") != BI_NONE;
+    constexpr LPCSTR valve_prefix = "valvebiped.bip01_";
+    const size_t valve_prefix_length = xr_strlen(valve_prefix);
+    if (base_human_rig && !strncmp(valve_bone_name, valve_prefix, valve_prefix_length))
+    {
+        const char side = valve_bone_name[valve_prefix_length];
+        LPCSTR valve_suffix = valve_bone_name + valve_prefix_length + 2;
+        LPCSTR base_suffix = nullptr;
+
+        struct bone_alias
+        {
+            LPCSTR valve;
+            LPCSTR base;
+        };
+        static constexpr bone_alias aliases[] = {
+            {"clavicle", "collarbone"},
+            {"upperarm", "upperarm"},
+            {"forearm", "forearm1"},
+            {"hand", "palm"},
+            {"finger0", "digit11"},
+            {"finger01", "digit12"},
+            {"finger02", "digit13"},
+            {"finger1", "digit21"},
+            {"finger11", "digit22"},
+            {"finger12", "digit23"},
+            {"finger2", "digit31"},
+            {"finger21", "digit32"},
+            {"finger22", "digit33"},
+            {"finger3", "digit41"},
+            {"finger31", "digit42"},
+            {"finger32", "digit43"},
+            {"finger4", "digit51"},
+            {"finger41", "digit52"},
+            {"finger42", "digit53"},
+        };
+
+        for (const bone_alias& alias : aliases)
+        {
+            if (!xr_strcmp(valve_suffix, alias.valve))
+            {
+                base_suffix = alias.base;
+                break;
+            }
+        }
+
+        if ((side == 'l' || side == 'r') && base_suffix)
+        {
+            string128 base_bone_name;
+            xr_sprintf(base_bone_name, "base human%c%s", side, base_suffix);
+            if (const u16 bone_id = skeleton->LL_BoneID(base_bone_name); bone_id != BI_NONE)
+                return bone_id;
+        }
+    }
+
+    return skeleton->LL_BoneID(valve_bone_name);
+}
+
+bool is_base_human_hud_skeleton(const IKinematics* skeleton)
+{
+    return skeleton && skeleton->LL_BoneID("base humanlcollarbone") != BI_NONE &&
+        skeleton->LL_BoneID("base humanrcollarbone") != BI_NONE;
+}
+
 bool is_source_hud_skeleton(const IKinematics* skeleton)
 {
-    return skeleton && skeleton->LL_BoneID(source_root_bone) != BI_NONE && skeleton->LL_BoneID(source_l_clavicle) != BI_NONE &&
-        skeleton->LL_BoneID(source_r_clavicle) != BI_NONE;
+    return skeleton && skeleton->LL_BoneID(source_root_bone) != BI_NONE && source_motion_bone_id(skeleton, source_l_clavicle) != BI_NONE &&
+        source_motion_bone_id(skeleton, source_r_clavicle) != BI_NONE;
 }
 
 u16 hud_bone_id(const IKinematics* skeleton, LPCSTR bone_name)
@@ -68,16 +147,17 @@ bool is_source_arm_bone(LPCSTR bone_name)
     return bone_name && !strncmp(bone_name, "valvebiped.bip01_", xr_strlen("valvebiped.bip01_"));
 }
 
-bool is_source_arm_helper_bone(LPCSTR bone_name) 
-{ 
-    return bone_name && (strstr(bone_name, "_ulna") || strstr(bone_name, "_wrist")); 
+bool is_source_arm_helper_bone(LPCSTR bone_name)
+{
+    return bone_name && (strstr(bone_name, "_ulna") || strstr(bone_name, "_wrist"));
 }
 
 bool same_source_bind_transform(const Fmatrix& left, const Fmatrix& right)
 {
-    // Source exporters introduce small bind-pose drift even for rigs made from
-    // the same reference skeleton. Glock-sized axis changes are much larger.
-    constexpr float bind_epsilon = 0.1f;
+    // Only rigs exported from the same reference pose may use the legacy copy
+    // path. A loose component-wise tolerance misclassifies visibly different
+    // arm bind poses as identical and silently bypasses automatic retargeting.
+    constexpr float bind_epsilon = 1e-4f;
     return left.i.similar(right.i, bind_epsilon) && left.j.similar(right.j, bind_epsilon) &&
         left.k.similar(right.k, bind_epsilon) && left.c.similar(right.c, bind_epsilon);
 }
@@ -1861,31 +1941,49 @@ void player_hud::refresh_source_skeleton_merge()
             continue;
 
         u16 merged_bones = 0;
-        u16 retargeted_bones = 0;
+        u16 remapped_bones = 0;
+        u16 converted_bones = 0;
+        u16 following_bones = 0;
+        u16 direct_merge_bones = 0;
+        const bool source_uses_bone_merge_markers = is_base_human_hud_skeleton(source);
         for (u16 target_bone_id = 0; target_bone_id < target->LL_BoneCount(); ++target_bone_id)
         {
             LPCSTR bone_name = target->LL_BoneName(target_bone_id);
-            if(!is_source_arm_bone(bone_name) || is_source_arm_helper_bone(bone_name))
+            if (!is_source_arm_bone(bone_name) || is_source_arm_helper_bone(bone_name))
                 continue;
 
-            const u16 source_bone_id = source->LL_BoneID(bone_name);
+            // ARC9/EFT viewmodels animate their Base Human* hierarchy and keep
+            // ValveBiped bones as leaf markers for Source's EF_BONEMERGE.  The
+            // marker's evaluated model-space matrix is the final c_arms pose;
+            // remapping it back to Base Human and running another IK pass loses
+            // the offsets authored into those marker bones.
+            const u16 exact_source_bone_id = source->LL_BoneID(bone_name);
+            const u16 source_bone_id = source_uses_bone_merge_markers && exact_source_bone_id != BI_NONE ?
+                exact_source_bone_id : source_motion_bone_id(source, bone_name);
             if (source_bone_id == BI_NONE)
-                continue; // Optional Ulna/Wrist helpers may only exist in the mesh.
+                continue; // Optional helpers may only exist in one of the rigs.
+
+            remapped_bones += source_bone_id != exact_source_bone_id;
 
             CBoneInstance& target_bone = target->LL_GetBoneInstance(target_bone_id);
             target_bone.set_param(0, static_cast<float>(source_bone_id));
             target_bone.set_param(1, 0.f);
             target_bone.set_param(2, static_cast<float>(target_bone_id));
-            const bool own_bind_differs =
+            const bool direct_marker_merge = source_uses_bone_merge_markers && source_bone_id == exact_source_bone_id;
+            const bool own_bind_differs = !direct_marker_merge &&
                 !same_source_bind_transform(source->LL_GetData(source_bone_id).bind_transform, target->LL_GetData(target_bone_id).bind_transform);
-            const bool retarget_bind_chain = own_bind_differs || source_bind_chain_needs_retarget(source, target, source_bone_id, target_bone_id);
+            const bool retarget_bind_chain = !direct_marker_merge &&
+                (own_bind_differs || source_bind_chain_needs_retarget(source, target, source_bone_id, target_bone_id));
 
-            // 0: fully compatible chain, preserve the exact model-space path.
+            // 0: fully compatible conventional hierarchy.
             // 1: this bone has a different bind pose and needs conversion.
             // 2: this bone is compatible, but must follow a converted parent.
-            const u16 retarget_mode = own_bind_differs ? 1 : (retarget_bind_chain ? 2 : 0);
+            // 3: Source/ARC9 bone-merge marker; copy its final model-space pose.
+            const u16 retarget_mode = direct_marker_merge ? 3 : (own_bind_differs ? 1 : (retarget_bind_chain ? 2 : 0));
             target_bone.set_param(3, static_cast<float>(retarget_mode));
-            retargeted_bones += retarget_mode != 0;
+            converted_bones += retarget_mode == 1;
+            following_bones += retarget_mode == 2;
+            direct_merge_bones += retarget_mode == 3;
             if (target_idx == 0)
             {
                 if (!xr_strcmp(bone_name, source_r_thumb0))
@@ -1900,8 +1998,9 @@ void player_hud::refresh_source_skeleton_merge()
         }
 
         m_source_skeletons[target_idx] = source;
-        MsgDbg("HUD Source skeleton merge: [%s] drives [%s], %u bones matched by name, %u bind-corrected", source->getDebugName().c_str(),
-            target->getDebugName().c_str(), merged_bones, retargeted_bones);
+        Msg("HUD Source skeleton merge: [%s] drives [%s], %u bones matched, %u direct, %u remapped, %u converted, %u follow-parent",
+            source->getDebugName().c_str(), target->getDebugName().c_str(), merged_bones, direct_merge_bones, remapped_bones,
+            converted_bones, following_bones);
     }
 }
 
@@ -1918,14 +2017,20 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
     {
         const CBoneData& source_data = source->LL_GetData(source_bone_id);
         const CBoneData& target_data = target->LL_GetData(target_bone_id);
-        const u16 source_parent_id = source_data.GetParentID();
-        const u16 target_parent_id = target_data.GetParentID();
 
         // Preserve the old exact path for weapons whose complete ancestor bind
         // chain is identical to the hands rig. This keeps already compatible
         // models bit-for-bit equivalent to the original skeleton merge.
         const u16 retarget_mode = static_cast<u16>(target_bone->get_param(3));
-        if (retarget_mode == 0)
+        if (retarget_mode == 3)
+        {
+            // This is the operation performed by Source bone merge: matched
+            // target bones consume the already evaluated bone-to-model matrix
+            // of the parent viewmodel. The target mesh keeps its own inverse
+            // bind matrix when mRenderTransform is built by CKinematics.
+            target_bone->mTransform.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
+        }
+        else if (retarget_mode == 0)
         {
             Fmatrix target_bind, animated_delta;
             target_bind.invert(target_data.m2b_transform);
@@ -1934,64 +2039,221 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
         }
         else
         {
-            const bool source_has_parent = source_parent_id != BI_NONE && source_parent_id < source->LL_BoneCount();
-            const bool target_has_parent = target_parent_id != BI_NONE && target_parent_id < target->LL_BoneCount();
-            bool compatible_parent_chain = !source_has_parent && !target_has_parent;
+            const u16 source_parent_id = source_data.GetParentID();
+            const u16 target_parent_id = target_data.GetParentID();
+            LPCSTR bone_name = target->LL_BoneName(target_bone_id);
 
-            if (source_has_parent && target_has_parent &&
-                !xr_strcmp(source->LL_BoneName(source_parent_id), target->LL_BoneName(target_parent_id)))
-                compatible_parent_chain = true;
-
-            if (compatible_parent_chain)
+            // Retarget the animation in parent-local space.  The source bind is
+            // removed before the target bind is applied, so the replacement
+            // skeleton keeps its own joint offsets and bone lengths.
+            Fmatrix source_local;
+            if (source_parent_id != BI_NONE && source_parent_id < source->LL_BoneCount())
             {
-                Fmatrix source_local;
-                if (source_has_parent)
-                {
-                    Fmatrix source_parent_inv;
-                    source_parent_inv.invert(source->LL_GetBoneInstance(source_parent_id).mTransform);
-                    source_local.mul_43(source_parent_inv, source->LL_GetBoneInstance(source_bone_id).mTransform);
-                }
-                else
-                    source_local.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
-
-                // Apply only the animated local rotation to the target bind pose.
-                // Target translations are kept intact, so a weapon rig with other
-                // arm lengths cannot stretch or collapse the hands mesh.
-                Fmatrix source_bind_inv, local_delta, target_local;
-                source_bind_inv.invert(source_data.bind_transform);
-                local_delta.mul_43(source_bind_inv, source_local);
-                local_delta.c.set(0.f, 0.f, 0.f);
-                target_local.mul_43(target_data.bind_transform, local_delta);
-                target_local.c.set(target_data.bind_transform.c);
-
-                if (target_has_parent)
-                    target_bone->mTransform.mul_43(target->LL_GetBoneInstance(target_parent_id).mTransform, target_local);
-                else
-                    target_bone->mTransform.set(target_local);
-
-                // Hands are end effectors: keep the corrected target-hand
-                // orientation and proportions, but place the palm at the exact
-                // point authored in the weapon animation. This restores the
-                // two-handed pistol grip without importing weapon bone lengths.
-                LPCSTR target_bone_name = target->LL_BoneName(target_bone_id);
-                if (retarget_mode == 1 && target_bone_name && strstr(target_bone_name, "_hand"))
-                {
-                    Fmatrix target_bind, animated_delta, model_space_retarget;
-                    target_bind.invert(target_data.m2b_transform);
-                    animated_delta.mul_43(source_data.m2b_transform, target_bind);
-                    model_space_retarget.mul_43(source->LL_GetBoneInstance(source_bone_id).mTransform, animated_delta);
-                    target_bone->mTransform.c.set(model_space_retarget.c);
-                }
+                Fmatrix source_parent_inverse;
+                source_parent_inverse.invert(source->LL_GetBoneInstance(source_parent_id).mTransform);
+                source_local.mul_43(source_parent_inverse, source->LL_GetBoneInstance(source_bone_id).mTransform);
             }
             else
+                source_local.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
+
+            Fmatrix source_bind_inverse, local_delta, target_local;
+            source_bind_inverse.invert(source_data.bind_transform);
+            local_delta.mul_43(source_bind_inverse, source_local);
+            local_delta.c.set(0.f, 0.f, 0.f);
+            target_local.mul_43(target_data.bind_transform, local_delta);
+            target_local.c.set(target_data.bind_transform.c);
+            if (!xr_strcmp(bone_name, source_root_bone))
             {
-                // A helper bone or a different hierarchy breaks the local chain.
-                // Rebase this bone independently in model space, then descendants
-                // with matching parents can continue local bind-space retargeting.
-                Fmatrix target_bind, animated_delta;
-                target_bind.invert(target_data.m2b_transform);
-                animated_delta.mul_43(source_data.m2b_transform, target_bind);
-                target_bone->mTransform.mul_43(source->LL_GetBoneInstance(source_bone_id).mTransform, animated_delta);
+                Fvector root_translation;
+                root_translation.sub(source_local.c, source_data.bind_transform.c);
+                target_local.c.add(root_translation);
+            }
+
+            if (target_parent_id != BI_NONE && target_parent_id < target->LL_BoneCount())
+                target_bone->mTransform.mul_43(target->LL_GetBoneInstance(target_parent_id).mTransform, target_local);
+            else
+                target_bone->mTransform.set(target_local);
+
+            LPCSTR upperarm_name = nullptr;
+            LPCSTR forearm_name = nullptr;
+            LPCSTR hand_name = nullptr;
+            if (!strncmp(bone_name, "valvebiped.bip01_l_", xr_strlen("valvebiped.bip01_l_")))
+            {
+                upperarm_name = source_l_upperarm;
+                forearm_name = source_l_forearm;
+                hand_name = source_l_hand;
+            }
+            else if (!strncmp(bone_name, "valvebiped.bip01_r_", xr_strlen("valvebiped.bip01_r_")))
+            {
+                upperarm_name = source_r_upperarm;
+                forearm_name = source_r_forearm;
+                hand_name = source_r_hand;
+            }
+
+            const bool base_human_source = is_base_human_hud_skeleton(source);
+            const u16 source_upperarm_id = upperarm_name ?
+                (base_human_source ? source->LL_BoneID(upperarm_name) : source_motion_bone_id(source, upperarm_name)) : BI_NONE;
+            const u16 source_forearm_id = forearm_name ?
+                (base_human_source ? source->LL_BoneID(forearm_name) : source_motion_bone_id(source, forearm_name)) : BI_NONE;
+            const u16 source_hand_id = hand_name ?
+                (base_human_source ? source->LL_BoneID(hand_name) : source_motion_bone_id(source, hand_name)) : BI_NONE;
+            const u16 target_upperarm_id = upperarm_name ? target->LL_BoneID(upperarm_name) : BI_NONE;
+            const u16 target_forearm_id = forearm_name ? target->LL_BoneID(forearm_name) : BI_NONE;
+            const u16 target_hand_id = hand_name ? target->LL_BoneID(hand_name) : BI_NONE;
+
+            if (source_upperarm_id != BI_NONE && source_forearm_id != BI_NONE && source_hand_id != BI_NONE &&
+                target_upperarm_id != BI_NONE && target_forearm_id != BI_NONE && target_hand_id != BI_NONE)
+            {
+                // The wrist is an end effector: derive its desired model-space
+                // pose with the inverse bind matrices, then solve the target
+                // upperarm/forearm chain to that point.  This keeps the palm on
+                // the weapon without detaching it from either arm segment.
+                const CBoneData& source_hand_data = source->LL_GetData(source_hand_id);
+                const CBoneData& target_hand_data = target->LL_GetData(target_hand_id);
+                Fmatrix target_hand_bind, hand_bind_conversion, desired_hand;
+                target_hand_bind.invert(target_hand_data.m2b_transform);
+                hand_bind_conversion.mul_43(source_hand_data.m2b_transform, target_hand_bind);
+                desired_hand.mul_43(source->LL_GetBoneInstance(source_hand_id).mTransform, hand_bind_conversion);
+                // The animated Source wrist is the actual weapon-authored grip
+                // point. A global bind-position difference also contains the
+                // complete shoulder/rest-pose offset (especially on the left
+                // side) and must not be added to this end effector.
+                desired_hand.c.set(source->LL_GetBoneInstance(source_hand_id).mTransform.c);
+
+                const CBoneData& source_upperarm_data = source->LL_GetData(source_upperarm_id);
+                const CBoneData& target_upperarm_data = target->LL_GetData(target_upperarm_id);
+                Fmatrix source_upperarm_bind, target_upperarm_bind, upperarm_bind_conversion, desired_upperarm;
+                source_upperarm_bind.invert(source_upperarm_data.m2b_transform);
+                target_upperarm_bind.invert(target_upperarm_data.m2b_transform);
+                upperarm_bind_conversion.mul_43(source_upperarm_data.m2b_transform, target_upperarm_bind);
+                desired_upperarm.mul_43(source->LL_GetBoneInstance(source_upperarm_id).mTransform, upperarm_bind_conversion);
+                if (is_base_human_hud_skeleton(source))
+                {
+                    // Base Human exports can keep their rest pose around a
+                    // distant authoring origin while their HUD motions move
+                    // the complete rig close to the weapon. Applying the
+                    // rest-pose model-space offset here sends the shoulder
+                    // hundreds of units away and stretches the arm mesh.
+                    // Its animated shoulder and wrist already share the same
+                    // weapon-authored space, so use that shoulder directly.
+                    desired_upperarm.c.set(source->LL_GetBoneInstance(source_upperarm_id).mTransform.c);
+                }
+                else
+                {
+                    Fvector upperarm_bind_offset;
+                    upperarm_bind_offset.sub(target_upperarm_bind.c, source_upperarm_bind.c);
+                    desired_upperarm.c.add(source->LL_GetBoneInstance(source_upperarm_id).mTransform.c, upperarm_bind_offset);
+                }
+
+                if (target_bone_id == target_upperarm_id)
+                    target_bone->mTransform.c.set(desired_upperarm.c);
+
+                const Fmatrix& target_upperarm = target->LL_GetBoneInstance(target_upperarm_id).mTransform;
+                Fvector shoulder = desired_upperarm.c;
+                Fvector to_hand;
+                to_hand.sub(desired_hand.c, shoulder);
+                const float hand_distance = to_hand.magnitude();
+
+                const float upperarm_length = target->LL_GetData(target_forearm_id).bind_transform.c.magnitude();
+                const float forearm_length = target_hand_data.bind_transform.c.magnitude();
+                if (hand_distance > EPS_S && upperarm_length > EPS_S && forearm_length > EPS_S)
+                {
+                    to_hand.mul(1.f / hand_distance);
+
+                    Fvector source_to_elbow;
+                    source_to_elbow.sub(source->LL_GetBoneInstance(source_forearm_id).mTransform.c,
+                        source->LL_GetBoneInstance(source_upperarm_id).mTransform.c);
+                    Fvector pole_projection = to_hand;
+                    pole_projection.mul(source_to_elbow.dotproduct(to_hand));
+                    Fvector bend_direction;
+                    bend_direction.sub(source_to_elbow, pole_projection);
+
+                    if (bend_direction.square_magnitude() < EPS_S)
+                    {
+                        Fvector target_bind_elbow;
+                        target_upperarm.transform_tiny(target_bind_elbow, target->LL_GetData(target_forearm_id).bind_transform.c);
+                        bend_direction.sub(target_bind_elbow, shoulder);
+                        pole_projection.set(to_hand).mul(bend_direction.dotproduct(to_hand));
+                        bend_direction.sub(pole_projection);
+                    }
+                    bend_direction.normalize_safe();
+
+                    float solved_distance = hand_distance;
+                    clamp(solved_distance, _abs(upperarm_length - forearm_length) + EPS_S,
+                        upperarm_length + forearm_length - EPS_S);
+                    const float along = (upperarm_length * upperarm_length - forearm_length * forearm_length +
+                                            solved_distance * solved_distance) /
+                        (2.f * solved_distance);
+                    const float height = _sqrt(_max(upperarm_length * upperarm_length - along * along, 0.f));
+
+                    Fvector elbow = shoulder;
+                    elbow.mad(elbow, to_hand, along);
+                    elbow.mad(elbow, bend_direction, height);
+
+                    auto aim_at = [](Fmatrix& transform, const Fvector& child_bind_offset, const Fvector& child_position) {
+                        Fvector current_direction;
+                        transform.transform_dir(current_direction, child_bind_offset);
+                        Fvector desired_direction;
+                        desired_direction.sub(child_position, transform.c);
+                        if (current_direction.square_magnitude() < EPS_S || desired_direction.square_magnitude() < EPS_S)
+                            return;
+
+                        current_direction.normalize();
+                        desired_direction.normalize();
+                        float cosine = current_direction.dotproduct(desired_direction);
+                        clamp(cosine, -1.f, 1.f);
+
+                        Fvector axis;
+                        axis.crossproduct(current_direction, desired_direction);
+                        if (axis.square_magnitude() < EPS_S)
+                            return;
+                        axis.normalize();
+
+                        Fmatrix correction;
+                        correction.rotation(axis, acosf(cosine));
+                        const Fvector position = transform.c;
+
+                        // The historical matrix helpers use non-obvious A/B
+                        // naming. Pick the composition that actually aligns the
+                        // child direction in model space instead of assuming an
+                        // order and accidentally applying a world-space axis as
+                        // a bone-local rotation.
+                        Fmatrix candidate_a = transform;
+                        candidate_a.mulA_43(correction);
+                        candidate_a.c.set(position);
+                        Fmatrix candidate_b = transform;
+                        candidate_b.mulB_43(correction);
+                        candidate_b.c.set(position);
+
+                        Fvector direction_a;
+                        candidate_a.transform_dir(direction_a, child_bind_offset);
+                        direction_a.normalize_safe();
+                        Fvector direction_b;
+                        candidate_b.transform_dir(direction_b, child_bind_offset);
+                        direction_b.normalize_safe();
+                        if (direction_a.dotproduct(desired_direction) >= direction_b.dotproduct(desired_direction))
+                            transform.set(candidate_a);
+                        else
+                            transform.set(candidate_b);
+                    };
+
+                    if (target_bone_id == target_upperarm_id)
+                    {
+                        aim_at(target_bone->mTransform, target->LL_GetData(target_forearm_id).bind_transform.c, elbow);
+                    }
+                    else if (target_bone_id == target_forearm_id)
+                    {
+                        target_bone->mTransform.c.set(elbow);
+                        aim_at(target_bone->mTransform, target_hand_data.bind_transform.c, desired_hand.c);
+                    }
+                    else if (target_bone_id == target_hand_id)
+                    {
+                        Fquaternion hand_rotation;
+                        hand_rotation.set(desired_hand).normalize();
+                        target_bone->mTransform.rotation(hand_rotation);
+                        target_bone->mTransform.c.set(desired_hand.c);
+                    }
+                }
             }
         }
     }
@@ -2016,13 +2278,14 @@ bool player_hud::camera_bone_rotation(Fmatrix& rotation) const
         return false;
 
     const u16 camera_bone_id = source->LL_BoneID(source_camera_bone);
-    if (camera_bone_id == BI_NONE)
+    const u16 resolved_camera_bone_id = camera_bone_id != BI_NONE ? camera_bone_id : source->LL_BoneID("camera_animated");
+    if (resolved_camera_bone_id == BI_NONE)
         return false;
 
-    const CBoneData& camera_data = source->LL_GetData(camera_bone_id);
+    const CBoneData& camera_data = source->LL_GetData(resolved_camera_bone_id);
 
     Fmatrix camera_delta;
-    camera_delta.mul_43(source->LL_GetBoneInstance(camera_bone_id).mTransform, camera_data.m2b_transform);
+    camera_delta.mul_43(source->LL_GetBoneInstance(resolved_camera_bone_id).mTransform, camera_data.m2b_transform);
 
     Fquaternion camera_rotation;
     camera_rotation.set(camera_delta);

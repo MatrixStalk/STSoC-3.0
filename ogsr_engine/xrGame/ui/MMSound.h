@@ -1,5 +1,7 @@
 #pragma once
 
+#include "UIWindow.h"
+
 class CUIXml;
 
 class CMMSound
@@ -25,4 +27,15 @@ protected:
     ref_sound m_whell;
     ref_sound m_whell_click;
     xr_vector<xr_string> m_play_list;
+};
+
+class CUIMMSound : public CUIWindow
+{
+public:
+    void Init(CUIXml& xml_doc, LPCSTR path);
+    void Update() override;
+    void SetMusic(const char* filename);
+
+private:
+    CMMSound m_sound;
 };

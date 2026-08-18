@@ -23,6 +23,7 @@
 #include "UIListBox.h" //#include "UIScrollView.h"
 #include "UIComboBox.h"
 #include "UITrackBar.h"
+#include "UIControlConfig.h"
 
 #include "UIDragDropListEx.h"
 
@@ -43,6 +44,46 @@
 #define LETTERICA25_FONT_NAME "letterica25"
 
 #define DI_FONT_NAME "di"
+
+namespace
+{
+CUIXml& controls_config()
+{
+    static CUIXml config;
+    static const bool loaded = config.Init(CONFIG_PATH, UI_PATH, "ui_controls.xml");
+    VERIFY(loaded);
+    return config;
+}
+} // namespace
+
+LPCSTR UIControlConfig::ReadString(LPCSTR section, LPCSTR attribute, LPCSTR fallback)
+{
+    return controls_config().ReadAttrib(section, 0, attribute, fallback);
+}
+
+int UIControlConfig::ReadInt(LPCSTR section, LPCSTR attribute, int fallback)
+{
+    return controls_config().ReadAttribInt(section, 0, attribute, fallback);
+}
+
+float UIControlConfig::ReadFloat(LPCSTR section, LPCSTR attribute, float fallback)
+{
+    return controls_config().ReadAttribFlt(section, 0, attribute, fallback);
+}
+
+bool UIControlConfig::ReadBool(LPCSTR section, LPCSTR attribute, bool fallback)
+{
+    return ReadInt(section, attribute, fallback ? 1 : 0) != 0;
+}
+
+u32 UIControlConfig::ReadColor(LPCSTR section, u32 fallback)
+{
+    CUIXml& config = controls_config();
+    return color_argb(config.ReadAttribInt(section, 0, "a", color_get_A(fallback)),
+                      config.ReadAttribInt(section, 0, "r", color_get_R(fallback)),
+                      config.ReadAttribInt(section, 0, "g", color_get_G(fallback)),
+                      config.ReadAttribInt(section, 0, "b", color_get_B(fallback)));
+}
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -115,6 +156,45 @@ bool CUIXmlInit::InitWindow(CUIXml& xml_doc, LPCSTR path, int index, CUIWindow* 
         pWnd->SetWindowName(xml_doc.Read(buf, index, NULL));
     else if (xr_strlen(path))
         pWnd->SetWindowName(path, TRUE);
+
+    LPCSTR animation = xml_doc.ReadAttrib(path, index, "animation", "curve_fade");
+    LPCSTR animation_in = xml_doc.ReadAttrib(path, index, "animation_in", animation);
+    LPCSTR animation_out = xml_doc.ReadAttrib(path, index, "animation_out", animation);
+    pWnd->SetAnimationPresets(animation_in, animation_out);
+    pWnd->SetAnimationTimes(xml_doc.ReadAttribFlt(path, index, "animation_time", 220.f),
+                            xml_doc.ReadAttribFlt(path, index, "animation_hide_time", 160.f));
+    pWnd->SetAnimationDelay(xml_doc.ReadAttribFlt(path, index, "animation_delay", 0.f));
+    pWnd->SetAnimationDistance(xml_doc.ReadAttribFlt(path, index, "animation_distance", 24.f));
+
+    LPCSTR motion_effect = xml_doc.ReadAttrib(path, index, "motion_effect", "none");
+    pWnd->SetMotionEffect(motion_effect);
+
+    float mouse_x = 0.f, mouse_y = 0.f, auto_x = 0.f, auto_y = 0.f, speed = 0.f, smoothing = 8.f;
+    if (0 == xr_strcmp(motion_effect, "parallax"))
+    {
+        mouse_x = 8.f;
+        mouse_y = 5.f;
+        auto_x = 1.2f;
+        auto_y = .8f;
+        speed = .35f;
+    }
+    else if (0 == xr_strcmp(motion_effect, "panorama"))
+    {
+        mouse_x = 14.f;
+        mouse_y = 7.f;
+        auto_x = 8.f;
+        auto_y = 2.5f;
+        speed = .1f;
+        smoothing = 4.f;
+    }
+
+    pWnd->SetMotionMouseStrength(xml_doc.ReadAttribFlt(path, index, "motion_mouse_x", mouse_x),
+                                 xml_doc.ReadAttribFlt(path, index, "motion_mouse_y", mouse_y));
+    pWnd->SetMotionAutoStrength(xml_doc.ReadAttribFlt(path, index, "motion_auto_x", auto_x),
+                                xml_doc.ReadAttribFlt(path, index, "motion_auto_y", auto_y));
+    pWnd->SetMotionSpeed(xml_doc.ReadAttribFlt(path, index, "motion_speed", speed));
+    pWnd->SetMotionSmoothing(xml_doc.ReadAttribFlt(path, index, "motion_smoothing", smoothing));
+    pWnd->SetMotionPhase(xml_doc.ReadAttribFlt(path, index, "motion_phase", 0.f));
 
     InitAutoStaticGroup(xml_doc, path, index, pWnd);
     return true;
@@ -247,7 +327,11 @@ bool CUIXmlInit::InitStatic(CUIXml& xml_doc, LPCSTR path, int index, CUIStatic* 
 
 bool CUIXmlInit::InitCheck(CUIXml& xml_doc, LPCSTR path, int index, CUICheckButton* pWnd)
 {
+    pWnd->SetUseXmlSize(
+        xml_doc.ReadAttribInt(path, index, "use_xml_size", UIControlConfig::ReadInt("check_button", "use_xml_size", 1)) != 0);
     InitStatic(xml_doc, path, index, pWnd);
+    pWnd->SetStretchTexture(
+        xml_doc.ReadAttribInt(path, index, "stretch", UIControlConfig::ReadInt("check_button", "stretch", 0)) != 0);
     InitOptionsItem(xml_doc, path, index, pWnd);
 
     return true;
@@ -576,8 +660,9 @@ bool CUIXmlInit::InitListWnd(CUIXml& xml_doc, LPCSTR path, int index, CUIListWnd
 
     float width = xml_doc.ReadAttribFlt(path, index, "width");
     float height = xml_doc.ReadAttribFlt(path, index, "height");
-    float item_height = xml_doc.ReadAttribFlt(path, index, "item_height");
-    int active_background = xml_doc.ReadAttribInt(path, index, "active_bg");
+    float item_height = xml_doc.ReadAttribFlt(path, index, "item_height", UIControlConfig::ReadFloat("list", "item_height", 30.f));
+    int active_background =
+        xml_doc.ReadAttribInt(path, index, "active_bg", UIControlConfig::ReadInt("list", "active_background", 0));
 
     // Init font from xml config file
     string256 buf;
@@ -592,24 +677,25 @@ bool CUIXmlInit::InitListWnd(CUIXml& xml_doc, LPCSTR path, int index, CUIListWnd
         pWnd->SetTextColor(cl);
     }
 
-    pWnd->SetScrollBarProfile(xml_doc.ReadAttrib(path, index, "scroll_profile", "default"));
+    pWnd->SetScrollBarProfile(
+        xml_doc.ReadAttrib(path, index, "scroll_profile", UIControlConfig::ReadString("list", "scroll_profile", "default")));
     pWnd->Init(x, y, width, height, item_height);
     pWnd->EnableActiveBackground(!!active_background);
 
-    if (xml_doc.ReadAttribInt(path, index, "always_show_scroll"))
+    if (xml_doc.ReadAttribInt(path, index, "always_show_scroll", UIControlConfig::ReadInt("list", "always_show_scroll", 0)))
     {
         pWnd->SetAlwaysShowScroll(true);
         pWnd->EnableAlwaysShowScroll(true);
         pWnd->EnableScrollBar(true);
     }
 
-    if (xml_doc.ReadAttribInt(path, index, "always_hide_scroll"))
+    if (xml_doc.ReadAttribInt(path, index, "always_hide_scroll", UIControlConfig::ReadInt("list", "always_hide_scroll", 0)))
     {
         pWnd->SetAlwaysShowScroll(false);
         pWnd->EnableAlwaysShowScroll(true);
     }
 
-    bool bVertFlip = (1 == xml_doc.ReadAttribInt(path, index, "flip_vert", 0));
+    bool bVertFlip = (1 == xml_doc.ReadAttribInt(path, index, "flip_vert", UIControlConfig::ReadInt("list", "flip_vertical", 0)));
     pWnd->SetVertFlip(bVertFlip);
 
     return true;
@@ -1381,29 +1467,37 @@ bool CUIXmlInit::InitScrollView(CUIXml& xml_doc, const char* path, int index, CU
     R_ASSERT3(xml_doc.NavigateToNode(path, index), "XML node not found", path);
 
     InitWindow(xml_doc, path, index, pWnd);
-    pWnd->SetRightIndention(xml_doc.ReadAttribFlt(path, index, "right_ident", 0.0f));
-    pWnd->SetLeftIndention(xml_doc.ReadAttribFlt(path, index, "left_ident", 0.0f));
-    pWnd->SetUpIndention(xml_doc.ReadAttribFlt(path, index, "top_indent", 0.0f));
-    pWnd->SetDownIndention(xml_doc.ReadAttribFlt(path, index, "bottom_indent", 0.0f));
+    pWnd->SetRightIndention(
+        xml_doc.ReadAttribFlt(path, index, "right_ident", UIControlConfig::ReadFloat("scroll_view", "right_indent", 0.f)));
+    pWnd->SetLeftIndention(
+        xml_doc.ReadAttribFlt(path, index, "left_ident", UIControlConfig::ReadFloat("scroll_view", "left_indent", 0.f)));
+    pWnd->SetUpIndention(
+        xml_doc.ReadAttribFlt(path, index, "top_indent", UIControlConfig::ReadFloat("scroll_view", "top_indent", 0.f)));
+    pWnd->SetDownIndention(
+        xml_doc.ReadAttribFlt(path, index, "bottom_indent", UIControlConfig::ReadFloat("scroll_view", "bottom_indent", 0.f)));
 
-    float vi = xml_doc.ReadAttribFlt(path, index, "vert_interval", 0.0f);
+    float vi = xml_doc.ReadAttribFlt(path, index, "vert_interval", UIControlConfig::ReadFloat("scroll_view", "vertical_interval", 0.f));
     pWnd->m_vertInterval = (vi);
 
-    bool bInverseDir = (1 == xml_doc.ReadAttribInt(path, index, "inverse_dir", 0));
+    bool bInverseDir =
+        (1 == xml_doc.ReadAttribInt(path, index, "inverse_dir", UIControlConfig::ReadInt("scroll_view", "inverse_direction", 0)));
     pWnd->m_flags.set(CUIScrollView::eInverseDir, bInverseDir);
 
-    pWnd->SetScrollBarProfile(xml_doc.ReadAttrib(path, index, "scroll_profile", "default"));
+    pWnd->SetScrollBarProfile(xml_doc.ReadAttrib(
+        path, index, "scroll_profile", UIControlConfig::ReadString("scroll_view", "scroll_profile", "default")));
 
     pWnd->Init();
 
-    bool bVertFlip = (1 == xml_doc.ReadAttribInt(path, index, "flip_vert", 0));
+    bool bVertFlip =
+        (1 == xml_doc.ReadAttribInt(path, index, "flip_vert", UIControlConfig::ReadInt("scroll_view", "flip_vertical", 0)));
     pWnd->SetVertFlip(bVertFlip);
 
-    bool b = (1 == xml_doc.ReadAttribInt(path, index, "always_show_scroll", 1));
+    bool b = (1 == xml_doc.ReadAttribInt(path, index, "always_show_scroll",
+                                          UIControlConfig::ReadInt("scroll_view", "always_show_scroll", 1)));
 
     pWnd->SetFixedScrollBar(b);
 
-    b = (1 == xml_doc.ReadAttribInt(path, index, "can_select", 0));
+    b = (1 == xml_doc.ReadAttribInt(path, index, "can_select", UIControlConfig::ReadInt("scroll_view", "can_select", 0)));
 
     pWnd->m_flags.set(CUIScrollView::eItemsSelectabe, b);
 
@@ -1467,14 +1561,14 @@ bool CUIXmlInit::InitTrackBar(CUIXml& xml_doc, const char* path, int index, CUIT
 {
     InitWindow(xml_doc, path, 0, pWnd);
 
-    int is_integer = xml_doc.ReadAttribInt(path, index, "is_integer", 0);
+    int is_integer = xml_doc.ReadAttribInt(path, index, "is_integer", UIControlConfig::ReadInt("track_bar", "integer", 0));
     pWnd->SetType(!is_integer);
     InitOptionsItem(xml_doc, path, 0, pWnd);
 
-    int invert = xml_doc.ReadAttribInt(path, index, "invert", 0);
+    int invert = xml_doc.ReadAttribInt(path, index, "invert", UIControlConfig::ReadInt("track_bar", "invert", 0));
     pWnd->SetInvert(!!invert);
 
-    float step = xml_doc.ReadAttribFlt(path, index, "step", 0.1f);
+    float step = xml_doc.ReadAttribFlt(path, index, "step", UIControlConfig::ReadFloat("track_bar", "step", .1f));
     pWnd->SetStep(step);
 
     float min_xml = xml_doc.ReadAttribFlt(path, index, "min", 0.0f);
@@ -1491,12 +1585,14 @@ bool CUIXmlInit::InitComboBox(CUIXml& xml_doc, const char* path, int index, CUIC
     u32 color;
     CGameFont* pFont;
 
-    pWnd->SetListLength(xml_doc.ReadAttribInt(path, index, "list_length", 4));
+    pWnd->SetListLength(
+        xml_doc.ReadAttribInt(path, index, "list_length", UIControlConfig::ReadInt("combo_box", "list_length", 4)));
 
     InitWindow(xml_doc, path, index, pWnd);
     InitOptionsItem(xml_doc, path, index, pWnd);
 
-    bool b = (1 == xml_doc.ReadAttribInt(path, index, "always_show_scroll", 1));
+    bool b = (1 == xml_doc.ReadAttribInt(path, index, "always_show_scroll",
+                                          UIControlConfig::ReadInt("combo_box", "always_show_scroll", 1)));
 
     pWnd->m_list.SetFixedScrollBar(b);
 

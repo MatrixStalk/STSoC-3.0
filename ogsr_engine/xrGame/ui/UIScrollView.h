@@ -28,6 +28,9 @@ protected:
     float m_downIndent;
 
     float m_vertInterval;
+    float m_scrollSmoothing;
+    int m_scrollStepDivisor;
+    int m_shiftWheelMultiplier;
 
     Flags16 m_flags;
     shared_str m_scrollbar_profile;

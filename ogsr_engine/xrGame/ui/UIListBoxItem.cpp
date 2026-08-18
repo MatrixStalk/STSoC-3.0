@@ -1,5 +1,6 @@
 #include "StdAfx.h"
 #include "UIListBoxItem.h"
+#include "UIControlConfig.h"
 #include "UIScrollView.h"
 #include "../object_broker.h"
 
@@ -25,7 +26,10 @@ void CUIListBoxItem::Draw()
     m_bTextureAvailable = m_bSelected;
 
     u32 CurColor = GetTextColor();
-    u32 ResColor = (IsEnabled() ? 0xff000000 : 0x80000000) | (CurColor & 0x00ffffff);
+    static const u32 enabled_alpha = clampr(UIControlConfig::ReadInt("list_box", "enabled_alpha", 255), 0, 255);
+    static const u32 disabled_alpha = clampr(UIControlConfig::ReadInt("list_box", "disabled_alpha", 128), 0, 255);
+    const u32 alpha = IsEnabled() ? enabled_alpha : disabled_alpha;
+    u32 ResColor = (alpha << 24) | (CurColor & 0x00ffffff);
     SetTextColor(ResColor);
 
     CUILabel::Draw();
@@ -37,7 +41,10 @@ void CUIListBoxItem::OnFocusReceive()
     GetMessageTarget()->SendMessage(this, LIST_ITEM_FOCUS_RECEIVED);
 }
 
-void CUIListBoxItem::InitDefault() { InitTexture("ui_listline"); }
+void CUIListBoxItem::InitDefault()
+{
+    InitTexture(UIControlConfig::ReadString("list_box", "default_texture", "ui_listline"));
+}
 bool CUIListBoxItem::OnDbClick()
 {
     smart_cast<CUIScrollView*>(GetParent()->GetParent())->SetSelected(this);

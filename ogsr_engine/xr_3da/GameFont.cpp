@@ -13,6 +13,7 @@ ENGINE_API float g_fontHeightScale = 1.f;
 #include "../Include/xrAPI/xrAPI.h"
 #include "../Include/xrRender/RenderFactory.h"
 #include "../Include/xrRender/FontRender.h"
+#include "../Include/xrRender/UIRender.h"
 
 CGameFont::CGameFont(LPCSTR section, u32 flags)
 {
@@ -325,6 +326,14 @@ void CGameFont::MasterOut(BOOL bCheckDevice, BOOL bUseCoords, BOOL bScaleCoords,
     rs.x = (bUseCoords ? (bScaleCoords ? (DI2PX(_x)) : _x) : fCurrentX);
     rs.y = (bUseCoords ? (bScaleCoords ? (DI2PY(_y)) : _y) : fCurrentY);
     rs.color = dwCurrentColor;
+
+    if (UIRender)
+    {
+        const Fvector2 animation_offset = UIRender->GetAnimationOffset();
+        rs.x += animation_offset.x;
+        rs.y += animation_offset.y;
+        rs.color = subst_alpha(rs.color, static_cast<u32>(color_get_A(rs.color) * UIRender->GetAnimationAlpha()));
+    }
     rs.height = fCurrentHeight;
     rs.align = eCurrentAlignment;
 

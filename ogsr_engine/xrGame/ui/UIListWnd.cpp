@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "uilistwnd.h"
 //.#include "uiscrollbar.h"
+#include "UIControlConfig.h"
 #include "UIFrameLineWnd.h"
 
 //. #define				ACTIVE_BACKGROUND			"ui\\ui_pop_up_active_back"
@@ -20,14 +21,15 @@ CUIListWnd::CUIListWnd()
     m_iSelectedItemGroupID = -1;
     m_bShowSelectedItem = false;
     m_bActiveBackground = false;
-    m_dwFontColor = 0xFFFFFFFF;
-    SetItemHeight(DEFAULT_ITEM_HEIGHT);
+    m_dwFontColor = UIControlConfig::ReadColor("list:text_color", 0xFFFFFFFF);
+    SetItemHeight(UIControlConfig::ReadFloat("list", "item_height", DEFAULT_ITEM_HEIGHT));
     m_bVertFlip = false;
     m_bUpdateMouseMove = false;
     m_bForceFocusedItem = false;
     m_iLastUniqueID = 0;
     m_bAlwaysShowScroll = false;
     m_bAlwaysShowScroll_enable = false;
+    m_scrollbar_profile = UIControlConfig::ReadString("list", "scroll_profile", "default");
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -358,7 +360,7 @@ void CUIListWnd::DrawActiveBackFrame(const Frect& rect, CUIListItem* itm)
     if (m_ScrollBar->IsShown())
         _w -= m_ScrollBar->GetWidth();
     m_ActiveBackgroundFrame->SetWidth(_w);
-    m_ActiveBackgroundFrame->Draw();
+    m_ActiveBackgroundFrame->DrawWithAnimation();
 }
 
 void CUIListWnd::Draw()

@@ -16,6 +16,7 @@
 #include "ui\UIAnimatedStatic.h"
 #include "ui\UITrackBar.h"
 #include "ui\UIMMShniaga.h"
+#include "ui\MMSound.h"
 #include "ui\UIScrollView.h"
 #include "ui\UIProgressBar.h"
 
@@ -49,6 +50,8 @@ CScriptXmlInit& CScriptXmlInit::operator=(const CScriptXmlInit& other)
 void CScriptXmlInit::ParseFile(LPCSTR xml_file) { m_xml.Init(CONFIG_PATH, UI_PATH, xml_file); }
 
 void CScriptXmlInit::ParseShTexInfo(LPCSTR xml_file) { CUITextureMaster::ParseShTexInfo(xml_file); }
+
+bool CScriptXmlInit::NodeExist(LPCSTR path) { return m_xml.NavigateToNode(path, 0) != nullptr; }
 
 void CScriptXmlInit::InitWindow(LPCSTR path, int index, CUIWindow* pWnd) { CUIXmlInit::InitWindow(m_xml, path, index, pWnd); }
 
@@ -234,6 +237,15 @@ CUIMMShniaga* CScriptXmlInit::InitMMShniaga(LPCSTR path, CUIWindow* parent)
     return pWnd;
 }
 
+CUIMMSound* CScriptXmlInit::InitMMSound(LPCSTR path, CUIWindow* parent)
+{
+    CUIMMSound* pWnd = xr_new<CUIMMSound>();
+    pWnd->Init(m_xml, path);
+    pWnd->SetAutoDelete(true);
+    _attach_child(pWnd, parent);
+    return pWnd;
+}
+
 CUIWindow* CScriptXmlInit::InitKeyBinding(LPCSTR path, CUIWindow* parent)
 {
     CUIKeyBinding* pWnd = xr_new<CUIKeyBinding>();
@@ -268,6 +280,7 @@ void CScriptXmlInit::script_register(lua_State* L)
                   .def(constructor<>())
                   .def("ParseFile", &CScriptXmlInit::ParseFile)
                   .def("ParseShTexInfo", &CScriptXmlInit::ParseShTexInfo)
+                  .def("NodeExist", &CScriptXmlInit::NodeExist)
                   .def("InitWindow", &CScriptXmlInit::InitWindow)
                   .def("InitFrame", &CScriptXmlInit::InitFrame)
                   .def("InitFrameLine", &CScriptXmlInit::InitFrameLine)
@@ -288,6 +301,7 @@ void CScriptXmlInit::script_register(lua_State* L)
                   .def("InitTrackBar", &CScriptXmlInit::InitTrackBar)
                   .def("InitKeyBinding", &CScriptXmlInit::InitKeyBinding)
                   .def("InitMMShniaga", &CScriptXmlInit::InitMMShniaga)
+                  .def("InitMMSound", &CScriptXmlInit::InitMMSound)
                   .def("InitScrollView", &CScriptXmlInit::InitScrollView)
                   .def("InitAutoStaticGroup", &CScriptXmlInit::InitAutoStaticGroup)
                   .def("InitProgressBar", &CScriptXmlInit::InitProgressBar)];

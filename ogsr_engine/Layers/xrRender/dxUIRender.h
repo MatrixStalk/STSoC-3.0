@@ -5,13 +5,18 @@
 class dxUIRender : public IUIRender
 {
 public:
-    dxUIRender() : PrimitiveType(ptNone), m_PointType(pttNone) { ; }
+    dxUIRender() : PrimitiveType(ptNone), m_PointType(pttNone) { m_animationOffset.set(0.f, 0.f); }
 
     virtual void CreateUIGeom();
     virtual void DestroyUIGeom();
 
     virtual void SetShader(IUIShader& shader);
     virtual void SetAlphaRef(int aref);
+
+    void SetAnimationAlpha(float alpha) override { m_animationAlpha = alpha; }
+    float GetAnimationAlpha() const override { return m_animationAlpha; }
+    void SetAnimationOffset(float x, float y) override { m_animationOffset.set(x, y); }
+    Fvector2 GetAnimationOffset() const override { return m_animationOffset; }
 
     virtual void SetScissor(Irect* rect = nullptr);
     virtual void GetActiveTextureResolution(Fvector2& res);
@@ -32,6 +37,9 @@ private:
 
     ePrimitiveType PrimitiveType;
     ePointType m_PointType;
+
+    float m_animationAlpha{1.f};
+    Fvector2 m_animationOffset;
 
     //	Vertex buffer attributes
     u32 m_iMaxVerts;

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<window>
+	<!--
+		width / height          - displayed cursor size in UI coordinates
+		scale_x / scale_y       - additional size multiplier
+		scale_with_kx           - apply widescreen horizontal correction
+		hotspot_x / hotspot_y   - click point inside the unscaled cursor image
+		sensitivity             - relative mouse movement multiplier
+
+		The texture rectangle allows the cursor to use a region of an atlas.
+		Remove x/y/width/height from <texture> to use its original rectangle.
+	-->
+	<cursor x="0" y="0" width="40" height="40"
+		stretch="1"
+		scale_x="1.0" scale_y="1.0" scale_with_kx="1"
+		hotspot_x="0" hotspot_y="0"
+		sensitivity="1.0"
+		animation="none">
+		<texture shader="hud\cursor" x="0" y="0" width="40" height="40">ui\ui_ani_cursor</texture>
+	</cursor>
+</window>

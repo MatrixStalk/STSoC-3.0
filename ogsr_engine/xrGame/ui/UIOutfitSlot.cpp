@@ -98,7 +98,7 @@ CUICellItem* CUIOutfitDragDropList::RemoveItem(CUICellItem* itm, bool force_root
 void CUIOutfitDragDropList::Draw()
 {
     if (Core.Features.test(xrCore::Feature::old_outfit_slot_style))
-        m_background->Draw();
+        m_background->DrawWithAnimation();
     else
         inherited::Draw();
 }

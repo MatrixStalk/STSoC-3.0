@@ -9,6 +9,24 @@ class CUIWindow;
 class CUIWindow : public CUISimpleWindow
 {
 public:
+    enum class EAnimationPreset : u8
+    {
+        None,
+        Fade,
+        CurveFade,
+        SlideLeft,
+        SlideRight,
+        SlideUp,
+        SlideDown
+    };
+
+    enum class EMotionEffect : u8
+    {
+        None,
+        Parallax,
+        Panorama
+    };
+
     using CUISimpleWindow::Init;
 
     CUIWindow();
@@ -89,13 +107,28 @@ public:
     virtual bool IsEnabled() { return m_bIsEnabled; }
 
     //убрать/показать окно и его дочерние окна
-    virtual void Show(bool status)
-    {
-        SetVisible(status);
-        Enable(status);
-    }
-    IC bool IsShown() { return this->GetVisible(); }
+    virtual void Show(bool status);
+    void ShowImmediate(bool status);
+    IC bool IsShown() const { return m_requestedVisible; }
+    IC bool IsVisibleForRender() const { return GetVisible(); }
+    IC bool IsAnimating() const { return m_animationState != EAnimationState::Idle; }
     void ShowChildren(bool show);
+
+    void SetAnimationPreset(LPCSTR preset);
+    void SetAnimationPresets(LPCSTR show_preset, LPCSTR hide_preset);
+    void SetAnimationTimes(float show_time_ms, float hide_time_ms);
+    void SetAnimationDelay(float delay_ms);
+    void SetAnimationDistance(float distance);
+    float GetAnimationAlpha() const { return m_animationAlpha; }
+    const Fvector2& GetAnimationOffset() const { return m_animationOffset; }
+
+    void SetMotionEffect(LPCSTR effect);
+    void SetMotionMouseStrength(float x, float y);
+    void SetMotionAutoStrength(float x, float y);
+    void SetMotionSpeed(float cycles_per_second);
+    void SetMotionSmoothing(float smoothing);
+    void SetMotionPhase(float degrees);
+    const Fvector2& GetMotionOffset() const { return m_motionOffset; }
 
     //абсолютные координаты
     IC void GetAbsoluteRect(Frect& r);
@@ -115,6 +148,8 @@ public:
 
     //прорисовка окна
     virtual void Draw();
+    void DrawWithAnimation();
+    void DrawWithoutAnimation();
     virtual void Draw(float x, float y);
     //обновление окна передпрорисовкой
     virtual void Update();
@@ -163,6 +198,19 @@ public:
     void SortByPriority();
 
 protected:
+    enum class EAnimationState : u8
+    {
+        Idle,
+        Showing,
+        Hiding
+    };
+
+    static EAnimationPreset ParseAnimationPreset(LPCSTR preset);
+    static EMotionEffect ParseMotionEffect(LPCSTR effect);
+    void StartAnimation(bool show);
+    void UpdateAnimation();
+    void UpdateMotion();
+
     int priority_index{};
     
     bool m_bCustomDraw{};
@@ -207,6 +255,31 @@ protected:
     bool m_bCursorOverWindow;
     bool m_bCursorOverWindowChanged;
     bool m_bClickable;
+
+    EAnimationPreset m_showAnimation{EAnimationPreset::CurveFade};
+    EAnimationPreset m_hideAnimation{EAnimationPreset::CurveFade};
+    EAnimationState m_animationState{EAnimationState::Showing};
+    float m_animationAlpha{};
+    float m_animationStartAlpha{};
+    Fvector2 m_animationOffset{};
+    Fvector2 m_animationStartOffset{};
+    Fvector2 m_animationTargetOffset{};
+    float m_showAnimationTime{220.f};
+    float m_hideAnimationTime{160.f};
+    float m_animationDelay{};
+    float m_animationDistance{24.f};
+    u32 m_animationStartTime{};
+    bool m_animationStarted{};
+    bool m_requestedVisible{true};
+    bool m_wasDrawn{};
+
+    EMotionEffect m_motionEffect{EMotionEffect::None};
+    Fvector2 m_motionOffset{};
+    Fvector2 m_motionMouseStrength{};
+    Fvector2 m_motionAutoStrength{};
+    float m_motionSpeed{};
+    float m_motionSmoothing{8.f};
+    float m_motionPhase{};
 
 #ifdef DEBUG
     int m_dbg_id;

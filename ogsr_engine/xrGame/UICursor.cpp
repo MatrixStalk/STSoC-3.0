@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "uicursor.h"
 #include "ui/UIStatic.h"
+#include "ui/UIXmlInit.h"
 
 CUICursor::CUICursor()
 {
@@ -13,19 +14,45 @@ CUICursor::~CUICursor() { Device.seqRender.Remove(this); }
 void CUICursor::InitInternal()
 {
     m_static = std::make_unique<CUIStatic>();
-    m_static->InitTextureEx("ui\\ui_ani_cursor", "hud\\cursor");
 
-    constexpr Frect rect{0.0f, 0.0f, 40.0f, 40.0f};
-    m_static->SetOriginalRect(rect);
+    CUIXml xml;
+    if (xml.Init(CONFIG_PATH, UI_PATH, "ui_cursor.xml") && xml.NavigateToNode("cursor", 0))
+    {
+        CUIXmlInit::InitStatic(xml, "cursor", 0, m_static.get());
 
-    Fvector2 sz{rect.rb};
-    sz.x *= UI()->get_current_kx();
+        const float legacy_scale_x = READ_IF_EXISTS(pSettings, r_float, "ui_tweaks", "cursor_scale_x", 1.f);
+        const float legacy_scale_y = READ_IF_EXISTS(pSettings, r_float, "ui_tweaks", "cursor_scale_y", 1.f);
+        const float scale_x = xml.ReadAttribFlt("cursor", 0, "scale_x", legacy_scale_x);
+        const float scale_y = xml.ReadAttribFlt("cursor", 0, "scale_y", legacy_scale_y);
+        const bool scale_with_kx = !!xml.ReadAttribInt("cursor", 0, "scale_with_kx", 1);
 
-    sz.x *= READ_IF_EXISTS(pSettings, r_float, "ui_tweaks", "cursor_scale_x", 1.f);
-    sz.y *= READ_IF_EXISTS(pSettings, r_float, "ui_tweaks", "cursor_scale_y", 1.f);
+        Fvector2 size = m_static->GetWndSize();
+        const float kx = scale_with_kx ? UI()->get_current_kx() : 1.f;
+        size.x *= kx * scale_x;
+        size.y *= scale_y;
+        m_static->SetWndSize(size);
 
-    m_static->SetWndSize(sz);
-    m_static->SetStretchTexture(true);
+        m_hotspot.x = xml.ReadAttribFlt("cursor", 0, "hotspot_x", 0.f) * kx * scale_x;
+        m_hotspot.y = xml.ReadAttribFlt("cursor", 0, "hotspot_y", 0.f) * scale_y;
+        m_sensitivity = xml.ReadAttribFlt("cursor", 0, "sensitivity", 1.f);
+    }
+    else
+    {
+        Msg("! Cannot load [ui_cursor.xml], using the default cursor");
+        m_static->InitTextureEx("ui\\ui_ani_cursor", "hud\\cursor");
+
+        constexpr Frect rect{0.0f, 0.0f, 40.0f, 40.0f};
+        m_static->SetOriginalRect(rect);
+
+        Fvector2 size{rect.rb};
+        size.x *= UI()->get_current_kx();
+        size.x *= READ_IF_EXISTS(pSettings, r_float, "ui_tweaks", "cursor_scale_x", 1.f);
+        size.y *= READ_IF_EXISTS(pSettings, r_float, "ui_tweaks", "cursor_scale_y", 1.f);
+        m_static->SetWndSize(size);
+        m_static->SetStretchTexture(true);
+    }
+
+    m_static->ShowImmediate(true);
 }
 
 void CUICursor::OnRender()
@@ -55,7 +82,7 @@ void CUICursor::OnRender()
     }
 #endif
 
-    m_static->SetWndPos(vPos);
+    m_static->SetWndPos(vPos.x - m_hotspot.x, vPos.y - m_hotspot.y);
     m_static->Update();
     m_static->Draw();
 }
@@ -88,9 +115,8 @@ void CUICursor::UpdateCursorPosition(const int _dx, const int _dy)
     }
     else
     {
-        constexpr float sens = 1.0f;
-        vPos.x += _dx * sens;
-        vPos.y += _dy * sens;
+        vPos.x += _dx * m_sensitivity;
+        vPos.y += _dy * m_sensitivity;
     }
 
     clamp(vPos.x, 0.f, UI_BASE_WIDTH);

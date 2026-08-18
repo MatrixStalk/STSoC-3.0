@@ -366,7 +366,7 @@ void CMainMenu::OnRenderPPUI_PP()
     xr_vector<CUIWindow*>::iterator it = m_pp_draw_wnds.begin();
     for (; it != m_pp_draw_wnds.end(); ++it)
     {
-        (*it)->Draw();
+        (*it)->DrawWithAnimation();
     }
     UI()->pp_stop();
 */

@@ -455,7 +455,7 @@ void CLevel::OnRender()
     {
         Render->AfterWorldRender();
 
-        pGameSP->PdaMenu->Draw();
+        pGameSP->PdaMenu->DrawWithAnimation();
 
         const CUIDialogWnd* receiver = pGameSP->MainInputReceiver();
         const bool is_top = receiver == pGameSP->PdaMenu;

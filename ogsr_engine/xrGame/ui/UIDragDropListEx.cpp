@@ -938,7 +938,7 @@ void CUICellContainer::Draw()
         for (; it != m_cells_to_draw.end(); ++it)
             if (!(*it).Empty() && !(*it).m_item->m_b_already_drawn)
             {
-                (*it).m_item->Draw();
+                (*it).m_item->DrawWithAnimation();
             }
     }
 
