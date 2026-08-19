@@ -8,6 +8,10 @@
 #include "level.h"
 #include "weapon.h"
 
+// Bone editor corrections are applied to already evaluated skeleton matrices.
+// The implementation lives in player_hud_tune.cpp.
+void hud_apply_bone_adjustments(IKinematics* model, const shared_str& section, IKinematics* authoritative_source = nullptr);
+
 player_hud* g_player_hud{};
 
 namespace
@@ -1514,13 +1518,21 @@ void player_hud::update(const Fmatrix& cam_trans)
     }
 
     if (m_attached_items[0])
+    {
         m_attached_items[0]->update(true);
+        // Apply editor/config correction AFTER the item skeleton has finished
+        // CalculateBones, but BEFORE replacement hands consume it via merge.
+        hud_apply_bone_adjustments(m_attached_items[0]->m_model, m_attached_items[0]->m_sect_name);
+    }
 
     if (m_attached_items[1])
+    {
         m_attached_items[1]->update(true);
+        hud_apply_bone_adjustments(m_attached_items[1]->m_model, m_attached_items[1]->m_sect_name);
+    }
 
     // Item animation is calculated first; the replaceable hands mesh then
-    // consumes the common Source-bone transforms through merge callbacks.
+    // consumes the already-adjusted Source-bone transforms through merge callbacks.
     if (m_source_skeletons[0])
     {
         m_model_kinematics->CalculateBones_Invalidate();
@@ -1531,6 +1543,20 @@ void player_hud::update(const Fmatrix& cam_trans)
         m_model_2_kinematics->CalculateBones_Invalidate();
         m_model_2_kinematics->CalculateBones(TRUE);
     }
+
+    // Hand-only/helper bones that do not exist in the authoritative source
+    // still need to be editable. Exact source-owned names are skipped here
+    // because their correction has already propagated through skeleton merge.
+    auto adjust_item_for_hand = [this](u16 idx) -> attachable_hud_item* {
+        if (m_attached_items[idx])
+            return m_attached_items[idx];
+        return m_attached_items[idx ? 0 : 1];
+    };
+
+    if (attachable_hud_item* item = adjust_item_for_hand(0))
+        hud_apply_bone_adjustments(m_model_kinematics, item->m_sect_name, m_source_skeletons[0]);
+    if (attachable_hud_item* item = adjust_item_for_hand(1))
+        hud_apply_bone_adjustments(m_model_2_kinematics, item->m_sect_name, m_source_skeletons[1]);
 
     if (script_anim_item_attached && script_anim_item_model)
         update_script_item();
