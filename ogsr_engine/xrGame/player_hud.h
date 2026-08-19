@@ -451,6 +451,7 @@ public:
     void update_script_item();
 
     IKinematics* Model() { return m_model_kinematics; }
+    IKinematics* Model2() { return m_model_2_kinematics; }
     IKinematicsAnimated* AnimatedModel() { return m_model; }
     const Fmatrix& XFORM() const { return m_transform; }
 
