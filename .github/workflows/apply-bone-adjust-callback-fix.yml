@@ -1,0 +1,122 @@
+name: Apply bone adjust callback fix
+
+on:
+  push:
+    branches:
+      - fix/bone-adjust-callback-eval
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'bootstrap bone adjust callback fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Patch bone adjustment callback evaluation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('ogsr_engine/xrGame/player_hud_tune.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old, new, label):
+              global text
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, got {count}')
+              text = text.replace(old, new, 1)
+
+          replace_once(
+          '''struct bone_adjust_callback_context
+          {
+              BoneCallback original_callback{};
+              void* original_param{};
+              shared_str section;
+              shared_str bone_name;
+              u16 target_idx{};
+          };''',
+          '''struct bone_adjust_callback_context
+          {
+              BoneCallback original_callback{};
+              void* original_param{};
+              BOOL original_overwrite{};
+              u32 original_type{};
+              shared_str section;
+              shared_str bone_name;
+              u16 target_idx{};
+          };''',
+          'context fields')
+
+          replace_once(
+          '''            const BoneCallback original = bone.callback();
+
+              bone_adjust_callback_context context;
+              context.original_callback = original == BoneAdjustCallback ? nullptr : original;
+              context.original_param = original == BoneAdjustCallback ? nullptr : bone.callback_param();
+              context.section = item->m_sect_name;
+              context.bone_name = bone_name;
+              context.target_idx = target_idx;
+              g_bone_adjust_callbacks.emplace(&bone, context);
+
+              bone.set_callback(bctCustom, BoneAdjustCallback, context.original_param, TRUE);''',
+          '''            const BoneCallback original = bone.callback();
+              const bool already_ours = original == BoneAdjustCallback;
+
+              bone_adjust_callback_context context;
+              context.original_callback = already_ours ? nullptr : original;
+              context.original_param = already_ours ? nullptr : bone.callback_param();
+              context.original_overwrite = already_ours ? FALSE : bone.callback_overwrite();
+              context.original_type = already_ours ? bctCustom : bone.callback_type();
+              context.section = item->m_sect_name;
+              context.bone_name = bone_name;
+              context.target_idx = target_idx;
+              g_bone_adjust_callbacks.emplace(&bone, context);
+
+              // This flag is not cosmetic: overwrite=TRUE makes X-Ray skip the
+              // normal animated bone calculation entirely. Preserve the original
+              // callback contract; ordinary bones must stay non-overwrite so the
+              // current animation is built before our post-correction runs.
+              bone.set_callback(bctCustom, BoneAdjustCallback, context.original_param, context.original_overwrite);''',
+          'callback installation')
+
+          replace_once(
+          '''            if (bone_adjust_item_for_index(context.target_idx) && context.original_callback)
+                  bone->set_callback(bctCustom, context.original_callback, context.original_param, TRUE);
+              else
+                  bone->reset_callback();''',
+          '''            if (bone_adjust_item_for_index(context.target_idx) && context.original_callback)
+                  bone->set_callback(context.original_type, context.original_callback, context.original_param, context.original_overwrite);
+              else
+                  bone->reset_callback();''',
+          'callback restore')
+
+          # Keep the user's no-numpad setup working even after the later all-bone changes.
+          replacements = {
+              'if (dik == DIK_NUMPAD0)\n            {': 'if (dik == DIK_NUMPAD0 || dik == DIK_0)\n            {',
+              'else if (dik == DIK_NUMPAD1)\n                g_bHudAdjustMode = BONE_POS;': 'else if (dik == DIK_NUMPAD1 || dik == DIK_1)\n                g_bHudAdjustMode = BONE_POS;',
+              'else if (dik == DIK_NUMPAD2)\n                g_bHudAdjustMode = BONE_ROT;': 'else if (dik == DIK_NUMPAD2 || dik == DIK_2)\n                g_bHudAdjustMode = BONE_ROT;',
+              'else if (dik == DIK_NUMPAD8)\n                g_bHudAdjustMode = BONE_ADJUST_DELTA_POS;': 'else if (dik == DIK_NUMPAD8 || dik == DIK_8)\n                g_bHudAdjustMode = BONE_ADJUST_DELTA_POS;',
+              'else if (dik == DIK_NUMPAD9)\n                g_bHudAdjustMode = BONE_ADJUST_DELTA_ROT;': 'else if (dik == DIK_NUMPAD9 || dik == DIK_9)\n                g_bHudAdjustMode = BONE_ADJUST_DELTA_ROT;',
+              'if (dik == DIK_NUMPAD0)\n                g_bHudAdjustItemIdx = 0;': 'if (dik == DIK_NUMPAD0 || dik == DIK_0)\n                g_bHudAdjustItemIdx = 0;',
+              'else if (dik == DIK_NUMPAD1)\n                g_bHudAdjustItemIdx = 1;': 'else if (dik == DIK_NUMPAD1 || dik == DIK_1)\n                g_bHudAdjustItemIdx = 1;',
+          }
+          for old, new in replacements.items():
+              if old in text:
+                  text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ogsr_engine/xrGame/player_hud_tune.cpp
+          git commit -m "Fix bone adjust callback evaluation [ci build]"
+          git push origin HEAD:fix/bone-adjust-callback-eval
