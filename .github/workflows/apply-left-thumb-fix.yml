@@ -1,0 +1,96 @@
+name: Apply left thumb retarget fix
+
+on:
+  push:
+    branches:
+      - fix/source-left-thumb-retarget
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'bootstrap left thumb retarget fix'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Apply focused Source thumb retarget fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('ogsr_engine/xrGame/player_hud.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          old = '''            const bool direct_marker_merge = source_uses_bone_merge_markers && source_bone_id == exact_source_bone_id;
+            const bool own_bind_differs = !direct_marker_merge &&
+                !same_source_bind_transform(source->LL_GetData(source_bone_id).bind_transform, target->LL_GetData(target_bone_id).bind_transform);
+            const bool retarget_bind_chain = !direct_marker_merge &&
+                (own_bind_differs || source_bind_chain_needs_retarget(source, target, source_bone_id, target_bone_id));
+
+            // 0: fully compatible conventional hierarchy.
+            // 1: this bone has a different bind pose and needs conversion.
+            // 2: this bone is compatible, but must follow a converted parent.
+            // 3: Source/ARC9 bone-merge marker; copy its final model-space pose.
+            const u16 retarget_mode = direct_marker_merge ? 3 : (own_bind_differs ? 1 : (retarget_bind_chain ? 2 : 0));
+            target_bone.set_param(3, static_cast<float>(retarget_mode));
+            converted_bones += retarget_mode == 1;
+'''
+
+          new = '''            const bool left_thumb_marker = target_idx == 1 &&
+                (!xr_strcmp(bone_name, "valvebiped.bip01_l_finger0") ||
+                    !xr_strcmp(bone_name, "valvebiped.bip01_l_finger01") ||
+                    !xr_strcmp(bone_name, "valvebiped.bip01_l_finger02"));
+            const bool marker_bind_retarget = source_uses_bone_merge_markers && source_bone_id == exact_source_bone_id &&
+                left_thumb_marker &&
+                !same_source_bind_transform(source->LL_GetData(source_bone_id).bind_transform, target->LL_GetData(target_bone_id).bind_transform);
+            const bool direct_marker_merge = source_uses_bone_merge_markers && source_bone_id == exact_source_bone_id && !marker_bind_retarget;
+            const bool own_bind_differs = !direct_marker_merge && !marker_bind_retarget &&
+                !same_source_bind_transform(source->LL_GetData(source_bone_id).bind_transform, target->LL_GetData(target_bone_id).bind_transform);
+            const bool retarget_bind_chain = !direct_marker_merge && !marker_bind_retarget &&
+                (own_bind_differs || source_bind_chain_needs_retarget(source, target, source_bone_id, target_bone_id));
+
+            // 0: fully compatible conventional hierarchy.
+            // 1: this bone has a different bind pose and needs conversion.
+            // 2: this bone is compatible, but must follow a converted parent.
+            // 3: Source/ARC9 bone-merge marker; copy its final model-space pose.
+            // 4: left-thumb marker with a different bind pose; retarget in model space.
+            const u16 retarget_mode = marker_bind_retarget ? 4 : (direct_marker_merge ? 3 : (own_bind_differs ? 1 : (retarget_bind_chain ? 2 : 0)));
+            target_bone.set_param(3, static_cast<float>(retarget_mode));
+            converted_bones += retarget_mode == 1 || retarget_mode == 4;
+'''
+
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one marker-mode block, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          old = '''        else if (retarget_mode == 0)
+        {
+            Fmatrix target_bind, animated_delta;
+'''
+          new = '''        else if (retarget_mode == 0 || retarget_mode == 4)
+        {
+            // Mode 4 is a Source bone-merge marker whose bind orientation does
+            // not match the replacement left thumb. Preserve its animated
+            // model-space delta while applying the target hand bind pose.
+            Fmatrix target_bind, animated_delta;
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f'expected one model-space retarget block, found {text.count(old)}')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ogsr_engine/xrGame/player_hud.cpp
+          git commit -m "fix left thumb marker retarget [ci build]"
+          git push --force origin HEAD:fix/source-left-thumb-retarget
