@@ -450,6 +450,7 @@ public:
 
     void update_script_item();
 
+    // Both rendered hands skeletons are exposed for runtime bone tuning.
     IKinematics* Model() { return m_model_kinematics; }
     IKinematics* Model2() { return m_model_2_kinematics; }
     IKinematicsAnimated* AnimatedModel() { return m_model; }
