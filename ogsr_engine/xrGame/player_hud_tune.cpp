@@ -371,6 +371,88 @@ void refresh_bone_adjust_callbacks()
     }
 }
 
+void apply_single_bone_adjustment(IKinematics* model, u16 root_bone_id, const hud_bone_adjustment& adjustment)
+{
+    if (!model || root_bone_id == BI_NONE || root_bone_id >= model->LL_BoneCount())
+        return;
+
+    const u16 bone_count = model->LL_BoneCount();
+    xr_vector<Fmatrix> before(bone_count);
+    for (u16 bone_id = 0; bone_id < bone_count; ++bone_id)
+        before[bone_id].set(model->LL_GetBoneInstance(bone_id).mTransform);
+
+    Fvector rotation_radians = adjustment.rotation;
+    rotation_radians.mul(PI / 180.f);
+
+    Fmatrix correction;
+    correction.identity();
+    correction.rotateX(rotation_radians.x);
+
+    Fmatrix axis_rotation;
+    axis_rotation.identity();
+    axis_rotation.rotateY(rotation_radians.y);
+    correction.mulA_43(axis_rotation);
+
+    axis_rotation.identity();
+    axis_rotation.rotateZ(rotation_radians.z);
+    correction.mulA_43(axis_rotation);
+    correction.translate_over(adjustment.position);
+
+    CBoneInstance& root = model->LL_GetBoneInstance(root_bone_id);
+    root.mTransform.mulB_43(correction);
+    root.mRenderTransform.mul_43(root.mTransform, model->LL_GetData(root_bone_id).m2b_transform);
+
+    // CalculateBones has already evaluated the whole model. Rebuild every
+    // descendant from its PRE-adjustment animated parent-local transform,
+    // so moving/rotating a Base Human bone also moves its ValveBiped marker
+    // children and any skinned descendants. This is intentionally independent
+    // of the bone callback system.
+    xr_vector<u8> moved(bone_count, 0);
+    moved[root_bone_id] = 1;
+
+    for (u16 pass = 0; pass < bone_count; ++pass)
+    {
+        bool progress = false;
+        for (u16 bone_id = 0; bone_id < bone_count; ++bone_id)
+        {
+            if (moved[bone_id])
+                continue;
+
+            const u16 parent_id = model->LL_GetData(bone_id).GetParentID();
+            if (parent_id == BI_NONE || parent_id >= bone_count || !moved[parent_id])
+                continue;
+
+            Fmatrix old_parent_inverse, animated_local;
+            old_parent_inverse.invert(before[parent_id]);
+            animated_local.mul_43(old_parent_inverse, before[bone_id]);
+
+            CBoneInstance& bone = model->LL_GetBoneInstance(bone_id);
+            bone.mTransform.mul_43(model->LL_GetBoneInstance(parent_id).mTransform, animated_local);
+            bone.mRenderTransform.mul_43(bone.mTransform, model->LL_GetData(bone_id).m2b_transform);
+            moved[bone_id] = 1;
+            progress = true;
+        }
+
+        if (!progress)
+            break;
+    }
+}
+
+u16 bone_depth(IKinematics* model, u16 bone_id)
+{
+    u16 depth = 0;
+    const u16 bone_count = model ? model->LL_BoneCount() : 0;
+    for (u16 step = 0; model && step < bone_count; ++step)
+    {
+        const u16 parent_id = model->LL_GetData(bone_id).GetParentID();
+        if (parent_id == BI_NONE || parent_id >= bone_count)
+            break;
+        bone_id = parent_id;
+        ++depth;
+    }
+    return depth;
+}
+
 void print_bone_adjustment(const shared_str& section, LPCSTR bone_name, const hud_bone_adjustment& adjustment)
 {
     Log("####################################");
@@ -381,6 +463,48 @@ void print_bone_adjustment(const shared_str& section, LPCSTR bone_name, const hu
 }
 
 } // namespace
+
+void hud_apply_bone_adjustments(IKinematics* model, const shared_str& section, IKinematics* authoritative_source)
+{
+    if (!model || !section.c_str())
+        return;
+
+    auto& section_data = bone_adjust_section(section);
+    struct resolved_adjustment
+    {
+        u16 bone_id{};
+        u16 depth{};
+        const hud_bone_adjustment* adjustment{};
+    };
+
+    xr_vector<resolved_adjustment> resolved;
+    resolved.reserve(section_data.bones.size());
+
+    for (const auto& [bone_name, adjustment] : section_data.bones)
+    {
+        // If the animated item/source owns this exact bone, it was already
+        // adjusted before Source merge. Applying the same correction to the
+        // replacement hand would double it.
+        if (authoritative_source && find_bone_id_ci(authoritative_source, bone_name.c_str()) != BI_NONE)
+            continue;
+
+        const u16 bone_id = find_bone_id_ci(model, bone_name.c_str());
+        if (bone_id == BI_NONE)
+            continue;
+
+        resolved.push_back({bone_id, bone_depth(model, bone_id), &adjustment});
+    }
+
+    // Parent corrections first, child corrections afterwards. This makes
+    // multiple configured bones deterministic and lets child values remain
+    // local tweaks on top of an already-adjusted parent chain.
+    std::sort(resolved.begin(), resolved.end(), [](const resolved_adjustment& a, const resolved_adjustment& b) {
+        return a.depth < b.depth;
+    });
+
+    for (const resolved_adjustment& entry : resolved)
+        apply_single_bone_adjustment(model, entry.bone_id, *entry.adjustment);
+}
 
 bool set_bone_adjust_mode(LPCSTR bone_name)
 {
@@ -454,7 +578,6 @@ bool set_bone_adjust_mode(LPCSTR bone_name)
     g_bone_adjust_bone = resolved_bone_name;
     edit_bone_adjustment(item->m_sect_name, g_bone_adjust_bone.c_str());
     g_bHudAdjustMode = BONE_POS;
-    refresh_bone_adjust_callbacks();
 
     Msg("bone adjust mode: [%s] for [%s]", g_bone_adjust_bone.c_str(), item->m_sect_name.c_str());
     Msg("SHIFT+0 exit | SHIFT+1 position | SHIFT+2 rotation | SHIFT+8 pos step | SHIFT+9 rot step");
@@ -871,10 +994,6 @@ void player_hud::tune(const Ivector& _values)
 void hud_draw_adjust_mode()
 {
     ensure_bone_adjust_command_registered();
-
-    // Keep config-defined bone corrections active even while the adjustment UI
-    // itself is switched off.
-    refresh_bone_adjust_callbacks();
 
     if (!g_bHudAdjustMode)
         return;
