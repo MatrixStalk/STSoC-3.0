@@ -174,14 +174,61 @@ attachable_hud_item* bone_adjust_item_for_index(u16 idx)
     if (!g_player_hud)
         return nullptr;
 
-    if (auto item = g_player_hud->attached_item(idx); item && item->m_merge_skeleton)
+    // Bone adjustment is a generic HUD-skeleton feature. It must not depend on
+    // Source skeleton merge or on any particular naming convention.
+    if (auto item = g_player_hud->attached_item(idx))
         return item;
 
     const u16 other_idx = idx ? 0 : 1;
-    if (auto item = g_player_hud->attached_item(other_idx); item && item->m_merge_skeleton)
-        return item;
+    return g_player_hud->attached_item(other_idx);
+}
 
-    return nullptr;
+u16 find_bone_id_ci(IKinematics* model, LPCSTR bone_name)
+{
+    if (!model || !bone_name || !bone_name[0])
+        return BI_NONE;
+
+    const u16 direct = model->LL_BoneID(bone_name);
+    if (direct != BI_NONE)
+        return direct;
+
+    const u16 bone_count = model->LL_BoneCount();
+    for (u16 bone_id = 0; bone_id < bone_count; ++bone_id)
+    {
+        LPCSTR candidate = model->LL_BoneName(bone_id);
+        if (candidate && !_stricmp(candidate, bone_name))
+            return bone_id;
+    }
+
+    return BI_NONE;
+}
+
+void append_model_bone_tips(IKinematics* model, IConsole_Command::vecTips& tips)
+{
+    if (!model)
+        return;
+
+    const u16 bone_count = model->LL_BoneCount();
+    for (u16 bone_id = 0; bone_id < bone_count; ++bone_id)
+    {
+        LPCSTR bone_name = model->LL_BoneName(bone_id);
+        if (!bone_name || !bone_name[0])
+            continue;
+
+        const xr_string normalized = normalize_bone_name(bone_name);
+        bool duplicate = false;
+        for (const shared_str& tip : tips)
+        {
+            if (!_stricmp(tip.c_str(), normalized.c_str()))
+            {
+                duplicate = true;
+                break;
+            }
+        }
+
+        if (!duplicate)
+            tips.emplace_back(normalized.c_str());
+    }
 }
 
 void BoneAdjustCallback(CBoneInstance* bone)
@@ -190,8 +237,8 @@ void BoneAdjustCallback(CBoneInstance* bone)
     if (it == g_bone_adjust_callbacks.end())
         return;
 
-    // The Source merge callback owns the base pose. Run it first, then apply
-    // the user correction as a local post-transform.
+    // If this bone is also driven by Source merge/IK/another custom callback,
+    // let it establish the animated pose first, then apply the user correction.
     const BoneCallback original = it->second.original_callback;
     if (original && original != BoneAdjustCallback)
         original(bone);
@@ -248,7 +295,7 @@ void refresh_bone_adjust_callbacks()
         auto& section_data = bone_adjust_section(item->m_sect_name);
         for (const auto& [bone_name, adjustment] : section_data.bones)
         {
-            const u16 bone_id = model->LL_BoneID(bone_name);
+            const u16 bone_id = find_bone_id_ci(model, bone_name.c_str());
             if (bone_id == BI_NONE)
                 continue;
 
@@ -265,24 +312,22 @@ void refresh_bone_adjust_callbacks()
             }
 
             // refresh_source_skeleton_merge may have overwritten our wrapper.
-            // Capture the fresh Source callback and wrap it again.
+            // Capture the fresh callback and wrap it again. A bone without an
+            // existing callback is valid too: bone_adjust_mode must work on all
+            // bones, not only ValveBiped/Source-merge bones.
             if (context_it != g_bone_adjust_callbacks.end())
                 g_bone_adjust_callbacks.erase(context_it);
 
             const BoneCallback original = bone.callback();
-            if (!original || original == BoneAdjustCallback)
-                continue;
 
             bone_adjust_callback_context context;
-            context.original_callback = original;
-            context.original_param = bone.callback_param();
+            context.original_callback = original == BoneAdjustCallback ? nullptr : original;
+            context.original_param = original == BoneAdjustCallback ? nullptr : bone.callback_param();
             context.section = item->m_sect_name;
             context.bone_name = bone_name;
             context.target_idx = target_idx;
             g_bone_adjust_callbacks.emplace(&bone, context);
 
-            // Source skeleton merge callbacks are overwrite callbacks. Preserve
-            // that contract and invoke the original callback from our wrapper.
             bone.set_callback(bctCustom, BoneAdjustCallback, context.original_param, TRUE);
         }
     }
@@ -299,9 +344,6 @@ void refresh_bone_adjust_callbacks()
         const bone_adjust_callback_context context = it->second;
         if (bone->callback() == BoneAdjustCallback)
         {
-            // If Source merge is still active, put its callback back. If no
-            // merged item drives this hand anymore, the old Source callback is
-            // stale and must simply be removed.
             if (bone_adjust_item_for_index(context.target_idx) && context.original_callback)
                 bone->set_callback(bctCustom, context.original_callback, context.original_param, TRUE);
             else
@@ -364,26 +406,32 @@ bool set_bone_adjust_mode(LPCSTR bone_name)
 
     if (!item)
     {
-        Msg("! bone_adjust_mode: no HUD item with skeleton_merge is attached");
+        Msg("! bone_adjust_mode: no HUD item is attached");
         return false;
     }
 
-    const u16 bone0 = g_player_hud->Model() ? g_player_hud->Model()->LL_BoneID(normalized.c_str()) : BI_NONE;
-    const u16 bone1 = g_player_hud->Model2() ? g_player_hud->Model2()->LL_BoneID(normalized.c_str()) : BI_NONE;
+    const u16 bone0 = find_bone_id_ci(g_player_hud->Model(), normalized.c_str());
+    const u16 bone1 = find_bone_id_ci(g_player_hud->Model2(), normalized.c_str());
     if (bone0 == BI_NONE && bone1 == BI_NONE)
     {
         Msg("! bone_adjust_mode: bone [%s] not found in HUD hands skeleton", normalized.c_str());
         return false;
     }
 
+    LPCSTR resolved_bone_name = normalized.c_str();
+    if (bone0 != BI_NONE && g_player_hud->Model())
+        resolved_bone_name = g_player_hud->Model()->LL_BoneName(bone0);
+    else if (bone1 != BI_NONE && g_player_hud->Model2())
+        resolved_bone_name = g_player_hud->Model2()->LL_BoneName(bone1);
+
     g_bHudAdjustItemIdx = item_idx;
-    g_bone_adjust_bone = normalized.c_str();
+    g_bone_adjust_bone = resolved_bone_name;
     edit_bone_adjustment(item->m_sect_name, g_bone_adjust_bone.c_str());
     g_bHudAdjustMode = BONE_POS;
     refresh_bone_adjust_callbacks();
 
     Msg("bone adjust mode: [%s] for [%s]", g_bone_adjust_bone.c_str(), item->m_sect_name.c_str());
-    Msg("SHIFT+NUM0 exit | SHIFT+NUM1 position | SHIFT+NUM2 rotation | SHIFT+NUM8 pos step | SHIFT+NUM9 rot step");
+    Msg("SHIFT+0 exit | SHIFT+1 position | SHIFT+2 rotation | SHIFT+8 pos step | SHIFT+9 rot step");
     return true;
 }
 
@@ -398,7 +446,32 @@ public:
 
     void Info(TInfo& info) override
     {
-        strcpy_s(info, "adjust HUD hands bone: bone_adjust_mode <bone_name|off>");
+        strcpy_s(info, "adjust any HUD hands bone: bone_adjust_mode <bone_name|off>");
+    }
+
+    void fill_tips(vecTips& tips, u32 mode) override
+    {
+        add_LRU_to_tips(tips);
+
+        bool has_off = false;
+        for (const shared_str& tip : tips)
+        {
+            if (!_stricmp(tip.c_str(), "off"))
+            {
+                has_off = true;
+                break;
+            }
+        }
+        if (!has_off)
+            tips.emplace_back("off");
+
+        if (!g_player_hud)
+            return;
+
+        // Enumerate the actual loaded skeletons. ValveBiped, Base Human and
+        // custom rigs are all handled identically and appear automatically.
+        append_model_bone_tips(g_player_hud->Model(), tips);
+        append_model_bone_tips(g_player_hud->Model2(), tips);
     }
 };
 
@@ -780,9 +853,9 @@ void hud_draw_adjust_mode()
     {
         const char* text{};
         if (pInput->iGetAsyncKeyState(DIK_LSHIFT))
-            text = "press SHIFT+NUM 0-return|1-bone_pos|2-bone_rot|8-pos_step|9-rot_step";
+            text = "press SHIFT+0-return|1-bone_pos|2-bone_rot|8-pos_step|9-rot_step";
         else if (pInput->iGetAsyncKeyState(DIK_LCONTROL))
-            text = "press CTRL+NUM 0-item idx 1|1-item idx 2";
+            text = "press CTRL+0-item idx 1|1-item idx 2";
         else if (g_bHudAdjustMode == BONE_POS)
             text = "adjusting BONE POSITION";
         else if (g_bHudAdjustMode == BONE_ROT)
