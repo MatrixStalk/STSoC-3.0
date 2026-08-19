@@ -3,6 +3,8 @@
 #include "level.h"
 #include "debug_renderer.h"
 #include "../xr_3da/xr_input.h"
+#include "../xr_3da/XR_IOConsole.h"
+#include "../xr_3da/xr_ioc_cmd.h"
 #include "HudManager.h"
 #include "HudItem.h"
 #include "Weapon.h"
@@ -385,6 +387,33 @@ bool set_bone_adjust_mode(LPCSTR bone_name)
     return true;
 }
 
+namespace
+{
+class CCC_BoneAdjustMode final : public IConsole_Command
+{
+public:
+    CCC_BoneAdjustMode(LPCSTR name) : IConsole_Command(name) { bEmptyArgsHandled = TRUE; }
+
+    void Execute(LPCSTR args) override { set_bone_adjust_mode(args); }
+
+    void Info(TInfo& info) override
+    {
+        strcpy_s(info, "adjust HUD hands bone: bone_adjust_mode <bone_name|off>");
+    }
+};
+
+void ensure_bone_adjust_command_registered()
+{
+    static CCC_BoneAdjustMode command("bone_adjust_mode");
+    static bool registered{};
+    if (!registered && Console)
+    {
+        Console->AddCommand(&command);
+        registered = true;
+    }
+}
+} // namespace
+
 static bool is_attachable_item_tuning_mode()
 {
     return pInput->iGetAsyncKeyState(DIK_LSHIFT) || pInput->iGetAsyncKeyState(DIK_Z) || pInput->iGetAsyncKeyState(DIK_X) || pInput->iGetAsyncKeyState(DIK_C);
@@ -738,6 +767,8 @@ void player_hud::tune(const Ivector& _values)
 
 void hud_draw_adjust_mode()
 {
+    ensure_bone_adjust_command_registered();
+
     // Keep config-defined bone corrections active even while the adjustment UI
     // itself is switched off.
     refresh_bone_adjust_callbacks();
