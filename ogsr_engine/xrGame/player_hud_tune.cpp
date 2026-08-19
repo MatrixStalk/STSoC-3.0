@@ -77,6 +77,8 @@ struct bone_adjust_callback_context
 {
     BoneCallback original_callback{};
     void* original_param{};
+    BOOL original_overwrite{};
+    u32 original_type{};
     shared_str section;
     shared_str bone_name;
     u16 target_idx{};
@@ -203,6 +205,18 @@ u16 find_bone_id_ci(IKinematics* model, LPCSTR bone_name)
     return BI_NONE;
 }
 
+bool is_base_human_adjust_source(IKinematics* model)
+{
+    return model && find_bone_id_ci(model, "base humanlcollarbone") != BI_NONE &&
+        find_bone_id_ci(model, "base humanrcollarbone") != BI_NONE;
+}
+
+bool is_valvebiped_adjust_bone(LPCSTR bone_name)
+{
+    constexpr LPCSTR prefix = "valvebiped.bip01_";
+    return bone_name && !_strnicmp(bone_name, prefix, xr_strlen(prefix));
+}
+
 void append_model_bone_tips(IKinematics* model, IConsole_Command::vecTips& tips)
 {
     if (!model)
@@ -237,8 +251,8 @@ void BoneAdjustCallback(CBoneInstance* bone)
     if (it == g_bone_adjust_callbacks.end())
         return;
 
-    // If this bone is also driven by Source merge/IK/another custom callback,
-    // let it establish the animated pose first, then apply the user correction.
+    // Preserve whatever normally owns the pose (Source merge, IK, etc.), then
+    // apply the editor correction on top of the fully evaluated bone transform.
     const BoneCallback original = it->second.original_callback;
     if (original && original != BoneAdjustCallback)
         original(bone);
@@ -292,17 +306,24 @@ void refresh_bone_adjust_callbacks()
 
     std::unordered_set<CBoneInstance*> desired;
 
-    auto apply_section_to_model = [&](IKinematics* model, attachable_hud_item* item, u16 target_idx, bool skip_if_source_has_bone) {
+    auto apply_section_to_model = [&](IKinematics* model, attachable_hud_item* item, u16 target_idx, bool replacement_hands) {
         if (!model || !item)
             return;
 
         auto& section_data = bone_adjust_section(item->m_sect_name);
         for (const auto& [bone_name, adjustment] : section_data.bones)
         {
-            // Prefer the attached item/source skeleton when both source and replacement
-            // hands contain the same bone. Applying both would double the correction.
-            if (skip_if_source_has_bone && item->m_model && find_bone_id_ci(item->m_model, bone_name.c_str()) != BI_NONE)
-                continue;
+            if (replacement_hands && item->m_model && find_bone_id_ci(item->m_model, bone_name.c_str()) != BI_NONE)
+            {
+                // A Base Human Source export may also contain ValveBiped.* marker
+                // bones. Those markers are NOT the motion source used by retargeting:
+                // the visible replacement hand is driven from Base Human*. In that
+                // case we must still apply the correction to the visible ValveBiped
+                // target as well, otherwise editing the marker appears to do nothing.
+                const bool source_marker = is_base_human_adjust_source(item->m_model) && is_valvebiped_adjust_bone(bone_name.c_str());
+                if (!source_marker)
+                    continue;
+            }
 
             const u16 bone_id = find_bone_id_ci(model, bone_name.c_str());
             if (bone_id == BI_NONE)
@@ -324,28 +345,35 @@ void refresh_bone_adjust_callbacks()
                 g_bone_adjust_callbacks.erase(context_it);
 
             const BoneCallback original = bone.callback();
+            const bool already_ours = original == BoneAdjustCallback;
 
             bone_adjust_callback_context context;
-            context.original_callback = original == BoneAdjustCallback ? nullptr : original;
-            context.original_param = original == BoneAdjustCallback ? nullptr : bone.callback_param();
+            context.original_callback = already_ours ? nullptr : original;
+            context.original_param = already_ours ? nullptr : bone.callback_param();
+            context.original_overwrite = already_ours ? FALSE : bone.callback_overwrite();
+            context.original_type = already_ours ? bctCustom : bone.callback_type();
             context.section = item->m_sect_name;
             context.bone_name = bone_name;
             context.target_idx = target_idx;
             g_bone_adjust_callbacks.emplace(&bone, context);
 
-            bone.set_callback(bctCustom, BoneAdjustCallback, context.original_param, TRUE);
+            // overwrite=TRUE tells X-Ray to skip BuildBoneMatrix entirely. That is
+            // correct for Source merge callbacks, but was fatal for ordinary bones:
+            // their current animated pose never got built. Mirror the callback we
+            // are wrapping instead of forcing overwrite on every bone.
+            bone.set_callback(bctCustom, BoneAdjustCallback, context.original_param, context.original_overwrite);
         }
     };
 
-    // Base Human*, ValveBiped and arbitrary source-rig bones live on the attached
-    // item visual, and its bones are evaluated before the replacement hands merge.
+    // Source/item skeleton first. Base Human* corrections are therefore present
+    // before the replacement hands consume them through the merge callbacks.
     if (item0)
         apply_section_to_model(item0->m_model, item0, 0, false);
     if (item1)
         apply_section_to_model(item1->m_model, item1, 1, false);
 
-    // Replacement hand skeletons are still editable for bones that are absent from
-    // the item/source skeleton (helpers and custom hand-only bones).
+    // Replacement hand skeletons remain directly editable too. On Base Human
+    // exports this is also where ValveBiped marker edits become visibly useful.
     apply_section_to_model(models[0], bone_adjust_item_for_index(0), 0, true);
     apply_section_to_model(models[1], bone_adjust_item_for_index(1), 1, true);
 
@@ -362,7 +390,7 @@ void refresh_bone_adjust_callbacks()
         if (bone->callback() == BoneAdjustCallback)
         {
             if (bone_adjust_item_for_index(context.target_idx) && context.original_callback)
-                bone->set_callback(bctCustom, context.original_callback, context.original_param, TRUE);
+                bone->set_callback(context.original_type, context.original_callback, context.original_param, context.original_overwrite);
             else
                 bone->reset_callback();
         }
@@ -438,6 +466,19 @@ bool set_bone_adjust_mode(LPCSTR bone_name)
     {
         Msg("! bone_adjust_mode: bone [%s] not found in attached item or HUD hands skeleton", normalized.c_str());
         return false;
+    }
+
+    // Keep the adjustment section paired with the item that actually owns a
+    // source bone. This matters for slot 1/custom HUD rigs with different sections.
+    if (source_bone0 != BI_NONE && g_player_hud->attached_item(0))
+    {
+        item_idx = 0;
+        item = g_player_hud->attached_item(0);
+    }
+    else if (source_bone1 != BI_NONE && g_player_hud->attached_item(1))
+    {
+        item_idx = 1;
+        item = g_player_hud->attached_item(1);
     }
 
     LPCSTR resolved_bone_name = normalized.c_str();
@@ -952,26 +993,26 @@ void hud_adjust_mode_keyb(int dik)
     {
         if (pInput->iGetAsyncKeyState(DIK_LSHIFT))
         {
-            if (dik == DIK_NUMPAD0)
+            if (dik == DIK_NUMPAD0 || dik == DIK_0)
             {
                 g_bHudAdjustMode = OFF;
                 g_bone_adjust_bone = nullptr;
             }
-            else if (dik == DIK_NUMPAD1)
+            else if (dik == DIK_NUMPAD1 || dik == DIK_1)
                 g_bHudAdjustMode = BONE_POS;
-            else if (dik == DIK_NUMPAD2)
+            else if (dik == DIK_NUMPAD2 || dik == DIK_2)
                 g_bHudAdjustMode = BONE_ROT;
-            else if (dik == DIK_NUMPAD8)
+            else if (dik == DIK_NUMPAD8 || dik == DIK_8)
                 g_bHudAdjustMode = BONE_ADJUST_DELTA_POS;
-            else if (dik == DIK_NUMPAD9)
+            else if (dik == DIK_NUMPAD9 || dik == DIK_9)
                 g_bHudAdjustMode = BONE_ADJUST_DELTA_ROT;
             return;
         }
         else if (pInput->iGetAsyncKeyState(DIK_LCONTROL))
         {
-            if (dik == DIK_NUMPAD0)
+            if (dik == DIK_NUMPAD0 || dik == DIK_0)
                 g_bHudAdjustItemIdx = 0;
-            else if (dik == DIK_NUMPAD1)
+            else if (dik == DIK_NUMPAD1 || dik == DIK_1)
                 g_bHudAdjustItemIdx = 1;
             return;
         }
