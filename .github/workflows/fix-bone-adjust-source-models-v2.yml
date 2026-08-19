@@ -1,0 +1,208 @@
+name: Fix bone adjust source models v2
+
+on:
+  push:
+    branches:
+      - fix/bone-adjust-source-models-v2
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'trigger source skeleton bone adjust v2'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Patch player_hud_tune.cpp
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('ogsr_engine/xrGame/player_hud_tune.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          old = 'IKinematics* g_bone_adjust_models[2]{};\n'
+          if old not in text:
+              raise SystemExit('g_bone_adjust_models declaration not found')
+          text = text.replace(old, 'IKinematics* g_bone_adjust_models[4]{};\n', 1)
+
+          start = text.index('void refresh_bone_adjust_callbacks()\n{')
+          end = text.index('\nvoid print_bone_adjustment(', start)
+          old_block = text[start:end]
+          new_block = r'''void refresh_bone_adjust_callbacks()
+{
+    attachable_hud_item* item0 = g_player_hud ? g_player_hud->attached_item(0) : nullptr;
+    attachable_hud_item* item1 = g_player_hud ? g_player_hud->attached_item(1) : nullptr;
+
+    IKinematics* models[] = {
+        g_player_hud ? g_player_hud->Model() : nullptr,
+        g_player_hud ? g_player_hud->Model2() : nullptr,
+        item0 ? item0->m_model : nullptr,
+        item1 ? item1->m_model : nullptr,
+    };
+
+    bool models_changed = false;
+    for (u16 i = 0; i < 4; ++i)
+        models_changed |= models[i] != g_bone_adjust_models[i];
+
+    if (models_changed)
+    {
+        g_bone_adjust_callbacks.clear();
+        for (u16 i = 0; i < 4; ++i)
+            g_bone_adjust_models[i] = models[i];
+    }
+
+    std::unordered_set<CBoneInstance*> desired;
+
+    auto apply_section_to_model = [&](IKinematics* model, attachable_hud_item* item, u16 target_idx, bool skip_if_source_has_bone) {
+        if (!model || !item)
+            return;
+
+        auto& section_data = bone_adjust_section(item->m_sect_name);
+        for (const auto& [bone_name, adjustment] : section_data.bones)
+        {
+            // Source/item skeleton takes priority. Applying the same named bone to both
+            // source and replacement hands would double the correction after merge.
+            if (skip_if_source_has_bone && item->m_model && find_bone_id_ci(item->m_model, bone_name.c_str()) != BI_NONE)
+                continue;
+
+            const u16 bone_id = find_bone_id_ci(model, bone_name.c_str());
+            if (bone_id == BI_NONE)
+                continue;
+
+            CBoneInstance& bone = model->LL_GetBoneInstance(bone_id);
+            desired.insert(&bone);
+
+            auto context_it = g_bone_adjust_callbacks.find(&bone);
+            if (bone.callback() == BoneAdjustCallback && context_it != g_bone_adjust_callbacks.end())
+            {
+                context_it->second.section = item->m_sect_name;
+                context_it->second.bone_name = bone_name;
+                context_it->second.target_idx = target_idx;
+                continue;
+            }
+
+            if (context_it != g_bone_adjust_callbacks.end())
+                g_bone_adjust_callbacks.erase(context_it);
+
+            const BoneCallback original = bone.callback();
+
+            bone_adjust_callback_context context;
+            context.original_callback = original == BoneAdjustCallback ? nullptr : original;
+            context.original_param = original == BoneAdjustCallback ? nullptr : bone.callback_param();
+            context.section = item->m_sect_name;
+            context.bone_name = bone_name;
+            context.target_idx = target_idx;
+            g_bone_adjust_callbacks.emplace(&bone, context);
+
+            bone.set_callback(bctCustom, BoneAdjustCallback, context.original_param, TRUE);
+        }
+    };
+
+    // Base Human*, ValveBiped and arbitrary source-rig bones actually live on
+    // the attached item visual, so edit those first.
+    if (item0)
+        apply_section_to_model(item0->m_model, item0, 0, false);
+    if (item1)
+        apply_section_to_model(item1->m_model, item1, 1, false);
+
+    // Replacement hands remain editable for bones absent from the item visual.
+    apply_section_to_model(models[0], bone_adjust_item_for_index(0), 0, true);
+    apply_section_to_model(models[1], bone_adjust_item_for_index(1), 1, true);
+
+    for (auto it = g_bone_adjust_callbacks.begin(); it != g_bone_adjust_callbacks.end();)
+    {
+        if (desired.find(it->first) != desired.end())
+        {
+            ++it;
+            continue;
+        }
+
+        CBoneInstance* bone = it->first;
+        const bone_adjust_callback_context context = it->second;
+        if (bone->callback() == BoneAdjustCallback)
+        {
+            if (bone_adjust_item_for_index(context.target_idx) && context.original_callback)
+                bone->set_callback(bctCustom, context.original_callback, context.original_param, TRUE);
+            else
+                bone->reset_callback();
+        }
+
+        it = g_bone_adjust_callbacks.erase(it);
+    }
+}
+'''
+          text = text[:start] + new_block + text[end:]
+
+          old = r'''    const u16 bone0 = find_bone_id_ci(g_player_hud->Model(), normalized.c_str());
+    const u16 bone1 = find_bone_id_ci(g_player_hud->Model2(), normalized.c_str());
+    if (bone0 == BI_NONE && bone1 == BI_NONE)
+    {
+        Msg("! bone_adjust_mode: bone [%s] not found in HUD hands skeleton", normalized.c_str());
+        return false;
+    }
+
+    LPCSTR resolved_bone_name = normalized.c_str();
+    if (bone0 != BI_NONE && g_player_hud->Model())
+        resolved_bone_name = g_player_hud->Model()->LL_BoneName(bone0);
+    else if (bone1 != BI_NONE && g_player_hud->Model2())
+        resolved_bone_name = g_player_hud->Model2()->LL_BoneName(bone1);
+'''
+          new = r'''    IKinematics* item_model0 = g_player_hud->attached_item(0) ? g_player_hud->attached_item(0)->m_model : nullptr;
+    IKinematics* item_model1 = g_player_hud->attached_item(1) ? g_player_hud->attached_item(1)->m_model : nullptr;
+
+    const u16 source_bone0 = find_bone_id_ci(item_model0, normalized.c_str());
+    const u16 source_bone1 = find_bone_id_ci(item_model1, normalized.c_str());
+    const u16 hands_bone0 = find_bone_id_ci(g_player_hud->Model(), normalized.c_str());
+    const u16 hands_bone1 = find_bone_id_ci(g_player_hud->Model2(), normalized.c_str());
+    if (source_bone0 == BI_NONE && source_bone1 == BI_NONE && hands_bone0 == BI_NONE && hands_bone1 == BI_NONE)
+    {
+        Msg("! bone_adjust_mode: bone [%s] not found in attached item or HUD hands skeleton", normalized.c_str());
+        return false;
+    }
+
+    LPCSTR resolved_bone_name = normalized.c_str();
+    if (source_bone0 != BI_NONE && item_model0)
+        resolved_bone_name = item_model0->LL_BoneName(source_bone0);
+    else if (source_bone1 != BI_NONE && item_model1)
+        resolved_bone_name = item_model1->LL_BoneName(source_bone1);
+    else if (hands_bone0 != BI_NONE && g_player_hud->Model())
+        resolved_bone_name = g_player_hud->Model()->LL_BoneName(hands_bone0);
+    else if (hands_bone1 != BI_NONE && g_player_hud->Model2())
+        resolved_bone_name = g_player_hud->Model2()->LL_BoneName(hands_bone1);
+'''
+          if old not in text:
+              raise SystemExit('selection lookup block not found')
+          text = text.replace(old, new, 1)
+
+          old = r'''        // Enumerate the actual loaded skeletons. ValveBiped, Base Human and
+        // custom rigs are all handled identically and appear automatically.
+        append_model_bone_tips(g_player_hud->Model(), tips);
+        append_model_bone_tips(g_player_hud->Model2(), tips);
+'''
+          new = r'''        // Enumerate both replacement hands and attached item/source visuals.
+        // Base Human* bones usually live in the attached item model, not Model()/Model2().
+        append_model_bone_tips(g_player_hud->Model(), tips);
+        append_model_bone_tips(g_player_hud->Model2(), tips);
+        if (auto item = g_player_hud->attached_item(0))
+            append_model_bone_tips(item->m_model, tips);
+        if (auto item = g_player_hud->attached_item(1))
+            append_model_bone_tips(item->m_model, tips);
+'''
+          if old not in text:
+              raise SystemExit('autocomplete block not found')
+          text = text.replace(old, new, 1)
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add ogsr_engine/xrGame/player_hud_tune.cpp
+          git commit -m "Fix source skeleton bone adjust and autocomplete [ci build]"
+          git push origin HEAD:fix/bone-adjust-source-models-v2
