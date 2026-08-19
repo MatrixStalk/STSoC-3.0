@@ -84,7 +84,7 @@ struct bone_adjust_callback_context
 
 string_unordered_map<shared_str, hud_bone_adjustment_section> g_hud_bone_adjustments;
 std::unordered_map<CBoneInstance*, bone_adjust_callback_context> g_bone_adjust_callbacks;
-IKinematics* g_bone_adjust_models[2]{};
+IKinematics* g_bone_adjust_models[4]{};
 shared_str g_bone_adjust_bone;
 
 bool is_bone_adjust_mode()
@@ -269,32 +269,41 @@ void BoneAdjustCallback(CBoneInstance* bone)
 
 void refresh_bone_adjust_callbacks()
 {
+    attachable_hud_item* item0 = g_player_hud ? g_player_hud->attached_item(0) : nullptr;
+    attachable_hud_item* item1 = g_player_hud ? g_player_hud->attached_item(1) : nullptr;
+
     IKinematics* models[] = {
         g_player_hud ? g_player_hud->Model() : nullptr,
         g_player_hud ? g_player_hud->Model2() : nullptr,
+        item0 ? item0->m_model : nullptr,
+        item1 ? item1->m_model : nullptr,
     };
 
-    // A HUD hands visual can be destroyed/recreated in-place. Never touch old
-    // CBoneInstance pointers after the owning model changed.
-    if (models[0] != g_bone_adjust_models[0] || models[1] != g_bone_adjust_models[1])
+    bool models_changed = false;
+    for (u16 i = 0; i < 4; ++i)
+        models_changed |= models[i] != g_bone_adjust_models[i];
+
+    if (models_changed)
     {
         g_bone_adjust_callbacks.clear();
-        g_bone_adjust_models[0] = models[0];
-        g_bone_adjust_models[1] = models[1];
+        for (u16 i = 0; i < 4; ++i)
+            g_bone_adjust_models[i] = models[i];
     }
 
     std::unordered_set<CBoneInstance*> desired;
 
-    for (u16 target_idx = 0; target_idx < 2; ++target_idx)
-    {
-        IKinematics* model = models[target_idx];
-        attachable_hud_item* item = bone_adjust_item_for_index(target_idx);
+    auto apply_section_to_model = [&](IKinematics* model, attachable_hud_item* item, u16 target_idx, bool skip_if_source_has_bone) {
         if (!model || !item)
-            continue;
+            return;
 
         auto& section_data = bone_adjust_section(item->m_sect_name);
         for (const auto& [bone_name, adjustment] : section_data.bones)
         {
+            // Prefer the attached item/source skeleton when both source and replacement
+            // hands contain the same bone. Applying both would double the correction.
+            if (skip_if_source_has_bone && item->m_model && find_bone_id_ci(item->m_model, bone_name.c_str()) != BI_NONE)
+                continue;
+
             const u16 bone_id = find_bone_id_ci(model, bone_name.c_str());
             if (bone_id == BI_NONE)
                 continue;
@@ -311,10 +320,6 @@ void refresh_bone_adjust_callbacks()
                 continue;
             }
 
-            // refresh_source_skeleton_merge may have overwritten our wrapper.
-            // Capture the fresh callback and wrap it again. A bone without an
-            // existing callback is valid too: bone_adjust_mode must work on all
-            // bones, not only ValveBiped/Source-merge bones.
             if (context_it != g_bone_adjust_callbacks.end())
                 g_bone_adjust_callbacks.erase(context_it);
 
@@ -330,7 +335,19 @@ void refresh_bone_adjust_callbacks()
 
             bone.set_callback(bctCustom, BoneAdjustCallback, context.original_param, TRUE);
         }
-    }
+    };
+
+    // Base Human*, ValveBiped and arbitrary source-rig bones live on the attached
+    // item visual, and its bones are evaluated before the replacement hands merge.
+    if (item0)
+        apply_section_to_model(item0->m_model, item0, 0, false);
+    if (item1)
+        apply_section_to_model(item1->m_model, item1, 1, false);
+
+    // Replacement hand skeletons are still editable for bones that are absent from
+    // the item/source skeleton (helpers and custom hand-only bones).
+    apply_section_to_model(models[0], bone_adjust_item_for_index(0), 0, true);
+    apply_section_to_model(models[1], bone_adjust_item_for_index(1), 1, true);
 
     for (auto it = g_bone_adjust_callbacks.begin(); it != g_bone_adjust_callbacks.end();)
     {
@@ -410,19 +427,28 @@ bool set_bone_adjust_mode(LPCSTR bone_name)
         return false;
     }
 
-    const u16 bone0 = find_bone_id_ci(g_player_hud->Model(), normalized.c_str());
-    const u16 bone1 = find_bone_id_ci(g_player_hud->Model2(), normalized.c_str());
-    if (bone0 == BI_NONE && bone1 == BI_NONE)
+    IKinematics* item_model0 = g_player_hud->attached_item(0) ? g_player_hud->attached_item(0)->m_model : nullptr;
+    IKinematics* item_model1 = g_player_hud->attached_item(1) ? g_player_hud->attached_item(1)->m_model : nullptr;
+
+    const u16 source_bone0 = find_bone_id_ci(item_model0, normalized.c_str());
+    const u16 source_bone1 = find_bone_id_ci(item_model1, normalized.c_str());
+    const u16 hands_bone0 = find_bone_id_ci(g_player_hud->Model(), normalized.c_str());
+    const u16 hands_bone1 = find_bone_id_ci(g_player_hud->Model2(), normalized.c_str());
+    if (source_bone0 == BI_NONE && source_bone1 == BI_NONE && hands_bone0 == BI_NONE && hands_bone1 == BI_NONE)
     {
-        Msg("! bone_adjust_mode: bone [%s] not found in HUD hands skeleton", normalized.c_str());
+        Msg("! bone_adjust_mode: bone [%s] not found in attached item or HUD hands skeleton", normalized.c_str());
         return false;
     }
 
     LPCSTR resolved_bone_name = normalized.c_str();
-    if (bone0 != BI_NONE && g_player_hud->Model())
-        resolved_bone_name = g_player_hud->Model()->LL_BoneName(bone0);
-    else if (bone1 != BI_NONE && g_player_hud->Model2())
-        resolved_bone_name = g_player_hud->Model2()->LL_BoneName(bone1);
+    if (source_bone0 != BI_NONE && item_model0)
+        resolved_bone_name = item_model0->LL_BoneName(source_bone0);
+    else if (source_bone1 != BI_NONE && item_model1)
+        resolved_bone_name = item_model1->LL_BoneName(source_bone1);
+    else if (hands_bone0 != BI_NONE && g_player_hud->Model())
+        resolved_bone_name = g_player_hud->Model()->LL_BoneName(hands_bone0);
+    else if (hands_bone1 != BI_NONE && g_player_hud->Model2())
+        resolved_bone_name = g_player_hud->Model2()->LL_BoneName(hands_bone1);
 
     g_bHudAdjustItemIdx = item_idx;
     g_bone_adjust_bone = resolved_bone_name;
@@ -446,7 +472,7 @@ public:
 
     void Info(TInfo& info) override
     {
-        strcpy_s(info, "adjust any HUD hands bone: bone_adjust_mode <bone_name|off>");
+        strcpy_s(info, "adjust any HUD/item skeleton bone: bone_adjust_mode <bone_name|off>");
     }
 
     void fill_tips(vecTips& tips, u32 mode) override
@@ -468,10 +494,14 @@ public:
         if (!g_player_hud)
             return;
 
-        // Enumerate the actual loaded skeletons. ValveBiped, Base Human and
-        // custom rigs are all handled identically and appear automatically.
+        // Both replacement hands and the attached item/source skeleton are searchable.
+        // Base Human* names normally live in m_model of the attached HUD item.
         append_model_bone_tips(g_player_hud->Model(), tips);
         append_model_bone_tips(g_player_hud->Model2(), tips);
+        if (auto item = g_player_hud->attached_item(0))
+            append_model_bone_tips(item->m_model, tips);
+        if (auto item = g_player_hud->attached_item(1))
+            append_model_bone_tips(item->m_model, tips);
     }
 };
 
