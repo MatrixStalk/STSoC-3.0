@@ -170,6 +170,10 @@ public:
     //инициализация свойств присоединенных аддонов
     virtual void InitAddons();
 
+    // Render separate addon models attached to weapon skeleton bones. This is
+    // optional and coexists with the legacy embedded-bone addon visuals.
+    void RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mode);
+
     //для отоброажения иконок апгрейдов в интерфейсе
     int GetScopeX() { return m_iScopeX; }
     int GetScopeY() { return m_iScopeY; }
@@ -181,6 +185,22 @@ public:
     const shared_str& GetGrenadeLauncherName() const { return m_sGrenadeLauncherName; }
     const shared_str& GetScopeName() const { return m_sScopeName; }
     const shared_str& GetSilencerName() const { return m_sSilencerName; }
+
+    enum ECustomAddonSlot : u8
+    {
+        eCustomAddonMagazine,
+        eCustomAddonForegrip,
+        eCustomAddonSideRail,
+        eCustomAddonCount
+    };
+
+    bool CanAttachCustomAddon(const CInventoryItem* item) const;
+    bool CanDetachCustomAddon(LPCSTR item_section) const;
+    bool AttachCustomAddon(const CInventoryItem* item);
+    bool DetachCustomAddon(LPCSTR item_section);
+    const shared_str& GetCustomAddonSection(ECustomAddonSlot slot) const;
+    const xr_vector<shared_str>& GetCustomAddonAllowed(ECustomAddonSlot slot) const;
+    u8 GetCustomAddonIndex(ECustomAddonSlot slot) const;
 
     u8 GetAddonsState() const { return m_flagsAddOnState; };
     void SetAddonsState(u8 st) { m_flagsAddOnState = st; }
@@ -203,6 +223,27 @@ public:
     shared_str m_sHud_wpn_flashlight_bone;
 
 private:
+    struct SAddonVisual
+    {
+        shared_str section;
+        IRenderVisual* world{};
+        IRenderVisual* hud{};
+        bool world_reported{};
+        bool hud_reported{};
+    };
+
+    struct SCustomAddonSlot
+    {
+        xr_vector<shared_str> allowed;
+        u8 installed_index{}; // 0 = empty, N = allowed[N - 1]
+    };
+
+    SCustomAddonSlot m_custom_addon_slots[eCustomAddonCount];
+    SAddonVisual m_addon_visuals[3 + eCustomAddonCount];
+    float m_world_scaling{1.f};
+    void DestroyAddonVisuals();
+    void UpdateAddonReplacementVisibility(bool hud_mode);
+
     xr_vector<shared_str> hidden_bones;
     xr_vector<shared_str> hud_hidden_bones;
 

@@ -26,6 +26,7 @@
 #include "../script_callback_ex.h"
 #include "../script_game_object.h"
 #include "../BottleItem.h"
+#include "../string_table.h"
 #include "../xr_3da/xr_input.h"
 
 #define CAR_BODY_XML "carbody_new.xml"
@@ -363,6 +364,12 @@ void CUICarBodyWnd::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
                 PlaySnd(eInvDetachAddon);
             }
             break;
+            case INVENTORY_DETACH_CUSTOM_ADDON: {
+                auto wpn = smart_cast<CWeapon*>(CurrentIItem());
+                wpn->Detach(static_cast<LPCSTR>(m_pUIPropertiesBox->GetClickedItem()->GetData()), true);
+                PlaySnd(eInvDetachAddon);
+            }
+            break;
             case INVENTORY_MOVE_ACTION: {
                 void* d = m_pUIPropertiesBox->GetClickedItem()->GetData();
                 bool b_all = (d == (void*)33);
@@ -388,7 +395,8 @@ void CUICarBodyWnd::SendMessage(CUIWindow* pWnd, s16 msg, void* pData)
             case INVENTORY_UNLOAD_MAGAZINE:
             case INVENTORY_DETACH_SCOPE_ADDON:
             case INVENTORY_DETACH_SILENCER_ADDON:
-            case INVENTORY_DETACH_GRENADE_LAUNCHER_ADDON: {
+            case INVENTORY_DETACH_GRENADE_LAUNCHER_ADDON:
+            case INVENTORY_DETACH_CUSTOM_ADDON: {
                 if (m_pInventoryBox)
                 {
                     UpdateLists_delayed();
@@ -731,6 +739,19 @@ void CUICarBodyWnd::ActivatePropertiesBox()
         if (pWeapon->SilencerAttachable() && pWeapon->IsSilencerAttached())
         {
             m_pUIPropertiesBox->AddItem("st_detach_silencer", NULL, INVENTORY_DETACH_SILENCER_ADDON);
+            b_show = true;
+        }
+        for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
+        {
+            const shared_str& addon_section = pWeapon->GetCustomAddonSection(static_cast<CWeapon::ECustomAddonSlot>(slot));
+            if (!addon_section.c_str())
+                continue;
+
+            LPCSTR inv_name = READ_IF_EXISTS(pSettings, r_string, addon_section, "inv_name", addon_section.c_str());
+            const shared_str translated_name = CStringTable().translate(inv_name);
+            string256 label{};
+            xr_sprintf(label, "Detach: %s", translated_name.c_str());
+            m_pUIPropertiesBox->AddItem(label, const_cast<char*>(addon_section.c_str()), INVENTORY_DETACH_CUSTOM_ADDON);
             b_show = true;
         }
         if (smart_cast<CWeaponMagazined*>(pWeapon))

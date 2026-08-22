@@ -1192,6 +1192,8 @@ bool CWeaponMagazined::CanAttach(PIItem pIItem)
     else if (pGrenadeLauncher && m_eGrenadeLauncherStatus == ALife::eAddonAttachable && (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonGrenadeLauncher) == 0 &&
              (m_sGrenadeLauncherName == pIItem->object().cNameSect()))
         return true;
+    else if (CanAttachCustomAddon(pIItem))
+        return true;
     else
         return inherited::CanAttach(pIItem);
 }
@@ -1205,6 +1207,8 @@ bool CWeaponMagazined::CanDetach(const char* item_section_name)
         return true;
     else if (m_eGrenadeLauncherStatus == CSE_ALifeItemWeapon::eAddonAttachable && 0 != (m_flagsAddOnState & CSE_ALifeItemWeapon::eWeaponAddonGrenadeLauncher) &&
              (m_sGrenadeLauncherName == item_section_name))
+        return true;
+    else if (CanDetachCustomAddon(item_section_name))
         return true;
     else
         return inherited::CanDetach(item_section_name);
@@ -1236,6 +1240,8 @@ bool CWeaponMagazined::Attach(PIItem pIItem, bool b_send_event)
         m_flagsAddOnState |= CSE_ALifeItemWeapon::eWeaponAddonGrenadeLauncher;
         result = true;
     }
+    else if (AttachCustomAddon(pIItem))
+        result = true;
 
     if (result)
     {
@@ -1286,6 +1292,12 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
     {
         m_flagsAddOnState &= ~CSE_ALifeItemWeapon::eWeaponAddonGrenadeLauncher;
 
+        UpdateAddonsVisibility();
+        InitAddons();
+        return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
+    }
+    else if (DetachCustomAddon(item_section_name))
+    {
         UpdateAddonsVisibility();
         InitAddons();
         return CInventoryItemObject::Detach(item_section_name, b_spawn_item);

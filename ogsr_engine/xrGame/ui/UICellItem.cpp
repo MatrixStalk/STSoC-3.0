@@ -379,6 +379,11 @@ void CUICellItem::ColorizeItems(std::initializer_list<CUIDragDropListEx*> args)
             ColorizeSects.push_back(Wpn->GetScopeName());
         if (Wpn->GrenadeLauncherAttachable())
             ColorizeSects.push_back(Wpn->GetGrenadeLauncherName());
+        for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
+        {
+            const auto& allowed = Wpn->GetCustomAddonAllowed(static_cast<CWeapon::ECustomAddonSlot>(slot));
+            std::copy(allowed.begin(), allowed.end(), std::back_inserter(ColorizeSects));
+        }
         std::copy(Wpn->m_highlightAddons.begin(), Wpn->m_highlightAddons.end(), std::back_inserter(ColorizeSects));
     };
 

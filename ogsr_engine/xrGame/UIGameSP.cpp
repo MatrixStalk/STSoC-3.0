@@ -77,6 +77,8 @@ extern void attach_draw_adjust_mode();
 extern void hud_adjust_mode_keyb(int dik);
 extern void hud_draw_adjust_mode();
 
+extern int g_bHudAdjustMode;
+
 extern bool g_actor_allow_pda;
 
 bool CUIGameSP::IR_OnKeyboardPress(int dik)
@@ -93,7 +95,22 @@ bool CUIGameSP::IR_OnKeyboardPress(int dik)
     if (pActor && !pActor->g_Alive())
         return false;
 
-    hud_adjust_mode_keyb(dik);
+    int hud_adjust_dik = dik;
+    if (g_bHudAdjustMode >= 12)
+    {
+        switch (dik)
+        {
+        case DIK_0: hud_adjust_dik = DIK_NUMPAD0; break;
+        case DIK_1: hud_adjust_dik = DIK_NUMPAD1; break;
+        case DIK_2: hud_adjust_dik = DIK_NUMPAD2; break;
+        case DIK_8: hud_adjust_dik = DIK_NUMPAD8; break;
+        case DIK_9: hud_adjust_dik = DIK_NUMPAD9; break;
+        default: break;
+        }
+    }
+
+    hud_adjust_mode_keyb(hud_adjust_dik);
+
     if (attach_adjust_mode_keyb(dik))
         return true;
 

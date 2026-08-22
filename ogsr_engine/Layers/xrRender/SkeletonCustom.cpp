@@ -545,15 +545,17 @@ void CKinematics::LL_SetBoneVisible(const u16 bone_id, const BOOL val, const BOO
     visimask.set(bone_id, !!val);
     if (!visimask.is(bone_id))
     {
-        bone_instances[bone_id].mTransform.scale(0.f, 0.f, 0.f);
-        if (LL_GetData(bone_id).GetParentID() < LL_BoneCount() && LL_GetData(bone_id).GetParentID() != BI_NONE)
-            bone_instances[bone_id].mTransform.c = LL_GetBoneInstance(LL_GetData(bone_id).GetParentID()).mTransform.c;
+        // Keep the animated bone transform intact: attachments and visible child
+        // bones may still use it even when this bone's own mesh is hidden.
+        bone_instances[bone_id].mRenderTransform.scale(0.f, 0.f, 0.f);
+        bone_instances[bone_id].mRenderTransform.c = bone_instances[bone_id].mTransform.c;
     }
     else
     {
         CalculateBones_Invalidate();
+        bone_instances[bone_id].mRenderTransform.mul_43(bone_instances[bone_id].mTransform,
+            (*bones)[bone_id]->m2b_transform);
     }
-    bone_instances[bone_id].mRenderTransform.mul_43(bone_instances[bone_id].mTransform, (*bones)[bone_id]->m2b_transform);
     if (bRecursive)
     {
         for (const auto& C : (*bones)[bone_id]->children)
@@ -573,10 +575,9 @@ void CKinematics::LL_SetBonesVisible(VisMask mask)
         }
         else
         {
-            Fmatrix& A = bone_instances[b].mTransform;
             Fmatrix& B = bone_instances[b].mRenderTransform;
-            A.scale(0.f, 0.f, 0.f);
-            B.mul_43(A, (*bones)[b]->m2b_transform);
+            B.scale(0.f, 0.f, 0.f);
+            B.c = bone_instances[b].mTransform.c;
         }
     }
     CalculateBones_Invalidate();

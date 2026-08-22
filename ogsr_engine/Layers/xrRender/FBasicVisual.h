@@ -46,6 +46,7 @@ class ECORE_API dxRender_Visual : public IRenderVisual
 public:
     virtual shared_str getDebugName() const { return dbg_name; }
     virtual shared_str getDebugInfo() const;
+    bool isHudVisual() const override { return IsHudVisual; }
 
     // Common data for rendering
     u32 Type; // visual's type

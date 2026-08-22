@@ -48,6 +48,9 @@ public:
         eSilencer = 0,
         eScope,
         eLauncher,
+        eMagazine,
+        eForegrip,
+        eSideRail,
         eMaxAddon
     };
     CUIStatic* m_addons[eMaxAddon];

@@ -179,23 +179,28 @@ void CKinematics::CLBone(const CBoneData* bd, CBoneInstance& bi, const Fmatrix* 
 
     const u16 SelfID = bd->GetSelfID();
 
-    if (LL_GetBoneVisible(SelfID))
+    if (bi.callback_overwrite())
     {
-        if (bi.callback_overwrite())
+        if (bi.callback())
+            bi.callback()(&bi);
+    }
+    else
+    {
+        BuildBoneMatrix(bd, bi, parent, channel_mask);
+        if (bi.callback())
         {
-            if (bi.callback())
-                bi.callback()(&bi);
+            bi.callback()(&bi);
         }
-        else
-        {
-            BuildBoneMatrix(bd, bi, parent, channel_mask);
-            if (bi.callback())
-            {
-                bi.callback()(&bi);
-            }
-        }
+    }
 
+    if (LL_GetBoneVisible(SelfID))
         bi.mRenderTransform.mul_43(bi.mTransform, bd->m2b_transform);
+    else
+    {
+        // Hide only this bone's skinned geometry. Its animated transform must
+        // remain valid for external attachments and visible descendants.
+        bi.mRenderTransform.scale(0.f, 0.f, 0.f);
+        bi.mRenderTransform.c = bi.mTransform.c;
     }
 }
 

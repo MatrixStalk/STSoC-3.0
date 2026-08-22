@@ -8,6 +8,8 @@
 #include "level.h"
 #include "weapon.h"
 
+void hud_apply_bone_adjustments(IKinematics* model, const attachable_hud_item* item, IKinematics* authoritative_source = nullptr);
+
 player_hud* g_player_hud{};
 
 namespace
@@ -550,9 +552,15 @@ void hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     m_hands_attach[1] = READ_IF_EXISTS(pSettings, r_fvector3, sect_name, val_name, Fvector{});
 
     strconcat(sizeof(val_name), val_name, "hud_scale", _prefix);
-    if (is_16x9 && !pSettings->line_exist(sect_name, val_name))
-        xr_strcpy(val_name, "hud_scale");
-    m_hud_scale = READ_IF_EXISTS(pSettings, r_float, sect_name, val_name, 1.f);
+    strconcat(sizeof(val_name2), val_name2, "hud_scaling", _prefix);
+    if (pSettings->line_exist(sect_name, val_name))
+        m_hud_scale = pSettings->r_float(sect_name, val_name);
+    else if (pSettings->line_exist(sect_name, val_name2))
+        m_hud_scale = pSettings->r_float(sect_name, val_name2);
+    else if (is_16x9 && pSettings->line_exist(sect_name, "hud_scale"))
+        m_hud_scale = pSettings->r_float(sect_name, "hud_scale");
+    else
+        m_hud_scale = READ_IF_EXISTS(pSettings, r_float, sect_name, "hud_scaling", 1.f);
     clamp(m_hud_scale, 0.001f, 100.f);
 
     if (!pSettings->line_exist(sect_name, "item_position") && pSettings->line_exist(sect_name, "position"))
@@ -1514,10 +1522,16 @@ void player_hud::update(const Fmatrix& cam_trans)
     }
 
     if (m_attached_items[0])
+    {
         m_attached_items[0]->update(true);
+        hud_apply_bone_adjustments(m_attached_items[0]->m_model, m_attached_items[0]);
+    }
 
     if (m_attached_items[1])
+    {
         m_attached_items[1]->update(true);
+        hud_apply_bone_adjustments(m_attached_items[1]->m_model, m_attached_items[1]);
+    }
 
     // Item animation is calculated first; the replaceable hands mesh then
     // consumes the common Source-bone transforms through merge callbacks.
@@ -1531,6 +1545,17 @@ void player_hud::update(const Fmatrix& cam_trans)
         m_model_2_kinematics->CalculateBones_Invalidate();
         m_model_2_kinematics->CalculateBones(TRUE);
     }
+
+    auto adjust_item_for_hand = [this](u16 idx) -> attachable_hud_item* {
+        if (m_attached_items[idx])
+            return m_attached_items[idx];
+        return m_attached_items[idx ? 0 : 1];
+    };
+
+    if (attachable_hud_item* item = adjust_item_for_hand(0))
+        hud_apply_bone_adjustments(m_model_kinematics, item, m_source_skeletons[0]);
+    if (attachable_hud_item* item = adjust_item_for_hand(1))
+        hud_apply_bone_adjustments(m_model_2_kinematics, item, m_source_skeletons[1]);
 
     if (script_anim_item_attached && script_anim_item_model)
         update_script_item();

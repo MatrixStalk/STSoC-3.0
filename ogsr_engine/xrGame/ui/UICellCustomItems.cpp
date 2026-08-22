@@ -14,6 +14,16 @@
 #define INV_GRID_WIDTHF 50.0f
 #define INV_GRID_HEIGHTF 50.0f
 
+namespace
+{
+Fvector2 custom_addon_icon_offset(const shared_str& addon_section, const Fvector2& fallback)
+{
+    if (addon_section.c_str() && pSettings->line_exist(addon_section.c_str(), "icon_offset"))
+        return pSettings->r_fvector2(addon_section, "icon_offset");
+    return fallback;
+}
+} // namespace
+
 CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
 {
     m_pData = (void*)itm;
@@ -200,9 +210,11 @@ void CUIAmmoCellItem::UpdateItemText()
 CUIWeaponCellItem::CUIWeaponCellItem(CWeapon* itm) : inherited(itm)
 {
     b_auto_drag_childs = false;
-    m_addons[eSilencer] = NULL;
-    m_addons[eScope] = NULL;
-    m_addons[eLauncher] = NULL;
+    for (u8 addon = 0; addon < eMaxAddon; ++addon)
+    {
+        m_addons[addon] = nullptr;
+        m_addon_offset[addon].set(0.f, 0.f);
+    }
 
     m_cell_size.set(INV_GRID_WIDTHF, INV_GRID_HEIGHTF);
 
@@ -214,6 +226,16 @@ CUIWeaponCellItem::CUIWeaponCellItem(CWeapon* itm) : inherited(itm)
 
     if (itm->GrenadeLauncherAttachable())
         m_addon_offset[eLauncher].set(object()->GetGrenadeLauncherX(), object()->GetGrenadeLauncherY());
+
+    constexpr LPCSTR custom_slot_names[CWeapon::eCustomAddonCount] = {"magazine", "foregrip", "side_rail"};
+    for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
+    {
+        string64 key_x{}, key_y{};
+        xr_sprintf(key_x, "%s_x", custom_slot_names[slot]);
+        xr_sprintf(key_y, "%s_y", custom_slot_names[slot]);
+        m_addon_offset[eMagazine + slot].set(READ_IF_EXISTS(pSettings, r_float, object()->cNameSect(), key_x, 0.f),
+                                             READ_IF_EXISTS(pSettings, r_float, object()->cNameSect(), key_y, 0.f));
+    }
 }
 
 #include "../object_broker.h"
@@ -302,6 +324,23 @@ void CUIWeaponCellItem::Update()
                 DestroyIcon(eLauncher);
         }
     }
+
+    for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
+    {
+        const eAddonType icon_type = static_cast<eAddonType>(eMagazine + slot);
+        const shared_str& addon_section = object()->GetCustomAddonSection(static_cast<CWeapon::ECustomAddonSlot>(slot));
+        if (addon_section.c_str())
+        {
+            if (!GetIcon(icon_type) || bForceReInitAddons)
+            {
+                CIconParams params(addon_section);
+                CreateIcon(icon_type, params);
+                InitAddon(GetIcon(icon_type), params, custom_addon_icon_offset(addon_section, m_addon_offset[icon_type]), Heading());
+            }
+        }
+        else if (GetIcon(icon_type))
+            DestroyIcon(icon_type);
+    }
 }
 
 void CUIWeaponCellItem::OnAfterChild(CUIDragDropListEx* parent_list)
@@ -313,6 +352,16 @@ void CUIWeaponCellItem::OnAfterChild(CUIDragDropListEx* parent_list)
     CUIStatic* s_launcher = is_launcher() ? GetIcon(eLauncher) : NULL;
 
     InitAllAddons(s_silencer, s_scope, s_launcher, parent_list->GetVerticalPlacement());
+    for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
+    {
+        const eAddonType icon_type = static_cast<eAddonType>(eMagazine + slot);
+        const shared_str& addon_section = object()->GetCustomAddonSection(static_cast<CWeapon::ECustomAddonSlot>(slot));
+        if (GetIcon(icon_type) && addon_section.c_str())
+        {
+            CIconParams params(addon_section);
+            InitAddon(GetIcon(icon_type), params, custom_addon_icon_offset(addon_section, m_addon_offset[icon_type]), parent_list->GetVerticalPlacement());
+        }
+    }
 }
 
 void CUIWeaponCellItem::InitAllAddons(CUIStatic* s_silencer, CUIStatic* s_scope, CUIStatic* s_launcher, bool b_vertical)
@@ -433,6 +482,7 @@ CUIDragItem* CUIWeaponCellItem::CreateDragItem()
     CUIStatic* s_silencer = nullptr;
     CUIStatic* s_scope = nullptr;
     CUIStatic* s_launcher = nullptr;
+    CUIStatic* custom_addons[CWeapon::eCustomAddonCount]{};
 
     if (GetIcon(eSilencer))
     {
@@ -452,6 +502,17 @@ CUIDragItem* CUIWeaponCellItem::CreateDragItem()
         s_launcher = MakeAddonStatic(i, params);
     }
 
+    for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
+    {
+        const eAddonType icon_type = static_cast<eAddonType>(eMagazine + slot);
+        const shared_str& addon_section = object()->GetCustomAddonSection(static_cast<CWeapon::ECustomAddonSlot>(slot));
+        if (GetIcon(icon_type) && addon_section.c_str())
+        {
+            params.Load(addon_section);
+            custom_addons[slot] = MakeAddonStatic(i, params);
+        }
+    }
+
     /*
     CUIStatic* s_silencer = GetIcon(eSilencer) ? MakeAddonStatic(i, params) : NULL;
     CUIStatic* s_scope = GetIcon(eScope) ? MakeAddonStatic(i, params) : NULL;
@@ -461,6 +522,15 @@ CUIDragItem* CUIWeaponCellItem::CreateDragItem()
     if (Heading())
         m_cell_size.set(m_cell_size.y, m_cell_size.x); // swap before
     InitAllAddons(s_silencer, s_scope, s_launcher, false);
+    for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
+    {
+        const shared_str& addon_section = object()->GetCustomAddonSection(static_cast<CWeapon::ECustomAddonSlot>(slot));
+        if (custom_addons[slot] && addon_section.c_str())
+        {
+            params.Load(addon_section);
+            InitAddon(custom_addons[slot], params, custom_addon_icon_offset(addon_section, m_addon_offset[eMagazine + slot]), false);
+        }
+    }
     if (Heading())
         m_cell_size.set(m_cell_size.y, m_cell_size.x); // swap after
 
@@ -477,6 +547,11 @@ bool CUIWeaponCellItem::EqualTo(CUICellItem* itm)
         return false;
 
     bool b_addons = ((object()->GetAddonsState() == ci->object()->GetAddonsState()));
+    for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
+    {
+        const auto custom_slot = static_cast<CWeapon::ECustomAddonSlot>(slot);
+        b_addons = b_addons && object()->GetCustomAddonIndex(custom_slot) == ci->object()->GetCustomAddonIndex(custom_slot);
+    }
     bool b_place = ((object()->m_eItemPlace == ci->object()->m_eItemPlace));
 
     return b_addons && b_place;

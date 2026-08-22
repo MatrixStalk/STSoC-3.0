@@ -14,6 +14,65 @@
 #include "../Weapon.h"
 #include "../Inventory.h"
 
+namespace
+{
+void RenderBoneAdjustments(u16 item_idx)
+{
+    static shared_str selected_bone[2];
+    xr_vector<shared_str> bones;
+    hud_collect_adjustable_bones(item_idx, bones);
+
+    if (bones.empty())
+    {
+        ImGui::TextDisabled("No skeletal bones available");
+        return;
+    }
+
+    auto selected_it = std::find_if(bones.begin(), bones.end(), [&](const shared_str& bone) {
+        return selected_bone[item_idx].c_str() && !_stricmp(bone.c_str(), selected_bone[item_idx].c_str());
+    });
+    if (selected_it == bones.end())
+        selected_bone[item_idx] = bones.front();
+
+    ImGui::PushID(static_cast<int>(item_idx));
+    if (ImGui::BeginCombo("Bone", selected_bone[item_idx].c_str()))
+    {
+        for (const shared_str& bone : bones)
+        {
+            const bool selected = !_stricmp(bone.c_str(), selected_bone[item_idx].c_str());
+            if (ImGui::Selectable(bone.c_str(), selected))
+                selected_bone[item_idx] = bone;
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    Fvector position{}, rotation{};
+    shared_str config_section;
+    if (hud_get_bone_adjustment(item_idx, selected_bone[item_idx].c_str(), position, rotation, &config_section))
+    {
+        bool changed = ImGui::DragFloat3("Bone position", (float*)&position, 0.0001f, 0.f, 0.f, "%.6f");
+        changed |= ImGui::DragFloat3("Bone rotation (deg)", (float*)&rotation, 0.05f, 0.f, 0.f, "%.3f");
+
+        if (ImGui::Button("Reset bone transform"))
+        {
+            position.set(0.f, 0.f, 0.f);
+            rotation.set(0.f, 0.f, 0.f);
+            changed = true;
+        }
+
+        if (changed)
+            hud_set_bone_adjustment(item_idx, selected_bone[item_idx].c_str(), position, rotation);
+
+        ImGui::TextDisabled("Config section: [%s]", config_section.c_str());
+        ImGui::TextDisabled("bone_position_%s", selected_bone[item_idx].c_str());
+        ImGui::TextDisabled("bone_rotation_%s", selected_bone[item_idx].c_str());
+    }
+    ImGui::PopID();
+}
+} // namespace
+
 
 void CImGuiHudEditorWnd::Render()
 {
@@ -52,6 +111,9 @@ void CImGuiHudEditorWnd::Render()
 		ImGui::DragFloat3("fire_point2 0",					(float*)&item->m_measures.m_fire_point2_offset[0],	drag_intensity, NULL, NULL, "%.6f");
 		ImGui::DragFloat3("shell_point 0",					(float*)&item->m_measures.m_shell_point_offset[0],	drag_intensity, NULL, NULL, "%.6f");
 
+        if (ImGui::CollapsingHeader("Bone transforms 0"))
+            RenderBoneAdjustments(0);
+
         if (Wpn)
         {
             // Laser light offsets
@@ -84,6 +146,9 @@ void CImGuiHudEditorWnd::Render()
 		ImGui::DragFloat3("fire_point 1",			(float*)&item->m_measures.m_fire_point_offset[0],	drag_intensity, NULL, NULL, "%.6f");
 		ImGui::DragFloat3("fire_point2 1",			(float*)&item->m_measures.m_fire_point2_offset[0],	drag_intensity, NULL, NULL, "%.6f");
 		ImGui::DragFloat3("shell_point 1",			(float*)&item->m_measures.m_shell_point_offset[0],	drag_intensity, NULL, NULL, "%.6f");
+
+        if (ImGui::CollapsingHeader("Bone transforms 1"))
+            RenderBoneAdjustments(1);
     }
 
     if (ImGui::Button("Save"))

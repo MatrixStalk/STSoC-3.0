@@ -284,7 +284,9 @@ dxRender_Visual* CModelPool::Instance_Find(LPCSTR N)
     xr_vector<ModelDef>::iterator I;
     for (I = Models.begin(); I != Models.end(); ++I)
     {
-        if (I->name[0] && (0 == xr_strcmp(*I->name, N)))
+        // The same OGF needs separate reference models for HUD and world
+        // rendering because its shaders are compiled with different flags.
+        if (I->name[0] && (0 == xr_strcmp(*I->name, N)) && I->model->IsHudVisual == ::Render->hud_loading)
         {
             Model = I->model;
             break;
@@ -304,8 +306,9 @@ dxRender_Visual* CModelPool::Create(const char* name, IReader* data)
         ModelsPool_lock.lock();
 
         // 0. Search POOL
-        const POOL_IT it = Pool.find(low_name);
-        if (it != Pool.end())
+        const auto [first, last] = Pool.equal_range(low_name);
+        const POOL_IT it = std::find_if(first, last, [](const auto& entry) { return entry.second->IsHudVisual == ::Render->hud_loading; });
+        if (it != last)
         {
             // 1. Instance found
             Model = it->second;
@@ -554,23 +557,24 @@ void CModelPool::Prefetch()
         float val1{}, val2{};
         sscanf(val.c_str(), "%f,%f", &val1, &val2);
 
+        const bool previous_hud_loading = ::Render->hud_loading;
+        ::Render->hud_loading = val2 == 2.f;
         if (!Instance_Find(low_name.c_str()))
         {
             shared_str fname;
             fname.sprintf("%s.ogf", low_name.c_str());
             if (FS.exist(fsgame::game_meshes, fname.c_str()))
             {
-                ::Render->hud_loading = val2 == 2.f;
                 //if (::Render->hud_loading)
                 //    Msg("--[%s] loading hud model [%s]", __FUNCTION__, fname.c_str());
                 dxRender_Visual* V = Create(low_name.c_str());
-                ::Render->hud_loading = false;
                 Delete(V, FALSE);
                 cnt++;
             }
             else
                 Msg("! [%s]: %s not found in $game_meshes$", __FUNCTION__, fname.c_str());
         }
+        ::Render->hud_loading = previous_hud_loading;
     }
 
     now_prefetch2 = false;

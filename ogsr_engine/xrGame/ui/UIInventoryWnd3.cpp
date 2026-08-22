@@ -117,6 +117,19 @@ void CUIInventoryWnd::ActivatePropertiesBox()
             UIPropertiesBox.AddItem("st_detach_silencer", NULL, INVENTORY_DETACH_SILENCER_ADDON);
             b_show = true;
         }
+        for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
+        {
+            const shared_str& addon_section = pWeapon->GetCustomAddonSection(static_cast<CWeapon::ECustomAddonSlot>(slot));
+            if (!addon_section.c_str())
+                continue;
+
+            LPCSTR inv_name = READ_IF_EXISTS(pSettings, r_string, addon_section, "inv_name", addon_section.c_str());
+            const shared_str translated_name = CStringTable().translate(inv_name);
+            string256 label{};
+            xr_sprintf(label, "Detach: %s", translated_name.c_str());
+            UIPropertiesBox.AddItem(label, const_cast<char*>(addon_section.c_str()), INVENTORY_DETACH_CUSTOM_ADDON);
+            b_show = true;
+        }
         if (smart_cast<CWeaponMagazined*>(pWeapon))
         {
             auto WpnMagazWgl = smart_cast<CWeaponMagazinedWGrenade*>(pWeapon);
@@ -253,6 +266,7 @@ void CUIInventoryWnd::ProcessPropertiesBoxClicked()
         case INVENTORY_DETACH_SCOPE_ADDON: DetachAddon(*(smart_cast<CWeapon*>(CurrentIItem()))->GetScopeName()); break;
         case INVENTORY_DETACH_SILENCER_ADDON: DetachAddon(*(smart_cast<CWeapon*>(CurrentIItem()))->GetSilencerName()); break;
         case INVENTORY_DETACH_GRENADE_LAUNCHER_ADDON: DetachAddon(*(smart_cast<CWeapon*>(CurrentIItem()))->GetGrenadeLauncherName()); break;
+        case INVENTORY_DETACH_CUSTOM_ADDON: DetachAddon(static_cast<LPCSTR>(UIPropertiesBox.GetClickedItem()->GetData())); break;
         case INVENTORY_RELOAD_MAGAZINE: (smart_cast<CWeapon*>(CurrentIItem()))->Action(kWPN_RELOAD, CMD_START); break;
         case INVENTORY_UNLOAD_MAGAZINE: {
             auto ProcessUnload = [](void* pWpn) {

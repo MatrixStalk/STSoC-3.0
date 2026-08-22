@@ -451,6 +451,7 @@ public:
     void update_script_item();
 
     IKinematics* Model() { return m_model_kinematics; }
+    IKinematics* Model2() { return m_model_2_kinematics; }
     IKinematicsAnimated* AnimatedModel() { return m_model; }
     const Fmatrix& XFORM() const { return m_transform; }
 
@@ -479,3 +480,9 @@ private:
 };
 
 extern player_hud* g_player_hud;
+
+// Runtime bone correction editor helpers. Config values are represented in the
+// owning weapon section as bone_position_<name> / bone_rotation_<name>.
+void hud_collect_adjustable_bones(u16 item_idx, xr_vector<shared_str>& bones);
+bool hud_get_bone_adjustment(u16 item_idx, LPCSTR bone_name, Fvector& position, Fvector& rotation, shared_str* config_section = nullptr);
+bool hud_set_bone_adjustment(u16 item_idx, LPCSTR bone_name, const Fvector& position, const Fvector& rotation);

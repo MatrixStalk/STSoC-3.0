@@ -15,6 +15,7 @@ public:
 
     virtual shared_str getDebugName() const = 0;
     virtual shared_str getDebugInfo() const = 0;
+    virtual bool isHudVisual() const { return false; }
 
     virtual void MarkAsHot(bool is_hot){};
 
