@@ -81,6 +81,8 @@ CWeapon::CWeapon(LPCSTR name)
 
 CWeapon::~CWeapon()
 {
+    if (g_player_hud)
+        g_player_hud->clear_addon_hand_pose_sources(this);
     DestroyAddonVisuals();
     xr_delete(m_UIScope);
 
@@ -111,6 +113,48 @@ u16 find_addon_bone(IKinematics* model, LPCSTR bone_name)
             return bone_id;
     }
     return BI_NONE;
+}
+
+// ARC9 evaluates LHIK/RHIK as a normalized animation timeline. Each entry is
+// `time:weight`; stages are blended with InOutQuart followed by ARC9's qerp.
+bool evaluate_addon_ik_timeline(LPCSTR value, float progress, float& result)
+{
+    if (!value || !value[0])
+        return false;
+
+    float previous_time = 0.f;
+    float previous_weight = 0.f;
+    bool parsed_any = false;
+    string64 item{};
+    for (int i = 0, count = _GetItemCount(value); i < count; ++i)
+    {
+        _GetItem(value, i, item);
+        float stage_time = 0.f;
+        float stage_weight = 0.f;
+        if (sscanf(item, "%f:%f", &stage_time, &stage_weight) != 2)
+            continue;
+
+        stage_time = clampr(stage_time, 0.f, 1.f);
+        stage_weight = clampr(stage_weight, 0.f, 1.f);
+        parsed_any = true;
+        if (progress <= stage_time)
+        {
+            const float duration = stage_time - previous_time;
+            float delta = duration > EPS_S ? (progress - previous_time) / duration : 1.f;
+            delta = clampr(delta, 0.f, 1.f);
+            const float quartic = delta < 0.5f ? 8.f * delta * delta * delta * delta :
+                1.f - powf(-2.f * delta + 2.f, 4.f) * 0.5f;
+            const float qdelta = clampr(-quartic * quartic + 2.f * quartic, 0.f, 1.f);
+            result = previous_weight + (stage_weight - previous_weight) * qdelta;
+            return true;
+        }
+        previous_time = stage_time;
+        previous_weight = stage_weight;
+    }
+
+    if (parsed_any)
+        result = previous_weight;
+    return parsed_any;
 }
 
 void append_addon_bones(LPCSTR section, LPCSTR key, xr_vector<shared_str>& result)
@@ -499,6 +543,7 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             continue;
 
         IRenderVisual*& visual = hud_mode ? instance.hud : instance.world;
+        bool visual_created = false;
         if (!visual)
         {
             // HUD shaders are compiled differently from ordinary world
@@ -508,11 +553,44 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             ::Render->hud_loading = hud_mode;
             visual = ::Render->model_Create(visual_name);
             ::Render->hud_loading = previous_hud_loading;
+            visual_created = visual != nullptr;
             if (visual && hud_mode)
                 visual->MarkAsHot(false);
         }
         if (!visual)
             continue;
+
+        LPCSTR hand_pose = hud_mode ? READ_IF_EXISTS(pSettings, r_string, sections[i], "hud_hand_pose", nullptr) : nullptr;
+        if (visual_created && hand_pose && hand_pose[0])
+        {
+            IKinematicsAnimated* animated = visual->dcast_PKinematicsAnimated();
+            LPCSTR pose_animation = READ_IF_EXISTS(pSettings, r_string, sections[i], "hud_hand_pose_animation", "idle");
+            if (animated && animated->ID_Cycle_Safe(pose_animation).valid())
+                animated->PlayCycle(pose_animation);
+            else
+                Msg("! Weapon addon [%s]: HUD hand pose animation [%s] not found in [%s]", sections[i].c_str(), pose_animation, visual_name);
+
+            // Bone scaling does not remove a skinned c_arms mesh: mixed-weight
+            // triangles may stretch towards the collapsed bones. Keep this an
+            // explicit compatibility option only. ARC9 normally uses a second,
+            // completely non-rendered proxy model for hand-pose sampling.
+            if (READ_IF_EXISTS(pSettings, r_bool, sections[i], "hud_hand_pose_hide_visual_arms", false))
+            {
+                IKinematics* pose_model = visual->dcast_PKinematics();
+                constexpr LPCSTR arm_roots[] = {
+                    "valvebiped.bip01_l_clavicle",
+                    "valvebiped.bip01_r_clavicle",
+                    "base humanlcollarbone",
+                    "base humanrcollarbone",
+                };
+                for (LPCSTR arm_root : arm_roots)
+                {
+                    const u16 arm_bone = find_addon_bone(pose_model, arm_root);
+                    if (arm_bone != BI_NONE)
+                        pose_model->LL_SetBoneVisible(arm_bone, FALSE, TRUE);
+                }
+            }
+        }
 
         const EAddonAttachSpace attach_space = read_addon_attach_space(sections[i].c_str(), hud_mode);
         const bool needs_target_bone = attach_space != EAddonAttachSpace::Weapon;
@@ -609,6 +687,58 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             if (!visual_bone_found)
                 Msg("! Weapon addon [%s]: visual bone [%s] not found in [%s]", sections[i].c_str(), visual_bone_name, visual_name);
             reported = true;
+        }
+        if (hud_mode && hand_pose && hand_pose[0] && g_player_hud)
+        {
+            IKinematics* pose_source = visual->dcast_PKinematics();
+            if (pose_source)
+            {
+                Fmatrix weapon_inverse, source_to_weapon;
+                weapon_inverse.invert(weapon_transform);
+                source_to_weapon.mul_43(weapon_inverse, result);
+
+                const float blend_in = READ_IF_EXISTS(pSettings, r_float, sections[i], "hud_hand_pose_blend_in", 0.18f);
+                const float blend_out = READ_IF_EXISTS(pSettings, r_float, sections[i], "hud_hand_pose_blend_out", 0.1f);
+                float ik_time = READ_IF_EXISTS(pSettings, r_float, sections[i], "hud_hand_pose_ik_time", 0.8f);
+                LPCSTR ik_timeline = READ_IF_EXISTS(pSettings, r_string, sections[i], "hud_hand_pose_ik_timeline", nullptr);
+                string256 motion_ik_key{};
+                string256 motion_timeline_key{};
+                if (m_current_motion.c_str() && m_current_motion.size())
+                {
+                    xr_sprintf(motion_ik_key, "hand_pose_ik_time_%s", m_current_motion.c_str());
+                    if (pSettings->line_exist(sections[i], motion_ik_key))
+                        ik_time = pSettings->r_float(sections[i], motion_ik_key);
+                    if (pSettings->line_exist(hud_sect, motion_ik_key))
+                        ik_time = pSettings->r_float(hud_sect, motion_ik_key);
+
+                    xr_sprintf(motion_timeline_key, "hand_pose_ik_timeline_%s", m_current_motion.c_str());
+                    if (pSettings->line_exist(sections[i], motion_timeline_key))
+                        ik_timeline = pSettings->r_string(sections[i], motion_timeline_key);
+                    if (pSettings->line_exist(hud_sect, motion_timeline_key))
+                        ik_timeline = pSettings->r_string(hud_sect, motion_timeline_key);
+                }
+
+                float target_weight = GetState() == eIdle ? 1.f : 0.f;
+                bool timeline_driven = false;
+                if (GetState() != eIdle && m_dwMotionEndTm > m_dwMotionStartTm)
+                {
+                    const float motion_progress = clampr(float(Device.dwTimeGlobal - m_dwMotionStartTm) /
+                        float(m_dwMotionEndTm - m_dwMotionStartTm), 0.f, 1.f);
+                    timeline_driven = evaluate_addon_ik_timeline(ik_timeline, motion_progress, target_weight);
+                    if (!timeline_driven && ik_time >= 0.f && motion_progress >= clampr(ik_time, 0.f, 1.f))
+                        target_weight = 1.f;
+                }
+
+                // A timeline already supplies a smooth, eased weight every
+                // frame. Applying the legacy time filter again would lag it.
+                const float effective_blend_in = timeline_driven ? 0.f : blend_in;
+                const float effective_blend_out = timeline_driven ? 0.f : blend_out;
+
+                if (!_stricmp(hand_pose, "right") || !_stricmp(hand_pose, "both"))
+                    g_player_hud->set_addon_hand_pose_source(0, pose_source, source_to_weapon, this, target_weight, effective_blend_in, effective_blend_out);
+                if (!_stricmp(hand_pose, "left") || !_stricmp(hand_pose, "both"))
+                    g_player_hud->set_addon_hand_pose_source(1, pose_source, source_to_weapon, this, target_weight, effective_blend_in, effective_blend_out);
+            }
         }
         ::Render->add_Visual(context_id, root, visual, result);
     }
@@ -826,6 +956,7 @@ void CWeapon::Load(LPCSTR section)
 
     iAmmoElapsed = pSettings->r_s32(section, "ammo_elapsed");
     iMagazineSize = pSettings->r_s32(section, "ammo_mag_size");
+    m_configuredMagazineSize = iMagazineSize;
 
     ////////////////////////////////////////////////////
     // дисперсия стрельбы
@@ -1039,6 +1170,9 @@ void CWeapon::Load(LPCSTR section)
         }
     }
 
+    append_addon_bones(section, "empty_hide_bones", empty_hide_bones);
+    append_addon_bones(section, "hide_bones_when_empty", empty_hide_bones);
+
     // Кости худовой модели оружия - если не прописаны, используются имена из конфига мировой модели.
     if (pSettings->line_exist(hud_sect, "scope_bone"))
     {
@@ -1079,6 +1213,14 @@ void CWeapon::Load(LPCSTR section)
     }
     else
         hud_hidden_bones = hidden_bones;
+
+    hud_empty_hide_bones = empty_hide_bones;
+    if (pSettings->line_exist(hud_sect, "empty_hide_bones") || pSettings->line_exist(hud_sect, "hide_bones_when_empty"))
+    {
+        hud_empty_hide_bones.clear();
+        append_addon_bones(hud_sect.c_str(), "empty_hide_bones", hud_empty_hide_bones);
+        append_addon_bones(hud_sect.c_str(), "hide_bones_when_empty", hud_empty_hide_bones);
+    }
 
     //Можно и из конфига прицела читать и наоборот! Пока так.
     m_fZoomHudFov = 0.0f;
@@ -2149,11 +2291,41 @@ void CWeapon::UpdateHUDAddonsVisibility()
         HudItemData()->set_bone_visible(bone_name, FALSE, TRUE);
 
     UpdateAddonReplacementVisibility(true);
+    UpdateEmptyBonesVisibility();
     callback(GameObject::eOnUpdateHUDAddonsVisibiility)();
+}
+
+void CWeapon::UpdateEmptyBonesVisibility()
+{
+    const bool visible = iAmmoElapsed > 0;
+
+    if (IKinematics* world_model = smart_cast<IKinematics*>(Visual()))
+    {
+        for (const shared_str& bone_name : empty_hide_bones)
+        {
+            const u16 bone_id = find_addon_bone(world_model, bone_name.c_str());
+            if (bone_id != BI_NONE)
+                world_model->LL_SetBoneVisible(bone_id, visible, TRUE);
+        }
+    }
+
+    if (GetHUDmode() && HudItemData() && HudItemData()->m_model)
+    {
+        IKinematics* hud_model = HudItemData()->m_model;
+        for (const shared_str& bone_name : hud_empty_hide_bones)
+        {
+            const u16 bone_id = find_addon_bone(hud_model, bone_name.c_str());
+            if (bone_id != BI_NONE)
+                hud_model->LL_SetBoneVisible(bone_id, visible, TRUE);
+        }
+    }
 }
 
 void CWeapon::UpdateAddonsVisibility()
 {
+    if (g_player_hud)
+        g_player_hud->clear_addon_hand_pose_sources(this);
+
     auto pWeaponVisual = smart_cast<IKinematics*>(Visual());
     VERIFY(pWeaponVisual);
 
@@ -2284,6 +2456,7 @@ void CWeapon::UpdateAddonsVisibility()
     ///////////////////////////////////////////////////////////////////
 
     UpdateAddonReplacementVisibility(false);
+    UpdateEmptyBonesVisibility();
     callback(GameObject::eOnUpdateAddonsVisibiility)();
 
     pWeaponVisual->CalculateBones_Invalidate();
@@ -2578,6 +2751,8 @@ void CWeapon::SetAmmoElapsed(int ammo_count)
                 m_magazine.pop_back();
         };
     };
+
+    UpdateEmptyBonesVisibility();
 }
 
 u32 CWeapon::ef_main_weapon_type() const
@@ -2928,4 +3103,9 @@ void CWeapon::on_a_hud_attach()
     K->LL_SetBonesVisible(new_mask);
 }
 
-void CWeapon::on_b_hud_detach() { inherited::on_b_hud_detach(); }
+void CWeapon::on_b_hud_detach()
+{
+    if (g_player_hud)
+        g_player_hud->clear_addon_hand_pose_sources(this);
+    inherited::on_b_hud_detach();
+}

@@ -40,6 +40,9 @@ public:
         eReady,
         eThrow,
         eThrowEnd,
+        eLook,
+        eMagCheck,
+        eMuzzleCheck,
     };
 
 private:

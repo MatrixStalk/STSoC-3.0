@@ -167,6 +167,7 @@ public:
     //обновление видимости для косточек аддонов
     void UpdateAddonsVisibility();
     void UpdateHUDAddonsVisibility();
+    void UpdateEmptyBonesVisibility();
     //инициализация свойств присоединенных аддонов
     virtual void InitAddons();
 
@@ -246,6 +247,8 @@ private:
 
     xr_vector<shared_str> hidden_bones;
     xr_vector<shared_str> hud_hidden_bones;
+    xr_vector<shared_str> empty_hide_bones;
+    xr_vector<shared_str> hud_empty_hide_bones;
 
 protected:
     //состояние подключенных аддонов
@@ -542,6 +545,7 @@ public:
 protected:
     int iAmmoElapsed; // ammo in magazine, currently
     int iMagazineSize; // size (in bullets) of magazine
+    int m_configuredMagazineSize{}; // capacity from the weapon section before addon overrides
 
     //для подсчета в GetAmmoCurrent
     mutable int iAmmoCurrent;

@@ -50,6 +50,11 @@ attach_rotation  = 0, 0, 0
 attach_scale     = 1
 replaced_bones   = magazine_static
 icon_offset      = 12, 18
+
+; Gameplay parameters of this magazine:
+magazine_capacity       = 45
+use_reload_animations   = 10
+use_magcheck_animations = 10
 ```
 
 When world and HUD skeletons use different anchors or embedded-part names, keep
@@ -61,9 +66,157 @@ installed section is saved and synchronized as an index into the corresponding
 weapon compatibility list. Therefore the order of `*_addons` must remain stable
 for existing saves.
 
-At this stage the custom slots provide inventory state, rendering, icon, weight
-and cost integration. A magazine addon does not yet change ammunition capacity
-or reload logic, and a foregrip does not select a separate animation set.
+Custom slots provide inventory state, rendering, icon, weight and cost
+integration. Magazine addons also control ammunition capacity and select reload
+and magazine-check animation sets.
+
+## Addon-authored HUD hand pose
+
+A Source addon such as a handguard or foregrip may include an `idle` motion
+that authors the position of one or both hands. Enable that motion in the addon
+section:
+
+```ini
+[handguard_example]
+addon_slot              = foregrip
+attach_visual           = weapons\addons\handguard_example
+hud_hand_pose           = left
+hud_hand_pose_animation = idle
+hud_hand_pose_blend_in  = 0.18
+hud_hand_pose_blend_out = 0.10
+hud_hand_pose_ik_time   = 0.78
+# ARC9-style optional timeline: normalized_time:IK_weight
+hud_hand_pose_ik_timeline = 0:1, 0.12:0, 0.72:0, 1:1
+```
+
+`hud_hand_pose` accepts `left`, `right`, or `both`. The animation defaults to
+`idle` when `hud_hand_pose_animation` is omitted. Like ARC9 LHIK/RHIK, the
+system evaluates the addon as a hidden pose proxy and blends all matching
+ValveBiped arm and finger matrices into the active weapon animation.
+
+`hud_hand_pose_blend_in` and `hud_hand_pose_blend_out` are transition times in
+seconds. During reload, draw, fire, inspection and check animations the IK
+weight first fades out. `hud_hand_pose_ik_time` is a normalized animation time
+from 0 to 1 at which the grip begins fading back in before the action ends; use
+`-1` to wait until the weapon returns to idle. A concrete HUD animation can
+override it in the weapon HUD section:
+
+```ini
+hand_pose_ik_time_anm_reload    = 0.72
+hand_pose_ik_time_anm_reload_10 = 0.76
+```
+
+For precise ARC9-style control, `hud_hand_pose_ik_timeline` contains comma
+separated `normalized_time:weight` stages. Stage interpolation uses ARC9's
+InOutQuart + qerp curve. A concrete motion can override the complete timeline
+in either the addon or weapon HUD section:
+
+```ini
+hand_pose_ik_timeline_anm_reload    = 0:1, 0.08:0, 0.70:0, 1:1
+hand_pose_ik_timeline_anm_reload_10 = 0:1, 0.10:0, 0.76:0, 1:1
+```
+
+`hud_hand_pose_hide_visual_arms` defaults to `false`. Keep it disabled for an
+attachment model which only contains the addon mesh plus pose bones. Scaling
+arm bones to zero can stretch mixed-weight triangles; a model containing an
+actual visible c_arms mesh should use a separately exported render visual and
+pose proxy instead.
+
+The suffix is the actual `anm_*` alias selected by the weapon. Source addon
+exports commonly contain their authoring c_arms geometry; its left and right
+arm branches are hidden automatically while their bones remain available for
+pose sampling. Set `hud_hand_pose_hide_visual_arms = false` only when that
+geometry is intentionally part of the visible addon.
+
+The hand pose follows the addon's complete HUD attachment transform, including
+`hud_attach_position`, `hud_attach_rotation`, its attachment space, and anchor
+alignment. Removing the addon immediately restores the weapon as the hand pose
+source. This feature requires the Source HUD hands/skeleton-merge path; legacy
+X-Ray hand rigs continue to ignore addon-authored Source poses.
+
+## Detachable-magazine gameplay
+
+The system is enabled by default and can be toggled from the console:
+
+```text
+g_detachable_magazines on
+g_detachable_magazines off
+```
+
+Only weapons with a non-empty `magazine_addons` list use the detachable-
+magazine rules. With the system enabled, such a weapon has capacity `1` while
+no magazine is installed. Reload then plays `anm_load_single`, uses
+`snd_load_single`, and loads exactly one cartridge. Installing a magazine sets
+capacity from its `magazine_capacity`. Removing a magazine safely returns rounds
+above the new capacity to the owner instead of deleting them.
+
+`use_reload_animations = 10` selects these keys in the weapon HUD section:
+
+```ini
+anm_reload_10       = reload10rnd
+anm_reload_10_t     = reload10rndt
+anm_reload_10_empty = reload10rnd_empty
+```
+
+The matching sound keys live in the normal weapon section. They may instead be
+placed in the magazine addon section when a sound belongs only to that addon:
+
+```ini
+snd_reload_10       = weapons\example\reload_10
+snd_reload_10_t     = weapons\example\reload_10_t
+snd_reload_10_empty = weapons\example\reload_10_empty
+```
+
+`use_magcheck_animations` is optional. When omitted, it inherits
+`use_reload_animations`. For value `10`, the HUD key is `anm_magcheck_10` and
+the corresponding sound key is `snd_magcheck_10`. Both fall back to the generic
+`anm_magcheck` / `snd_magcheck` keys.
+
+The other interaction animations are configured on the weapon and its HUD:
+
+```ini
+; Weapon HUD section
+anm_load_single  = load_single
+anm_look         = look
+anm_bore         = bore
+anm_magcheck     = magcheck
+anm_muzzle_check = muzzle_check
+anm_ready        = ready
+
+; Normal weapon section
+snd_load_single  = weapons\example\load_single
+snd_look         = weapons\example\look
+snd_bore         = weapons\example\bore
+snd_magcheck     = weapons\example\magcheck
+snd_muzzle_check = weapons\example\muzzle_check
+snd_ready        = weapons\example\ready
+
+; Optional random automatic bore delay, in seconds:
+bore_idle_time_min = 30
+bore_idle_time_max = 60
+```
+
+The existing `anim_bore` input action now starts `anm_look`, preserving old
+binds. `anm_bore` is automatic and starts after the configured random idle
+delay. The additional bindable actions are `anim_magcheck` and
+`anim_muzzle_check`. Magazine checking displays the current loaded/capacity
+count after its animation. `anm_ready` replaces the usual draw animation on the
+first valid draw only; loading a save or taking the weapon from a corpse does
+not replay it.
+
+## Bones hidden on empty
+
+The normal weapon section can contain a comma-separated list of bones that are
+visible while ammunition is loaded and hidden when the weapon reaches zero:
+
+```ini
+[wpn_example]
+empty_hide_bones = cartridge, loaded_round, magazine_rounds
+```
+
+The list applies to both the world and HUD models. If their bone names differ,
+put another `empty_hide_bones` list in the weapon HUD section; that list
+overrides the HUD fallback. `hide_bones_when_empty` is accepted as an alias.
 
 ## Addon item section
 

@@ -36,6 +36,15 @@ protected:
     shared_str m_sSndShotCurrent;
 	HUD_SOUND sndBore;
 	HUD_SOUND sndBoreEmpty;
+    HUD_SOUND sndLook;
+    HUD_SOUND sndMagCheck;
+    HUD_SOUND sndMuzzleCheck;
+    HUD_SOUND sndReady;
+    HUD_SOUND sndLoadSingle;
+    HUD_SOUND sndMagazineReload;
+    HUD_SOUND sndMagazineReloadTactical;
+    HUD_SOUND sndMagazineReloadEmpty;
+    HUD_SOUND sndMagazineCheckVariant;
 
     virtual void StopHUDSounds();
 
@@ -190,7 +199,11 @@ protected:
     virtual bool AllowFireWhileWorking() { return false; }
 
     //виртуальные функции для проигрывания анимации HUD
-	virtual void PlayAnimBore();
+    virtual void PlayAnimBore();
+    virtual void PlayAnimLook();
+    virtual void PlayAnimMagCheck();
+    virtual void PlayAnimMuzzleCheck();
+    virtual void PlayAnimReady();
     virtual void PlayAnimShow();
     virtual void PlayAnimHide();
     virtual void PlayAnimReload();
@@ -214,6 +227,24 @@ protected:
     virtual void PlayAnimCheckMisfire();
     virtual void PlayReloadSound();
 
+    void ApplyMagazineAddonConfiguration(bool trim_ammo);
+    void TrimMagazineToCapacity(bool return_ammo);
+    void ScheduleNextBore();
+    void ShowMagazineAmmoCount() const;
+    bool DetachableMagazineSystemActive() const;
+    const shared_str& InstalledMagazineSection() const;
+    int ReloadTargetCapacity() const;
+    void LoadMagazineVariantSounds();
+
+    shared_str m_reload_animation_variant;
+    shared_str m_magcheck_animation_variant;
+    shared_str m_applied_magazine_section;
+    bool m_applied_detachable_magazines{};
+    bool m_first_ready_played{};
+    u32 m_next_bore_time{};
+    float m_bore_idle_time_min{30.f};
+    float m_bore_idle_time_max{60.f};
+
     virtual int ShotsFired() { return m_iShotNum; }
     virtual float GetWeaponDeterioration();
 
@@ -230,4 +261,7 @@ protected:
     int CheckAmmoBeforeReload(u32& v_ammoType);
 
     bool ShouldPlayFlameParticles();
+
+public:
+    void SuppressFirstReadyAnimation() { m_first_ready_played = true; }
 };

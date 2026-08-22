@@ -40,7 +40,9 @@ xr_vector<_action> actions = {
 
                                                                                                         DEF_ACTION("hide_hud", kHIDEHUD) DEF_ACTION("show_hud", kSHOWHUD)
 																										
-																											DEF_ACTION("anim_bore", kANIM_BORE)
+																					DEF_ACTION("anim_bore", kANIM_BORE)
+                                                                                                            DEF_ACTION("anim_magcheck", kANIM_MAGCHECK)
+                                                                                                            DEF_ACTION("anim_muzzle_check", kANIM_MUZZLE_CHECK)
 };
 
 xr_vector<_binding> g_key_bindings;

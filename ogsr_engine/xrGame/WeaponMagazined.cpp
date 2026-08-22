@@ -28,6 +28,8 @@
 #include "../xr_3da/x_ray.h"
 
 #include "HudSound.h"
+#include "UIGameCustom.h"
+#include "ui/UIStatic.h"
 
 CUIXml* g_wpnScopeXml = NULL;
 
@@ -71,6 +73,15 @@ CWeaponMagazined::~CWeaponMagazined()
     HUD_SOUND::DestroySound(sndAimEnd);
 	HUD_SOUND::DestroySound(sndBore);
 	HUD_SOUND::DestroySound(sndBoreEmpty);
+    HUD_SOUND::DestroySound(sndLook);
+    HUD_SOUND::DestroySound(sndMagCheck);
+    HUD_SOUND::DestroySound(sndMuzzleCheck);
+    HUD_SOUND::DestroySound(sndReady);
+    HUD_SOUND::DestroySound(sndLoadSingle);
+    HUD_SOUND::DestroySound(sndMagazineReload);
+    HUD_SOUND::DestroySound(sndMagazineReloadTactical);
+    HUD_SOUND::DestroySound(sndMagazineReloadEmpty);
+    HUD_SOUND::DestroySound(sndMagazineCheckVariant);
     if (m_binoc_vision)
         xr_delete(m_binoc_vision);
 }
@@ -92,6 +103,15 @@ void CWeaponMagazined::StopHUDSounds()
     HUD_SOUND::StopSound(sndAimStart);
     HUD_SOUND::StopSound(sndAimEnd);
 	HUD_SOUND::StopSound(sndBore);
+    HUD_SOUND::StopSound(sndLook);
+    HUD_SOUND::StopSound(sndMagCheck);
+    HUD_SOUND::StopSound(sndMuzzleCheck);
+    HUD_SOUND::StopSound(sndReady);
+    HUD_SOUND::StopSound(sndLoadSingle);
+    HUD_SOUND::StopSound(sndMagazineReload);
+    HUD_SOUND::StopSound(sndMagazineReloadTactical);
+    HUD_SOUND::StopSound(sndMagazineReloadEmpty);
+    HUD_SOUND::StopSound(sndMagazineCheckVariant);
 
     HUD_SOUND::StopSound(sndShot);
     HUD_SOUND::StopSound(sndSilencerShot);
@@ -180,6 +200,22 @@ void CWeaponMagazined::Load(LPCSTR section)
 	
 	if (pSettings->line_exist(section, "snd_bore_empty"))
         HUD_SOUND::LoadSound(section, "snd_bore_empty", sndBoreEmpty, m_eSoundEmptyClick);
+
+    if (pSettings->line_exist(section, "snd_look"))
+        HUD_SOUND::LoadSound(section, "snd_look", sndLook, m_eSoundEmptyClick);
+    if (pSettings->line_exist(section, "snd_magcheck"))
+        HUD_SOUND::LoadSound(section, "snd_magcheck", sndMagCheck, m_eSoundEmptyClick);
+    if (pSettings->line_exist(section, "snd_muzzle_check"))
+        HUD_SOUND::LoadSound(section, "snd_muzzle_check", sndMuzzleCheck, m_eSoundEmptyClick);
+    if (pSettings->line_exist(section, "snd_ready"))
+        HUD_SOUND::LoadSound(section, "snd_ready", sndReady, m_eSoundShow);
+    if (pSettings->line_exist(section, "snd_load_single"))
+        HUD_SOUND::LoadSound(section, "snd_load_single", sndLoadSingle, m_eSoundReload);
+
+    m_bore_idle_time_min = READ_IF_EXISTS(pSettings, r_float, section, "bore_idle_time_min", 30.f);
+    m_bore_idle_time_max = READ_IF_EXISTS(pSettings, r_float, section, "bore_idle_time_max", 60.f);
+    if (m_bore_idle_time_max < m_bore_idle_time_min)
+        std::swap(m_bore_idle_time_min, m_bore_idle_time_max);
 	
 
     m_sSndShotCurrent = "sndShot";
@@ -299,6 +335,8 @@ void CWeaponMagazined::FireStart()
             if (GetState() == eMisfire)
                 return;
 			if (GetState() == eBore)
+                return;
+			if (GetState() == eLook || GetState() == eMagCheck || GetState() == eMuzzleCheck)
                 return;
 			if (GetState() == eFiremode)
                 return;
@@ -459,6 +497,8 @@ void CWeaponMagazined::UnloadMagazine(bool spawn_ammo)
 
     VERIFY((u32)iAmmoElapsed == m_magazine.size());
 
+    UpdateEmptyBonesVisibility();
+
     if (!spawn_ammo)
         return;
 
@@ -560,7 +600,7 @@ void CWeaponMagazined::ReloadMagazine()
     if (m_DefaultCartridge.m_LocalAmmoType != m_ammoType)
         m_DefaultCartridge.Load(*m_ammoTypes[m_ammoType], u8(m_ammoType));
     CCartridge l_cartridge = m_DefaultCartridge;
-    while (iAmmoElapsed < (iMagazineSize + static_cast<int>(CartridgeInTheChamber)))
+    while (iAmmoElapsed < ReloadTargetCapacity())
     {
         if (!unlimited_ammo())
         {
@@ -573,6 +613,8 @@ void CWeaponMagazined::ReloadMagazine()
     }
 
     VERIFY((u32)iAmmoElapsed == m_magazine.size());
+
+    UpdateEmptyBonesVisibility();
 
     //выкинуть коробку патронов, если она пустая
     if (m_pAmmo && !m_pAmmo->m_boxCurr)
@@ -631,6 +673,11 @@ void CWeaponMagazined::DeviceSwitch()
 void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
 {
     inherited::OnStateSwitch(S, oldState);
+    if (S == eIdle)
+        ScheduleNextBore();
+    else
+        m_next_bore_time = 0;
+
     switch (S)
     {
     case eIdle: switch2_Idle(); break;
@@ -671,6 +718,9 @@ void CWeaponMagazined::OnStateSwitch(u32 S, u32 oldState)
         PlayAnimDeviceSwitch();
         break;
 	case eBore: PlayAnimBore(); break;
+	case eLook: PlayAnimLook(); break;
+    case eMagCheck: PlayAnimMagCheck(); break;
+    case eMuzzleCheck: PlayAnimMuzzleCheck(); break;
 	case eFiremode: PlayAnimFiremode(); break;
     }
 }
@@ -723,6 +773,9 @@ void CWeaponMagazined::UpdateCL()
         case eSprintStart:
         case eSprintEnd:
 		case eBore:
+		case eLook:
+        case eMagCheck:
+        case eMuzzleCheck:
 		case eFiremode:
         case eIdle:
             fTime -= dt;
@@ -755,6 +808,22 @@ void CWeaponMagazined::UpdateCL()
 
     if (H_Parent() && IsZoomed() && !IsRotatingToZoom() && m_binoc_vision)
         m_binoc_vision->Update();
+
+    const bool detachable_enabled = DetachableMagazineSystemActive();
+    const shared_str& installed_magazine = InstalledMagazineSection();
+    const shared_str desired_section = detachable_enabled ? installed_magazine : shared_str();
+    if (detachable_enabled != m_applied_detachable_magazines || desired_section != m_applied_magazine_section)
+        ApplyMagazineAddonConfiguration(true);
+
+    if (GetState() == eIdle && GetNextState() == eIdle && !IsPending() && ParentIsActor())
+    {
+        CActor* actor = smart_cast<CActor*>(H_Parent());
+        const bool really_idle = actor && !(actor->get_state() & mcAnyMove) && !IsZoomed();
+        if (!really_idle)
+            ScheduleNextBore();
+        else if (m_next_bore_time && Device.dwTimeGlobal >= m_next_bore_time)
+            SwitchState(eBore);
+    }
 
     UpdateSounds();
 }
@@ -799,6 +868,24 @@ void CWeaponMagazined::UpdateSounds()
         sndAimEnd.set_position(get_LastFP());
 	if (sndBore.playing())
         sndBore.set_position(get_LastFP());
+    if (sndLook.playing())
+        sndLook.set_position(get_LastFP());
+    if (sndMagCheck.playing())
+        sndMagCheck.set_position(get_LastFP());
+    if (sndMuzzleCheck.playing())
+        sndMuzzleCheck.set_position(get_LastFP());
+    if (sndReady.playing())
+        sndReady.set_position(get_LastFP());
+    if (sndLoadSingle.playing())
+        sndLoadSingle.set_position(get_LastFP());
+    if (sndMagazineReload.playing())
+        sndMagazineReload.set_position(get_LastFP());
+    if (sndMagazineReloadTactical.playing())
+        sndMagazineReloadTactical.set_position(get_LastFP());
+    if (sndMagazineReloadEmpty.playing())
+        sndMagazineReloadEmpty.set_position(get_LastFP());
+    if (sndMagazineCheckVariant.playing())
+        sndMagazineCheckVariant.set_position(get_LastFP());
 }
 
 void CWeaponMagazined::state_Fire(float dt)
@@ -932,6 +1019,10 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
         HUD_SOUND::StopSound(sndReloadPartly);
         HUD_SOUND::StopSound(sndReloadJammed);
         HUD_SOUND::StopSound(sndReloadJammedLast);
+        HUD_SOUND::StopSound(sndLoadSingle);
+        HUD_SOUND::StopSound(sndMagazineReload);
+        HUD_SOUND::StopSound(sndMagazineReloadTactical);
+        HUD_SOUND::StopSound(sndMagazineReloadEmpty);
         bullet_update = true;
         SwitchState(eIdle);
         break; // End of reload animation
@@ -947,6 +1038,12 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
     case eFire:
     case eFire2: SwitchState(eIdle); break;
 	case eBore: SwitchState(eIdle); break;
+	case eLook: SwitchState(eIdle); break;
+    case eMagCheck:
+        ShowMagazineAmmoCount();
+        SwitchState(eIdle);
+        break;
+    case eMuzzleCheck: SwitchState(eIdle); break;
 	case eFiremode: SwitchState(eIdle); break;
     default: inherited::OnAnimationEnd(state);
     }
@@ -1033,6 +1130,23 @@ void CWeaponMagazined::switch2_Empty(const bool empty_click_anim_play)
 }
 void CWeaponMagazined::PlayReloadSound()
 {
+    if (DetachableMagazineSystemActive() && !InstalledMagazineSection().c_str())
+    {
+        PlaySound(sndLoadSingle.sounds.empty() ? sndReload : sndLoadSingle, get_LastFP());
+        return;
+    }
+
+    if (m_reload_animation_variant.c_str() && m_reload_animation_variant.size())
+    {
+        HUD_SOUND* variant = iAmmoElapsed == 0 ? &sndMagazineReloadEmpty :
+            (IsPartlyReloading() ? &sndMagazineReloadTactical : &sndMagazineReload);
+        if (!variant->sounds.empty())
+        {
+            PlaySound(*variant, get_LastFP());
+            return;
+        }
+    }
+
     if ((IsMisfire() && iAmmoElapsed == 1) && !sndReloadJammedLast.sounds.empty())
         PlaySound(sndReloadJammedLast, get_LastFP());
     else if (IsMisfire() && !sndReloadJammed.sounds.empty())
@@ -1077,6 +1191,10 @@ void CWeaponMagazined::switch2_Hidden()
     HUD_SOUND::StopSound(sndReloadPartly);
     HUD_SOUND::StopSound(sndReloadJammed);
     HUD_SOUND::StopSound(sndReloadJammedLast);
+    HUD_SOUND::StopSound(sndLoadSingle);
+    HUD_SOUND::StopSound(sndMagazineReload);
+    HUD_SOUND::StopSound(sndMagazineReloadTactical);
+    HUD_SOUND::StopSound(sndMagazineReloadEmpty);
     StopCurrentAnimWithoutCallback();
 
     signal_HideComplete();
@@ -1084,6 +1202,17 @@ void CWeaponMagazined::switch2_Hidden()
 }
 void CWeaponMagazined::switch2_Showing()
 {
+    if (ParentIsActor() && !m_first_ready_played)
+    {
+        m_first_ready_played = true;
+        if (AnimationExist("anm_ready"))
+        {
+            PlayAnimReady();
+            SetPending(TRUE);
+            return;
+        }
+    }
+
     PlaySound(sndShow, get_LastFP());
 
     SetPending(TRUE);
@@ -1168,7 +1297,24 @@ bool CWeaponMagazined::Action(s32 cmd, u32 flags)
 	case kANIM_BORE: {
         if ((flags & CMD_START) && GetState() == eIdle && !IsZoomed())
         {
-            SwitchState(eBore);
+            SwitchState(eLook);
+            return true;
+        }
+    }
+    break;
+    case kANIM_MAGCHECK: {
+        const bool has_magazine = !DetachableMagazineSystemActive() || InstalledMagazineSection().c_str();
+        if ((flags & CMD_START) && GetState() == eIdle && !IsZoomed() && has_magazine)
+        {
+            SwitchState(eMagCheck);
+            return true;
+        }
+    }
+    break;
+    case kANIM_MUZZLE_CHECK: {
+        if ((flags & CMD_START) && GetState() == eIdle && !IsZoomed())
+        {
+            SwitchState(eMuzzleCheck);
             return true;
         }
     }
@@ -1298,12 +1444,113 @@ bool CWeaponMagazined::Detach(const char* item_section_name, bool b_spawn_item)
     }
     else if (DetachCustomAddon(item_section_name))
     {
+        ApplyMagazineAddonConfiguration(true);
         UpdateAddonsVisibility();
         InitAddons();
         return CInventoryItemObject::Detach(item_section_name, b_spawn_item);
     }
     else
         return inherited::Detach(item_section_name, b_spawn_item);
+}
+
+const shared_str& CWeaponMagazined::InstalledMagazineSection() const
+{
+    return GetCustomAddonSection(eCustomAddonMagazine);
+}
+
+bool CWeaponMagazined::DetachableMagazineSystemActive() const
+{
+    return psActorFlags.test(AF_DETACHABLE_MAGAZINES) && !GetCustomAddonAllowed(eCustomAddonMagazine).empty();
+}
+
+int CWeaponMagazined::ReloadTargetCapacity() const
+{
+    if (DetachableMagazineSystemActive())
+        return iMagazineSize;
+    return iMagazineSize + static_cast<int>(CartridgeInTheChamber);
+}
+
+void CWeaponMagazined::TrimMagazineToCapacity(bool return_ammo)
+{
+    xr_map<shared_str, u32> removed;
+    while (iAmmoElapsed > iMagazineSize && !m_magazine.empty())
+    {
+        const CCartridge& cartridge = m_magazine.back();
+        ++removed[cartridge.m_ammoSect];
+        m_magazine.pop_back();
+        --iAmmoElapsed;
+    }
+
+    if (return_ammo && !unlimited_ammo())
+    {
+        for (const auto& [section, count] : removed)
+            SpawnAmmo(count, section.c_str());
+    }
+    m_dwAmmoCurrentCalcFrame = 0;
+    UpdateEmptyBonesVisibility();
+}
+
+void CWeaponMagazined::LoadMagazineVariantSounds()
+{
+    HUD_SOUND::DestroySound(sndMagazineReload);
+    HUD_SOUND::DestroySound(sndMagazineReloadTactical);
+    HUD_SOUND::DestroySound(sndMagazineReloadEmpty);
+    HUD_SOUND::DestroySound(sndMagazineCheckVariant);
+
+    if (!m_reload_animation_variant.c_str() || !m_reload_animation_variant.size())
+        return;
+
+    const shared_str& magazine = InstalledMagazineSection();
+    auto load_variant = [&](HUD_SOUND& sound, LPCSTR prefix, LPCSTR suffix, ESoundTypes type) {
+        string128 key{};
+        xr_sprintf(key, "%s_%s%s", prefix, m_reload_animation_variant.c_str(), suffix);
+        if (pSettings->line_exist(cNameSect(), key))
+            HUD_SOUND::LoadSound(cNameSect().c_str(), key, sound, type);
+        else if (magazine.c_str() && pSettings->line_exist(magazine, key))
+            HUD_SOUND::LoadSound(magazine.c_str(), key, sound, type);
+    };
+
+    load_variant(sndMagazineReload, "snd_reload", "", m_eSoundReload);
+    load_variant(sndMagazineReloadTactical, "snd_reload", "_t", m_eSoundReload);
+    load_variant(sndMagazineReloadEmpty, "snd_reload", "_empty", m_eSoundReload);
+
+    string128 magcheck_key{};
+    xr_sprintf(magcheck_key, "snd_magcheck_%s", m_magcheck_animation_variant.c_str());
+    if (pSettings->line_exist(cNameSect(), magcheck_key))
+        HUD_SOUND::LoadSound(cNameSect().c_str(), magcheck_key, sndMagazineCheckVariant, m_eSoundEmptyClick);
+    else if (magazine.c_str() && pSettings->line_exist(magazine, magcheck_key))
+        HUD_SOUND::LoadSound(magazine.c_str(), magcheck_key, sndMagazineCheckVariant, m_eSoundEmptyClick);
+}
+
+void CWeaponMagazined::ApplyMagazineAddonConfiguration(bool trim_ammo)
+{
+    const bool enabled = DetachableMagazineSystemActive();
+    const shared_str& magazine = InstalledMagazineSection();
+    const shared_str applied_section = enabled ? magazine : shared_str();
+
+    int capacity = m_configuredMagazineSize;
+    m_reload_animation_variant = nullptr;
+    m_magcheck_animation_variant = nullptr;
+    if (enabled)
+    {
+        capacity = 1;
+        if (magazine.c_str())
+        {
+            capacity = READ_IF_EXISTS(pSettings, r_s32, magazine, "magazine_capacity", m_configuredMagazineSize);
+            if (pSettings->line_exist(magazine, "use_reload_animations"))
+                m_reload_animation_variant = pSettings->r_string(magazine, "use_reload_animations");
+            if (pSettings->line_exist(magazine, "use_magcheck_animations"))
+                m_magcheck_animation_variant = pSettings->r_string(magazine, "use_magcheck_animations");
+            else
+                m_magcheck_animation_variant = m_reload_animation_variant;
+        }
+    }
+
+    iMagazineSize = _max(1, capacity);
+    m_applied_detachable_magazines = enabled;
+    m_applied_magazine_section = applied_section;
+    LoadMagazineVariantSounds();
+    TrimMagazineToCapacity(trim_ammo);
 }
 
 void CWeaponMagazined::InitZoomParams(LPCSTR section, bool useTexture)
@@ -1398,6 +1645,7 @@ void CWeaponMagazined::InitZoomParams(LPCSTR section, bool useTexture)
 
 void CWeaponMagazined::InitAddons()
 {
+    ApplyMagazineAddonConfiguration(false);
     //////////////////////////////////////////////////////////////////////////
     // Прицел
     m_fIronSightZoomFactor = READ_IF_EXISTS(pSettings, r_float, cNameSect(), "ironsight_zoom_factor", 50.0f);
@@ -1540,6 +1788,23 @@ void CWeaponMagazined::PlayAnimHide()
 
 void CWeaponMagazined::PlayAnimReload()
 {
+    if (DetachableMagazineSystemActive() && !InstalledMagazineSection().c_str())
+    {
+        PlayHUDMotion({"anm_load_single", "anm_reload_empty", "anim_reload", "anm_reload"}, true, GetState());
+        return;
+    }
+
+    if (m_reload_animation_variant.c_str() && m_reload_animation_variant.size())
+    {
+        string128 selected{}, generic{}, tactical{}, empty{};
+        xr_sprintf(generic, "anm_reload_%s", m_reload_animation_variant.c_str());
+        xr_sprintf(tactical, "anm_reload_%s_t", m_reload_animation_variant.c_str());
+        xr_sprintf(empty, "anm_reload_%s_empty", m_reload_animation_variant.c_str());
+        xr_strcpy(selected, iAmmoElapsed == 0 ? empty : (IsPartlyReloading() ? tactical : generic));
+        PlayHUDMotion({selected, generic, "anm_reload_empty", "anim_reload", "anm_reload"}, true, GetState());
+        return;
+    }
+
     if (IsMisfire())
         PlayHUDMotion({iAmmoElapsed == 1 ? "anm_reload_jammed_last" : "anm_reload_jammed", "anm_reload_jammed", "anm_reload_empty", "anim_reload", "anm_reload"}, true, GetState());
     else if (IsPartlyReloading())
@@ -1841,6 +2106,9 @@ void CWeaponMagazined::save(NET_Packet& output_packet)
 void CWeaponMagazined::load(IReader& input_packet)
 {
     inherited::load(input_packet);
+    // A restored weapon already existed before this session; never replay
+    // the first-acquisition ready animation after loading a save.
+    m_first_ready_played = true;
     load_data(m_iQueueSize, input_packet);
     SetQueueSize(m_iQueueSize);
     load_data(m_iShotNum, input_packet);
@@ -1973,6 +2241,80 @@ void CWeaponMagazined::PlayAnimBore()
     }
     else
         SwitchState(eIdle);
+}
+
+void CWeaponMagazined::ScheduleNextBore()
+{
+    const u32 min_delay = static_cast<u32>(_max(0.f, m_bore_idle_time_min) * 1000.f);
+    const u32 max_delay = static_cast<u32>(_max(m_bore_idle_time_min, m_bore_idle_time_max) * 1000.f);
+    const u32 delay = max_delay > min_delay ? Random.randI(min_delay, max_delay + 1) : min_delay;
+    m_next_bore_time = Device.dwTimeGlobal + delay;
+}
+
+void CWeaponMagazined::PlayAnimLook()
+{
+    if (!AnimationExist("anm_look"))
+    {
+        SwitchState(eIdle);
+        return;
+    }
+    PlayHUDMotion("anm_look", true, GetState());
+    if (!sndLook.sounds.empty())
+        PlaySound(sndLook, get_LastFP());
+    SetPending(TRUE);
+}
+
+void CWeaponMagazined::PlayAnimMagCheck()
+{
+    string128 variant{};
+    if (m_magcheck_animation_variant.c_str() && m_magcheck_animation_variant.size())
+        xr_sprintf(variant, "anm_magcheck_%s", m_magcheck_animation_variant.c_str());
+
+    LPCSTR selected = variant[0] && AnimationExist(variant) ? variant : "anm_magcheck";
+    if (!AnimationExist(selected))
+    {
+        SwitchState(eIdle);
+        return;
+    }
+    PlayHUDMotion(selected, true, GetState());
+    if (!sndMagazineCheckVariant.sounds.empty())
+        PlaySound(sndMagazineCheckVariant, get_LastFP());
+    else if (!sndMagCheck.sounds.empty())
+        PlaySound(sndMagCheck, get_LastFP());
+    SetPending(TRUE);
+}
+
+void CWeaponMagazined::PlayAnimMuzzleCheck()
+{
+    if (!AnimationExist("anm_muzzle_check"))
+    {
+        SwitchState(eIdle);
+        return;
+    }
+    PlayHUDMotion("anm_muzzle_check", true, GetState());
+    if (!sndMuzzleCheck.sounds.empty())
+        PlaySound(sndMuzzleCheck, get_LastFP());
+    SetPending(TRUE);
+}
+
+void CWeaponMagazined::PlayAnimReady()
+{
+    PlayHUDMotion("anm_ready", true, GetState());
+    if (!sndReady.sounds.empty())
+        PlaySound(sndReady, get_LastFP());
+}
+
+void CWeaponMagazined::ShowMagazineAmmoCount() const
+{
+    if (!ParentIsActor() || !HUD().GetUI() || !HUD().GetUI()->UIGame())
+        return;
+    SDrawStaticStruct* message = HUD().GetUI()->UIGame()->AddCustomStatic("item_used", true);
+    if (!message)
+        return;
+    string128 text{};
+    xr_sprintf(text, "Magazine: %d / %d", iAmmoElapsed, iMagazineSize);
+    message->m_endTime = Device.fTimeGlobal + 3.f;
+    message->wnd()->SetText(text);
 }
 
 void CWeaponMagazined::PlayAnimFiremode()

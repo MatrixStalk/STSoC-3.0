@@ -37,7 +37,7 @@ u16 source_motion_bone_id(const IKinematics* skeleton, LPCSTR valve_bone_name)
     // markers while the actual animated hierarchy is named Base Human*. Use
     // the real hierarchy for connected local-space retargeting. The marker
     // transforms are consumed separately as arm IK landmarks.
-    const bool base_human_rig = skeleton->LL_BoneID("base humanlcollarbone") != BI_NONE &&
+    const bool base_human_rig = skeleton->LL_BoneID("base humanlcollarbone") != BI_NONE ||
         skeleton->LL_BoneID("base humanrcollarbone") != BI_NONE;
     constexpr LPCSTR valve_prefix = "valvebiped.bip01_";
     const size_t valve_prefix_length = xr_strlen(valve_prefix);
@@ -97,14 +97,21 @@ u16 source_motion_bone_id(const IKinematics* skeleton, LPCSTR valve_bone_name)
 
 bool is_base_human_hud_skeleton(const IKinematics* skeleton)
 {
-    return skeleton && skeleton->LL_BoneID("base humanlcollarbone") != BI_NONE &&
-        skeleton->LL_BoneID("base humanrcollarbone") != BI_NONE;
+    return skeleton && (skeleton->LL_BoneID("base humanlcollarbone") != BI_NONE ||
+        skeleton->LL_BoneID("base humanrcollarbone") != BI_NONE);
 }
 
 bool is_source_hud_skeleton(const IKinematics* skeleton)
 {
     return skeleton && skeleton->LL_BoneID(source_root_bone) != BI_NONE && source_motion_bone_id(skeleton, source_l_clavicle) != BI_NONE &&
         source_motion_bone_id(skeleton, source_r_clavicle) != BI_NONE;
+}
+
+bool is_source_hand_skeleton(const IKinematics* skeleton, u16 hand_idx)
+{
+    // HUD target 0 is the right hand and target 1 is the left hand. Addon
+    // exports are allowed to contain only the arm which they author.
+    return skeleton && source_motion_bone_id(skeleton, hand_idx == 0 ? source_r_clavicle : source_l_clavicle) != BI_NONE;
 }
 
 u16 hud_bone_id(const IKinematics* skeleton, LPCSTR bone_name)
@@ -928,6 +935,10 @@ player_hud::player_hud()
 {
     m_transform.identity();
     m_transform_2.identity();
+    m_source_skeleton_transforms[0].identity();
+    m_source_skeleton_transforms[1].identity();
+    m_addon_hand_pose_transforms[0].identity();
+    m_addon_hand_pose_transforms[1].identity();
 
     script_anim_part = u8(-1);
     script_anim_offset_factor = 0.f;
@@ -1533,6 +1544,22 @@ void player_hud::update(const Fmatrix& cam_trans)
         hud_apply_bone_adjustments(m_attached_items[1]->m_model, m_attached_items[1]);
     }
 
+    // Addon hand poses live in separately rendered animated visuals, so they
+    // are not evaluated by attachable_hud_item::update(). Evaluate them before
+    // the hands consume their bone matrices through merge callbacks.
+    IKinematics* calculated_addon_source = nullptr;
+    for (IKinematics* source : m_addon_hand_pose_sources)
+    {
+        if (!source || source == calculated_addon_source)
+            continue;
+        if (source->dcast_PKinematicsAnimated())
+        {
+            source->CalculateBones_Invalidate();
+            source->CalculateBones(TRUE);
+            calculated_addon_source = source;
+        }
+    }
+
     // Item animation is calculated first; the replaceable hands mesh then
     // consumes the common Source-bone transforms through merge callbacks.
     if (m_source_skeletons[0])
@@ -1556,6 +1583,12 @@ void player_hud::update(const Fmatrix& cam_trans)
         hud_apply_bone_adjustments(m_model_kinematics, item, m_source_skeletons[0]);
     if (attachable_hud_item* item = adjust_item_for_hand(1))
         hud_apply_bone_adjustments(m_model_2_kinematics, item, m_source_skeletons[1]);
+
+    // The weapon animation remains authoritative. Addon-authored grips are
+    // applied afterwards as a weighted two-bone IK goal, so action animation
+    // motion and finger poses remain intact instead of switching skeletons.
+    apply_addon_hand_pose_ik(0);
+    apply_addon_hand_pose_ik(1);
 
     if (script_anim_item_attached && script_anim_item_model)
         update_script_item();
@@ -1958,11 +1991,14 @@ void player_hud::refresh_source_skeleton_merge()
     IKinematics* targets[] = {m_model_kinematics, m_model_2_kinematics};
     const BoneCallback callbacks[] = {SourceBoneMergeCallback0, SourceBoneMergeCallback1};
 
+    m_source_skeleton_transforms[0].identity();
+    m_source_skeleton_transforms[1].identity();
+
     for (u16 target_idx = 0; target_idx < 2; ++target_idx)
     {
         IKinematics* source = sources[target_idx];
         IKinematics* target = targets[target_idx];
-        if (!source || !is_source_hud_skeleton(source))
+        if (!source || !is_source_hand_skeleton(source, target_idx))
             continue;
 
         u16 merged_bones = 0;
@@ -2029,6 +2065,94 @@ void player_hud::refresh_source_skeleton_merge()
     }
 }
 
+void player_hud::set_addon_hand_pose_source(u16 hand_idx, IKinematics* source, const Fmatrix& source_to_weapon, const void* owner,
+    float target_weight, float blend_in, float blend_out)
+{
+    if (hand_idx >= 2 || !source || !owner)
+        return;
+
+    m_addon_hand_pose_sources[hand_idx] = source;
+    m_addon_hand_pose_transforms[hand_idx].set(source_to_weapon);
+    m_addon_hand_pose_owners[hand_idx] = owner;
+    m_addon_hand_pose_target_weights[hand_idx] = clampr(target_weight, 0.f, 1.f);
+    m_addon_hand_pose_blend_in[hand_idx] = _max(blend_in, EPS_S);
+    m_addon_hand_pose_blend_out[hand_idx] = _max(blend_out, EPS_S);
+}
+
+void player_hud::clear_addon_hand_pose_sources(const void* owner)
+{
+    bool changed = false;
+    for (u16 hand_idx = 0; hand_idx < 2; ++hand_idx)
+    {
+        if (m_addon_hand_pose_owners[hand_idx] != owner)
+            continue;
+
+        m_addon_hand_pose_sources[hand_idx] = nullptr;
+        m_addon_hand_pose_owners[hand_idx] = nullptr;
+        m_addon_hand_pose_transforms[hand_idx].identity();
+        m_addon_hand_pose_weights[hand_idx] = 0.f;
+        m_addon_hand_pose_target_weights[hand_idx] = 0.f;
+        changed = true;
+    }
+    (void)changed;
+}
+
+void player_hud::apply_addon_hand_pose_ik(u16 hand_idx)
+{
+    if (hand_idx >= 2)
+        return;
+
+    float& weight = m_addon_hand_pose_weights[hand_idx];
+    const float target_weight = m_addon_hand_pose_target_weights[hand_idx];
+    const float blend_time = target_weight > weight ? m_addon_hand_pose_blend_in[hand_idx] : m_addon_hand_pose_blend_out[hand_idx];
+    const float step = Device.fTimeDelta / _max(blend_time, EPS_S);
+    if (weight < target_weight)
+        weight = _min(weight + step, target_weight);
+    else if (weight > target_weight)
+        weight = _max(weight - step, target_weight);
+
+    IKinematics* source = m_addon_hand_pose_sources[hand_idx];
+    IKinematics* target = hand_idx == 0 ? m_model_kinematics : m_model_2_kinematics;
+    if (!source || !target || weight <= EPS_S)
+        return;
+
+    // ARC9 LHIK/RHIK does not solve an analytical arm chain. It evaluates a
+    // hidden attachment proxy and blends the model-space matrices of matching
+    // ValveBiped bones into the viewmodel. Mirroring that behaviour is both
+    // more faithful to the authored idle.smd pose and safer for Source meshes:
+    // every deforming arm/finger bone receives a mutually compatible matrix.
+    const LPCSTR side_prefix = hand_idx == 0 ? "valvebiped.bip01_r_" : "valvebiped.bip01_l_";
+    const size_t side_prefix_length = xr_strlen(side_prefix);
+    for (u16 target_bone_id = 0; target_bone_id < target->LL_BoneCount(); ++target_bone_id)
+    {
+        LPCSTR bone_name = target->LL_BoneName(target_bone_id);
+        if (strncmp(bone_name, side_prefix, side_prefix_length))
+            continue;
+
+        // Use the exact ValveBiped bone from the proxy, as ARC9 does. Source
+        // addon exports may also contain a Base Human authoring hierarchy, but
+        // its ValveBiped marker matrices are the final c_arms pose.
+        const u16 source_bone_id = source->LL_BoneID(bone_name);
+        if (source_bone_id == BI_NONE)
+            continue;
+
+        Fmatrix proxy_transform;
+        proxy_transform.mul_43(m_addon_hand_pose_transforms[hand_idx], source->LL_GetBoneInstance(source_bone_id).mTransform);
+
+        CBoneInstance& target_bone = target->LL_GetBoneInstance(target_bone_id);
+        Fquaternion animated_rotation, proxy_rotation, blended_rotation;
+        animated_rotation.set(target_bone.mTransform).normalize();
+        proxy_rotation.set(proxy_transform).normalize();
+        blended_rotation.slerp(animated_rotation, proxy_rotation, weight).normalize();
+
+        Fvector blended_position;
+        blended_position.lerp(target_bone.mTransform.c, proxy_transform.c, weight);
+        target_bone.mTransform.rotation(blended_rotation);
+        target_bone.mTransform.c.set(blended_position);
+        target_bone.mRenderTransform.mul_43(target_bone.mTransform, target->LL_GetData(target_bone_id).m2b_transform);
+    }
+}
+
 void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
 {
     IKinematics* source = m_source_skeletons[target_idx];
@@ -2040,6 +2164,11 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
     IKinematics* target = target_idx == 0 ? m_model_kinematics : m_model_2_kinematics;
     if (target && source_bone_id < source->LL_BoneCount() && target_bone_id < target->LL_BoneCount())
     {
+        auto source_transform = [this, target_idx, source](u16 bone_id) {
+            Fmatrix transformed;
+            transformed.mul_43(m_source_skeleton_transforms[target_idx], source->LL_GetBoneInstance(bone_id).mTransform);
+            return transformed;
+        };
         const CBoneData& source_data = source->LL_GetData(source_bone_id);
         const CBoneData& target_data = target->LL_GetData(target_bone_id);
 
@@ -2053,14 +2182,14 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
             // target bones consume the already evaluated bone-to-model matrix
             // of the parent viewmodel. The target mesh keeps its own inverse
             // bind matrix when mRenderTransform is built by CKinematics.
-            target_bone->mTransform.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
+            target_bone->mTransform.set(source_transform(source_bone_id));
         }
         else if (retarget_mode == 0)
         {
             Fmatrix target_bind, animated_delta;
             target_bind.invert(target_data.m2b_transform);
             animated_delta.mul_43(source_data.m2b_transform, target_bind);
-            target_bone->mTransform.mul_43(source->LL_GetBoneInstance(source_bone_id).mTransform, animated_delta);
+            target_bone->mTransform.mul_43(source_transform(source_bone_id), animated_delta);
         }
         else
         {
@@ -2074,12 +2203,14 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
             Fmatrix source_local;
             if (source_parent_id != BI_NONE && source_parent_id < source->LL_BoneCount())
             {
+                const Fmatrix source_parent_transform = source_transform(source_parent_id);
+                const Fmatrix source_bone_transform = source_transform(source_bone_id);
                 Fmatrix source_parent_inverse;
-                source_parent_inverse.invert(source->LL_GetBoneInstance(source_parent_id).mTransform);
-                source_local.mul_43(source_parent_inverse, source->LL_GetBoneInstance(source_bone_id).mTransform);
+                source_parent_inverse.invert(source_parent_transform);
+                source_local.mul_43(source_parent_inverse, source_bone_transform);
             }
             else
-                source_local.set(source->LL_GetBoneInstance(source_bone_id).mTransform);
+                source_local.set(source_transform(source_bone_id));
 
             Fmatrix source_bind_inverse, local_delta, target_local;
             source_bind_inverse.invert(source_data.bind_transform);
@@ -2138,12 +2269,13 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
                 Fmatrix target_hand_bind, hand_bind_conversion, desired_hand;
                 target_hand_bind.invert(target_hand_data.m2b_transform);
                 hand_bind_conversion.mul_43(source_hand_data.m2b_transform, target_hand_bind);
-                desired_hand.mul_43(source->LL_GetBoneInstance(source_hand_id).mTransform, hand_bind_conversion);
+                const Fmatrix source_hand_transform = source_transform(source_hand_id);
+                desired_hand.mul_43(source_hand_transform, hand_bind_conversion);
                 // The animated Source wrist is the actual weapon-authored grip
                 // point. A global bind-position difference also contains the
                 // complete shoulder/rest-pose offset (especially on the left
                 // side) and must not be added to this end effector.
-                desired_hand.c.set(source->LL_GetBoneInstance(source_hand_id).mTransform.c);
+                desired_hand.c.set(source_hand_transform.c);
 
                 const CBoneData& source_upperarm_data = source->LL_GetData(source_upperarm_id);
                 const CBoneData& target_upperarm_data = target->LL_GetData(target_upperarm_id);
@@ -2151,7 +2283,8 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
                 source_upperarm_bind.invert(source_upperarm_data.m2b_transform);
                 target_upperarm_bind.invert(target_upperarm_data.m2b_transform);
                 upperarm_bind_conversion.mul_43(source_upperarm_data.m2b_transform, target_upperarm_bind);
-                desired_upperarm.mul_43(source->LL_GetBoneInstance(source_upperarm_id).mTransform, upperarm_bind_conversion);
+                const Fmatrix source_upperarm_transform = source_transform(source_upperarm_id);
+                desired_upperarm.mul_43(source_upperarm_transform, upperarm_bind_conversion);
                 if (is_base_human_hud_skeleton(source))
                 {
                     // Base Human exports can keep their rest pose around a
@@ -2161,13 +2294,13 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
                     // hundreds of units away and stretches the arm mesh.
                     // Its animated shoulder and wrist already share the same
                     // weapon-authored space, so use that shoulder directly.
-                    desired_upperarm.c.set(source->LL_GetBoneInstance(source_upperarm_id).mTransform.c);
+                    desired_upperarm.c.set(source_upperarm_transform.c);
                 }
                 else
                 {
                     Fvector upperarm_bind_offset;
                     upperarm_bind_offset.sub(target_upperarm_bind.c, source_upperarm_bind.c);
-                    desired_upperarm.c.add(source->LL_GetBoneInstance(source_upperarm_id).mTransform.c, upperarm_bind_offset);
+                    desired_upperarm.c.add(source_upperarm_transform.c, upperarm_bind_offset);
                 }
 
                 if (target_bone_id == target_upperarm_id)
@@ -2186,8 +2319,7 @@ void player_hud::copy_source_bone(u16 target_idx, CBoneInstance* target_bone)
                     to_hand.mul(1.f / hand_distance);
 
                     Fvector source_to_elbow;
-                    source_to_elbow.sub(source->LL_GetBoneInstance(source_forearm_id).mTransform.c,
-                        source->LL_GetBoneInstance(source_upperarm_id).mTransform.c);
+                    source_to_elbow.sub(source_transform(source_forearm_id).c, source_upperarm_transform.c);
                     Fvector pole_projection = to_hand;
                     pole_projection.mul(source_to_elbow.dotproduct(to_hand));
                     Fvector bend_direction;

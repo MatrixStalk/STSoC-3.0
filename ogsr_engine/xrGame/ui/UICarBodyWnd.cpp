@@ -960,6 +960,14 @@ bool CUICarBodyWnd::TransferItem(PIItem itm, CInventoryOwner* owner_from, CInven
 
     if (smart_cast<CBaseMonster*>(go_to))
         return false;
+
+    // Weapons taken from a corpse use the ordinary draw animation. The
+    // one-time ready animation is reserved for a genuinely new acquisition.
+    if (CEntityAlive* source = smart_cast<CEntityAlive*>(go_from); source && !source->g_Alive())
+    {
+        if (CWeaponMagazined* weapon = smart_cast<CWeaponMagazined*>(itm))
+            weapon->SuppressFirstReadyAnimation();
+    }
     if (b_check)
     {
         float invWeight = owner_to->inventory().CalcTotalWeight();

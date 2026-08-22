@@ -455,6 +455,13 @@ public:
     IKinematicsAnimated* AnimatedModel() { return m_model; }
     const Fmatrix& XFORM() const { return m_transform; }
 
+    // A separately rendered weapon addon may contain an authored Source hand
+    // pose. It can temporarily replace the normal weapon animation source for
+    // either HUD hand without affecting the other one.
+    void set_addon_hand_pose_source(u16 hand_idx, IKinematics* source, const Fmatrix& source_to_weapon, const void* owner,
+        float target_weight, float blend_in, float blend_out);
+    void clear_addon_hand_pose_sources(const void* owner);
+
 private:
     static void Thumb0Callback(CBoneInstance* B);
     static void Thumb01Callback(CBoneInstance* B);
@@ -463,6 +470,7 @@ private:
     static void SourceBoneMergeCallback1(CBoneInstance* B);
 
     void copy_source_bone(u16 target_idx, CBoneInstance* target_bone);
+    void apply_addon_hand_pose_ik(u16 hand_idx);
     void clear_source_skeleton_merge();
     void refresh_source_skeleton_merge();
     void setup_thumb_callbacks();
@@ -473,6 +481,14 @@ private:
     IKinematics *m_model_kinematics{}, *m_model_2_kinematics{};
     IKinematicsAnimated *m_model{}, *m_model_2{};
     IKinematics* m_source_skeletons[2]{};
+    IKinematics* m_addon_hand_pose_sources[2]{};
+    Fmatrix m_source_skeleton_transforms[2];
+    Fmatrix m_addon_hand_pose_transforms[2];
+    const void* m_addon_hand_pose_owners[2]{};
+    float m_addon_hand_pose_weights[2]{};
+    float m_addon_hand_pose_target_weights[2]{};
+    float m_addon_hand_pose_blend_in[2]{0.18f, 0.18f};
+    float m_addon_hand_pose_blend_out[2]{0.1f, 0.1f};
     bool m_source_skeleton_mode{};
     xr_vector<u16> m_ancors;
     attachable_hud_item* m_attached_items[2]{};

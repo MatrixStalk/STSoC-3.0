@@ -60,6 +60,7 @@ void CWeapon::FireTrace(const Fvector& P, const Fvector& D)
     // Ammo
     m_magazine.pop_back();
     --iAmmoElapsed;
+    UpdateEmptyBonesVisibility();
 
     //проверить не произошла ли осечка
     // CheckForMisfire();

@@ -72,6 +72,8 @@ enum EGameActions
     kSHOWHUD,
 	
 	kANIM_BORE,
+    kANIM_MAGCHECK,
+    kANIM_MUZZLE_CHECK,
 
     kLASTACTION = u32(-3),
     kNOTBINDED = u32(-2),
