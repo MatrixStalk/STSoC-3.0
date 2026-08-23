@@ -1362,54 +1362,57 @@ void CWeapon::Load(LPCSTR section)
 
     modernRecoil = SModernRecoilParams{};
     modernRecoil.enabled = READ_IF_EXISTS(pSettings, r_bool, section, "cam_recoil_modern", true);
-    modernRecoil.camera_frequency = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_frequency", modernRecoil.camera_frequency);
-    modernRecoil.camera_damping = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_damping", modernRecoil.camera_damping);
-    modernRecoil.camera_impulse = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_impulse", modernRecoil.camera_impulse);
-    modernRecoil.return_delay = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_return_delay", modernRecoil.return_delay);
-    modernRecoil.return_speed = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_return_speed", modernRecoil.return_speed);
-    modernRecoil.camera_max_pitch = deg2rad(READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_max_pitch", modernRecoil.camera_max_pitch));
-    modernRecoil.camera_max_yaw = deg2rad(READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_max_yaw", modernRecoil.camera_max_yaw));
-    modernRecoil.vertical_random = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_vertical_random", modernRecoil.vertical_random);
-    modernRecoil.horizontal_factor = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_horizontal", modernRecoil.horizontal_factor);
-    modernRecoil.horizontal_random = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_horizontal_random", modernRecoil.horizontal_random);
-    modernRecoil.horizontal_change_chance =
-        READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_direction_change", modernRecoil.horizontal_change_chance);
-    modernRecoil.roll_factor = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_roll", modernRecoil.roll_factor);
-    modernRecoil.first_shot_multiplier =
-        READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_first_shot", modernRecoil.first_shot_multiplier);
-    modernRecoil.burst_growth = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_burst_growth", modernRecoil.burst_growth);
-    modernRecoil.burst_growth_limit =
-        READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_burst_limit", modernRecoil.burst_growth_limit);
-    modernRecoil.burst_reset_time = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_burst_reset", modernRecoil.burst_reset_time);
+    modernRecoil.recoil = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil", modernRecoil.recoil);
+    modernRecoil.recoil_up = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_up", modernRecoil.recoil_up);
+    modernRecoil.recoil_side = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_side", modernRecoil.recoil_side);
+    modernRecoil.recoil_random_up = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_random_up", modernRecoil.recoil_random_up);
+    modernRecoil.recoil_random_side = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_random_side", modernRecoil.recoil_random_side);
+    modernRecoil.recoil_auto_control = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_auto_control", modernRecoil.recoil_auto_control);
+    modernRecoil.recoil_pattern_drift = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_pattern_drift", modernRecoil.recoil_pattern_drift);
+    modernRecoil.recoil_per_shot = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_per_shot", modernRecoil.recoil_per_shot);
+    modernRecoil.recoil_dissipation_rate = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_dissipation_rate", modernRecoil.recoil_dissipation_rate);
+    modernRecoil.recoil_reset_time = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_reset_time", modernRecoil.recoil_reset_time);
+    modernRecoil.recoil_full_reset_time = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_full_reset_time", modernRecoil.recoil_full_reset_time);
+    modernRecoil.camera_max_pitch = READ_IF_EXISTS(pSettings, r_float, section, "arc9_camera_max_pitch", modernRecoil.camera_max_pitch);
+    modernRecoil.camera_max_yaw = READ_IF_EXISTS(pSettings, r_float, section, "arc9_camera_max_yaw", modernRecoil.camera_max_yaw);
+
+    modernRecoil.visual_recoil = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil", modernRecoil.visual_recoil);
+    modernRecoil.visual_recoil_up = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_up", modernRecoil.visual_recoil_up);
+    modernRecoil.visual_recoil_up_semi = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_up_semi", modernRecoil.visual_recoil_up_semi);
+    modernRecoil.visual_recoil_side = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_side", modernRecoil.visual_recoil_side);
+    modernRecoil.visual_recoil_side_semi = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_side_semi", modernRecoil.visual_recoil_side_semi);
+    modernRecoil.visual_recoil_roll = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_roll", modernRecoil.visual_recoil_roll);
+    modernRecoil.visual_recoil_punch = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_punch", modernRecoil.visual_recoil_punch);
+    modernRecoil.visual_recoil_punch_sights = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_punch_sights", modernRecoil.visual_recoil_punch_sights);
+    modernRecoil.visual_recoil_spring_constant = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_spring_constant", modernRecoil.visual_recoil_spring_constant);
+    modernRecoil.visual_recoil_spring_magnitude = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_spring_magnitude", modernRecoil.visual_recoil_spring_magnitude);
+    modernRecoil.visual_recoil_spring_damping = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_spring_damping", modernRecoil.visual_recoil_spring_damping);
+    modernRecoil.visual_recoil_bump_up = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_bump_up", modernRecoil.visual_recoil_bump_up);
+    modernRecoil.visual_recoil_bump_up_hip = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_bump_up_hip", modernRecoil.visual_recoil_bump_up_hip);
+    modernRecoil.visual_recoil_position_bump = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_position_bump", modernRecoil.visual_recoil_position_bump);
+    modernRecoil.visual_recoil_scale = READ_IF_EXISTS(pSettings, r_float, section, "arc9_visual_recoil_scale", modernRecoil.visual_recoil_scale);
+    if (pSettings->line_exist(section, "arc9_visual_recoil_center"))
+        modernRecoil.visual_recoil_center = pSettings->r_fvector3(section, "arc9_visual_recoil_center");
+    modernRecoil.shots_to_full_auto = READ_IF_EXISTS(pSettings, r_u32, section, "arc9_shots_to_full_auto", modernRecoil.shots_to_full_auto);
+    modernRecoil.subtle_visual_recoil = READ_IF_EXISTS(pSettings, r_float, section, "arc9_subtle_visual_recoil", modernRecoil.subtle_visual_recoil);
+    modernRecoil.subtle_visual_recoil_direction = READ_IF_EXISTS(pSettings, r_float, section, "arc9_subtle_visual_recoil_direction", modernRecoil.subtle_visual_recoil_direction);
+    modernRecoil.subtle_visual_recoil_speed = READ_IF_EXISTS(pSettings, r_float, section, "arc9_subtle_visual_recoil_speed", modernRecoil.subtle_visual_recoil_speed);
     modernRecoil.zoom_multiplier = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_zoom_k", modernRecoil.zoom_multiplier);
     modernRecoil.crouch_multiplier = READ_IF_EXISTS(pSettings, r_float, section, "cam_recoil_crouch_k", modernRecoil.crouch_multiplier);
 
-    modernRecoil.hud_kick = READ_IF_EXISTS(pSettings, r_float, section, "hud_recoil_kick", modernRecoil.hud_kick);
-    modernRecoil.hud_up = READ_IF_EXISTS(pSettings, r_float, section, "hud_recoil_up", modernRecoil.hud_up);
-    modernRecoil.hud_pitch = deg2rad(READ_IF_EXISTS(pSettings, r_float, section, "hud_recoil_pitch", modernRecoil.hud_pitch));
-    modernRecoil.hud_yaw = deg2rad(READ_IF_EXISTS(pSettings, r_float, section, "hud_recoil_yaw", modernRecoil.hud_yaw));
-    modernRecoil.hud_roll = deg2rad(READ_IF_EXISTS(pSettings, r_float, section, "hud_recoil_roll", modernRecoil.hud_roll));
-    modernRecoil.hud_frequency = READ_IF_EXISTS(pSettings, r_float, section, "hud_recoil_frequency", modernRecoil.hud_frequency);
-    modernRecoil.hud_damping = READ_IF_EXISTS(pSettings, r_float, section, "hud_recoil_damping", modernRecoil.hud_damping);
-
-    modernRecoil.camera_frequency = _max(modernRecoil.camera_frequency, 0.1f);
-    modernRecoil.hud_frequency = _max(modernRecoil.hud_frequency, 0.1f);
-    modernRecoil.camera_damping = _max(modernRecoil.camera_damping, 0.f);
-    modernRecoil.camera_impulse = clampr(modernRecoil.camera_impulse, 0.f, 4.f);
-    modernRecoil.hud_damping = _max(modernRecoil.hud_damping, 0.f);
-    modernRecoil.return_delay = _max(modernRecoil.return_delay, 0.f);
-    modernRecoil.return_speed = _max(modernRecoil.return_speed, 0.1f);
-    modernRecoil.camera_max_pitch = _max(modernRecoil.camera_max_pitch, deg2rad(0.1f));
-    modernRecoil.camera_max_yaw = _max(modernRecoil.camera_max_yaw, deg2rad(0.1f));
-    modernRecoil.vertical_random = clampr(modernRecoil.vertical_random, 0.f, 1.f);
-    modernRecoil.horizontal_factor = _max(modernRecoil.horizontal_factor, 0.f);
-    modernRecoil.horizontal_random = clampr(modernRecoil.horizontal_random, 0.f, 1.f);
-    modernRecoil.horizontal_change_chance = clampr(modernRecoil.horizontal_change_chance, 0.f, 1.f);
-    modernRecoil.roll_factor = _max(modernRecoil.roll_factor, 0.f);
-    modernRecoil.first_shot_multiplier = _max(modernRecoil.first_shot_multiplier, 0.f);
-    modernRecoil.burst_growth = _max(modernRecoil.burst_growth, 0.f);
-    modernRecoil.burst_growth_limit = _max(modernRecoil.burst_growth_limit, 1.f);
-    modernRecoil.burst_reset_time = _max(modernRecoil.burst_reset_time, 0.01f);
+    modernRecoil.recoil = _max(modernRecoil.recoil, 0.f);
+    modernRecoil.recoil_auto_control = _max(modernRecoil.recoil_auto_control, 0.f);
+    modernRecoil.recoil_per_shot = _max(modernRecoil.recoil_per_shot, 0.01f);
+    modernRecoil.recoil_dissipation_rate = _max(modernRecoil.recoil_dissipation_rate, 0.f);
+    modernRecoil.recoil_reset_time = _max(modernRecoil.recoil_reset_time, 0.f);
+    modernRecoil.recoil_full_reset_time = _max(modernRecoil.recoil_full_reset_time, modernRecoil.recoil_reset_time);
+    modernRecoil.camera_max_pitch = _max(modernRecoil.camera_max_pitch, 0.1f);
+    modernRecoil.camera_max_yaw = _max(modernRecoil.camera_max_yaw, 0.1f);
+    modernRecoil.visual_recoil_spring_constant = _max(modernRecoil.visual_recoil_spring_constant, 0.f);
+    modernRecoil.visual_recoil_spring_magnitude = _max(modernRecoil.visual_recoil_spring_magnitude, 0.f);
+    modernRecoil.visual_recoil_spring_damping = _max(modernRecoil.visual_recoil_spring_damping, 0.f);
+    modernRecoil.visual_recoil_scale = _max(modernRecoil.visual_recoil_scale, 0.f);
+    modernRecoil.subtle_visual_recoil_speed = _max(modernRecoil.subtle_visual_recoil_speed, 0.01f);
     modernRecoil.zoom_multiplier = _max(modernRecoil.zoom_multiplier, 0.f);
     modernRecoil.crouch_multiplier = _max(modernRecoil.crouch_multiplier, 0.f);
     //  [8/2/2005]

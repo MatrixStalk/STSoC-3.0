@@ -331,13 +331,10 @@ void CCameraShotEffector::Shot(float angle, float state_multiplier)
     const float visual_side = visual_side_value * m_modern_params.visual_recoil * m_recoil_side;
     const float visual_roll = m_modern_params.visual_recoil_roll * ::Random.randF(-1.f, 1.f) * 0.1f *
         m_modern_params.visual_recoil;
-    const float visual_punch = (m_pActor && m_pActor->inventory().ActiveItem() &&
-            smart_cast<CWeapon*>(m_pActor->inventory().ActiveItem())->IsZoomed() ?
-            m_modern_params.visual_recoil_punch_sights : m_modern_params.visual_recoil_punch) *
-        m_modern_params.visual_recoil;
-    const bool zoomed = m_pActor && m_pActor->inventory().ActiveItem() &&
-        smart_cast<CWeapon*>(m_pActor->inventory().ActiveItem()) &&
-        smart_cast<CWeapon*>(m_pActor->inventory().ActiveItem())->IsZoomed();
+    CWeapon* active_weapon = m_pActor ? smart_cast<CWeapon*>(m_pActor->inventory().ActiveItem()) : nullptr;
+    const bool zoomed = active_weapon && active_weapon->IsZoomed();
+    const float visual_punch = (zoomed ? m_modern_params.visual_recoil_punch_sights :
+                                         m_modern_params.visual_recoil_punch) * m_modern_params.visual_recoil;
     const float bump_up = zoomed ? m_modern_params.visual_recoil_bump_up : m_modern_params.visual_recoil_bump_up_hip;
     const float position_bump = m_modern_params.visual_recoil_position_bump * 0.66f;
 

@@ -171,11 +171,7 @@ void CActor::on_weapon_shot_start(CWeapon* weapon)
         if (mstate_real & mcCrouch)
             state_multiplier *= weapon->modernRecoil.crouch_multiplier;
 
-        // Legacy recoil grows linearly for the entire magazine. Modern recoil
-        // reaches its sustained-fire level after the opening shots instead.
-        const int shot_index = _max(weapon->ShotsFired() - 1, 0);
-        const float opening_shot_growth = float(_min(shot_index, 3));
-        effector->Shot(weapon->camDispersion + weapon->camDispersionInc * opening_shot_growth, state_multiplier);
+        effector->Shot(weapon->camDispersion, state_multiplier);
         return;
     }
 
