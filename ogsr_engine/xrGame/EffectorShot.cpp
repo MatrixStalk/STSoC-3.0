@@ -4,6 +4,8 @@
 
 #include "stdafx.h"
 #include "EffectorShot.h"
+#include "Inventory.h"
+#include "Weapon.h"
 
 //-----------------------------------------------------------------------------
 // Weapon shot effector
@@ -449,7 +451,9 @@ void CCameraShotEffector::GetHudRecoil(Fmatrix& transform) const
     Fvector rotated_center;
     transform.transform_dir(rotated_center, center);
     transform.c.sub(center, rotated_center);
-    transform.c.add(position.x, position.z, position.y);
+    Fvector mapped_position;
+    mapped_position.set(position.x, position.z, position.y);
+    transform.c.add(mapped_position);
 }
 
 void CCameraShotEffector::Clear()

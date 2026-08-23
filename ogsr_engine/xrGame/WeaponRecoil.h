@@ -35,7 +35,7 @@ struct SModernRecoilParams
     float visual_recoil_bump_up_hip{0.08f};
     float visual_recoil_position_bump{1.5f};
     float visual_recoil_scale{0.025f};
-    Fvector visual_recoil_center{0.f, 0.f, 0.f};
+    Fvector visual_recoil_center{};
     u32 shots_to_full_auto{3};
 
     float subtle_visual_recoil{0.f};
