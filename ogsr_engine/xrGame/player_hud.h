@@ -6,6 +6,9 @@
 #include "../Include/xrRender/KinematicsAnimated.h"
 
 #include "actor_defs.h"
+#include <_vector4.h>
+#include <_vector3d.h>
+#include <_vector2.h>
 
 class player_hud;
 class CHudItem;

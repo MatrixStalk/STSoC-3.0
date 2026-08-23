@@ -157,6 +157,27 @@ void CHudItem::Load(LPCSTR section)
     m_walk_offset[0] = READ_IF_EXISTS(pSettings, r_fvector3, section, "walk_hud_offset_pos", (Fvector{-0.02f, -0.02f, -0.03f}));
     m_walk_offset[1] = READ_IF_EXISTS(pSettings, r_fvector3, section, "walk_hud_offset_rot", (Fvector{0.f, 0.05f, -1.f}));
     m_walk_offset[2].set(READ_IF_EXISTS(pSettings, r_bool, section, "walk_enabled", true), READ_IF_EXISTS(pSettings, r_float, section, "walk_transition_time", 0.25f), 0.f);
+	
+	// Shooting HUD effect params
+    if (hud_sect.size())
+    {
+        shooting_hud_effect_data.enabled = READ_IF_EXISTS(pSettings, r_bool, hud_sect, "shooting_hud_effect", false);
+        shooting_hud_effect_data.max_lrud = READ_IF_EXISTS(pSettings, r_fvector4, hud_sect, "shooting_max_LRUD", Fvector4().set(0, 0, 0, 0));
+        shooting_hud_effect_data.max_lrud_aim = READ_IF_EXISTS(pSettings, r_fvector4, hud_sect, "shooting_max_LRUD_aim", Fvector4().set(0, 0, 0, 0));
+        shooting_hud_effect_data.backward_offset = READ_IF_EXISTS(pSettings, r_fvector2, hud_sect, "shooting_backward_offset", Fvector2().set(0, 0));
+        shooting_hud_effect_data.ret_speed = READ_IF_EXISTS(pSettings, r_float, hud_sect, "shooting_ret_speed", 1.0f);
+        shooting_hud_effect_data.ret_aim_speed = READ_IF_EXISTS(pSettings, r_float, hud_sect, "shooting_ret_aim_speed", 1.0f);
+        shooting_hud_effect_data.min_power = READ_IF_EXISTS(pSettings, r_float, hud_sect, "shooting_min_LRUD_power", 0.0f);
+    }
+    else
+    {
+        shooting_hud_effect_data.enabled = false;
+    }
+    shooting_hud_effect_data.current_offset.set(0.f, 0.f, 0.f);
+    shooting_hud_effect_data.current_rot.set(0.f, 0.f, 0.f);
+    shooting_hud_effect_data.lr_factor = 0.f;
+    shooting_hud_effect_data.ud_factor = 0.f;
+    shooting_hud_effect_data.backw_factor = 0.f;
 
     //Загрузка параметров инерции --#SM+# Begin--
     constexpr float PITCH_OFFSET_R = 0.0f; // Насколько сильно ствол смещается вбок (влево) при вертикальных поворотах камеры
@@ -178,6 +199,29 @@ void CHudItem::Load(LPCSTR section)
     inertion_data.m_tendto_speed = READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_tendto_speed", TENDTO_SPEED);
     inertion_data.m_tendto_speed_aim = READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_zoom_tendto_speed", TENDTO_SPEED_AIM);
     //--#SM+# End--
+}
+
+void CHudItem::AddHudShootingEffect()
+{
+    if (!shooting_hud_effect_data.enabled)
+        return;
+
+    if (!GetHUDmode() || IsHidden())
+        return;
+
+    if (!object().H_Parent() || !smart_cast<CActor*>(object().H_Parent()))
+        return;
+
+    const float fPowerMin = clampr(shooting_hud_effect_data.min_power, 0.0f, 0.99f);
+    const float fPowerRnd = 1.0f - fPowerMin;
+
+    shooting_hud_effect_data.backw_factor = 1.0f;
+
+    shooting_hud_effect_data.lr_factor = ::Random.randF(-fPowerRnd, fPowerRnd);
+    shooting_hud_effect_data.lr_factor += (shooting_hud_effect_data.lr_factor >= 0.0f ? fPowerMin : -fPowerMin);
+
+    shooting_hud_effect_data.ud_factor = ::Random.randF(-fPowerRnd, fPowerRnd);
+    shooting_hud_effect_data.ud_factor += (shooting_hud_effect_data.ud_factor >= 0.0f ? fPowerMin : -fPowerMin);
 }
 
 void CHudItem::PlaySound(HUD_SOUND& hud_snd, const Fvector& position, bool overlap) { HUD_SOUND::PlaySound(hud_snd, position, object().H_Root(), !!GetHUDmode(), false, overlap); }
@@ -1145,6 +1189,77 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
             summary_rotate.add(current_move[1]);
         }
     }
+	
+	//================ Эффекты стрельбы ==================//
+    {
+        if (shooting_hud_effect_data.enabled)
+        {
+            float zoom_factor = 0.0f;
+            if (const auto weapon = smart_cast<const CWeapon*>(this))
+                zoom_factor = weapon->GetZRotatingFactor();
+            else
+                zoom_factor = IsZoomed() ? 1.0f : 0.0f;
+
+            const float ret_speed = shooting_hud_effect_data.ret_speed +
+                (shooting_hud_effect_data.ret_aim_speed - shooting_hud_effect_data.ret_speed) * zoom_factor;
+            const float back_offset = shooting_hud_effect_data.backward_offset.x +
+                (shooting_hud_effect_data.backward_offset.y - shooting_hud_effect_data.backward_offset.x) * zoom_factor;
+
+            Fvector4 max_lrud{};
+            max_lrud.x = shooting_hud_effect_data.max_lrud.x +
+                (shooting_hud_effect_data.max_lrud_aim.x - shooting_hud_effect_data.max_lrud.x) * zoom_factor;
+            max_lrud.y = shooting_hud_effect_data.max_lrud.y +
+                (shooting_hud_effect_data.max_lrud_aim.y - shooting_hud_effect_data.max_lrud.y) * zoom_factor;
+            max_lrud.z = shooting_hud_effect_data.max_lrud.z +
+                (shooting_hud_effect_data.max_lrud_aim.z - shooting_hud_effect_data.max_lrud.z) * zoom_factor;
+            max_lrud.w = shooting_hud_effect_data.max_lrud.w +
+                (shooting_hud_effect_data.max_lrud_aim.w - shooting_hud_effect_data.max_lrud.w) * zoom_factor;
+
+            const float ret_k = clampr(1.f - ret_speed * Device.fTimeDelta, 0.0f, 1.0f);
+            shooting_hud_effect_data.lr_factor *= ret_k;
+            shooting_hud_effect_data.ud_factor *= ret_k;
+            shooting_hud_effect_data.backw_factor *= ret_k;
+
+            const float lin_ret = ret_speed * 0.125f * Device.fTimeDelta;
+            if (shooting_hud_effect_data.lr_factor < 0.0f)
+            {
+                shooting_hud_effect_data.lr_factor += lin_ret;
+                clamp(shooting_hud_effect_data.lr_factor, -1.0f, 0.0f);
+            }
+            else
+            {
+                shooting_hud_effect_data.lr_factor -= lin_ret;
+                clamp(shooting_hud_effect_data.lr_factor, 0.0f, 1.0f);
+            }
+
+            if (shooting_hud_effect_data.ud_factor < 0.0f)
+            {
+                shooting_hud_effect_data.ud_factor += lin_ret;
+                clamp(shooting_hud_effect_data.ud_factor, -1.0f, 0.0f);
+            }
+            else
+            {
+                shooting_hud_effect_data.ud_factor -= lin_ret;
+                clamp(shooting_hud_effect_data.ud_factor, 0.0f, 1.0f);
+            }
+
+            shooting_hud_effect_data.backw_factor -= lin_ret;
+            clamp(shooting_hud_effect_data.backw_factor, 0.0f, 1.0f);
+
+            float lr_lim = (shooting_hud_effect_data.lr_factor < 0.0f ? max_lrud.x : max_lrud.y);
+            float ud_lim = (shooting_hud_effect_data.ud_factor < 0.0f ? max_lrud.z : max_lrud.w);
+
+            shooting_hud_effect_data.current_offset.set(
+                lr_lim * shooting_hud_effect_data.lr_factor,
+                ud_lim * -1.f * shooting_hud_effect_data.ud_factor,
+                -1.f * back_offset * shooting_hud_effect_data.backw_factor);
+
+            shooting_hud_effect_data.current_rot.set(0.f, 0.f, 0.f);
+
+            summary_offset.add(shooting_hud_effect_data.current_offset);
+            summary_rotate.add(shooting_hud_effect_data.current_rot);
+        }
+    }
 
     //=============== Эффекты ходьбы ===================//
     {
@@ -1238,6 +1353,7 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
 
     UpdateCollision(trans);
 }
+
 
 float CHudItem::GetHudFov()
 {

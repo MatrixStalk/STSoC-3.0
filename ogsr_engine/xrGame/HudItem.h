@@ -264,6 +264,7 @@ public:
     virtual u8 GetCurrentHudOffsetIdx() const { return 0; }
     virtual float GetHudFov(); // Получить HUD FOV от текущего оружия игрока
     void UpdateHudAdditional(Fmatrix&, const bool need_update_collision = false);
+	void AddHudShootingEffect();
     bool UseSprintHudOffset() const;
     bool HudBobbingAllowed() const { return m_huditem_flags.test(fl_bobbing_allow); }
     bool AnmIdleMovingAllowed() const;
@@ -319,6 +320,22 @@ private:
 
     Fvector m_strafe_offset[3][2]{}, m_lookout_offset[3][2]{}, m_jump_offset[3][2]{}, m_fall_offset[2][2]{}, m_landing_offset[2][2]{}, m_move_offset[3]{}, m_walk_offset[3]{};
     Fvector current_difference[2]{}, current_strafe[2]{}, current_lookout[2]{}, current_jump[2]{}, current_move[2]{}, current_walk[2]{}, current_sprint[2]{};
+
+	struct shooting_hud_effect_params
+    {
+        bool enabled{};
+        Fvector4 max_lrud{};
+        Fvector4 max_lrud_aim{};
+        Fvector2 backward_offset{};
+        float ret_speed{1.0f};
+        float ret_aim_speed{1.0f};
+        float min_power{0.0f};
+        float lr_factor{};
+        float ud_factor{};
+        float backw_factor{};
+        Fvector current_rot{};
+        Fvector current_offset{};
+    } shooting_hud_effect_data{};
 
     float m_base_fov{};
 

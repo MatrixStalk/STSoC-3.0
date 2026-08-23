@@ -1001,6 +1001,8 @@ void CWeaponMagazined::OnShot()
     StartSmokeParticles(get_LastFP(), vel);
 
     update_visual_bullet_textures();
+	
+	AddHudShootingEffect();
 }
 
 void CWeaponMagazined::OnEmptyClick()

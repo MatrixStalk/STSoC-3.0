@@ -12,6 +12,7 @@
 #include "actoreffector.h"
 #include "effectorshot.h"
 #include "EffectorShotX.h"
+#include "HudItem.h"
 
 //возвращает 1, если оружие в отличном состоянии и >1 если повреждено
 float CWeapon::GetConditionDispersionFactor() const
