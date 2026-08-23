@@ -924,7 +924,10 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
         return;
 
     const CActor* actor = smart_cast<const CActor*>(object().H_Parent());
-    const bool procedural_sprint = UseSprintHudOffset() && actor && (actor->MovingState() & mcSprint);
+    CEntity::SEntityState actor_state{};
+    if (actor)
+        actor->g_State(actor_state);
+    const bool procedural_sprint = UseSprintHudOffset() && actor && actor_state.bSprint && !IsZoomed();
 
     // The coordinate sprint pose is an absolute HUD pose. Feeding camera
     // direction inertia into it made the weapon drift farther away for as
@@ -984,12 +987,12 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
 
             Fvector current_moving_offs{}, current_moving_rot{};
 
-            if (iMovingState & mcLStrafe) // Двигаемся влево
+            if (!procedural_sprint && (iMovingState & mcLStrafe)) // Двигаемся влево
             {
                 current_moving_offs.set(-m_strafe_offset[0][idx]);
                 current_moving_rot.set(-m_strafe_offset[1][idx]);
             }
-            else if (iMovingState & mcRStrafe) // Двигаемся вправо
+            else if (!procedural_sprint && (iMovingState & mcRStrafe)) // Двигаемся вправо
             {
                 current_moving_offs.set(m_strafe_offset[0][idx]);
                 current_moving_rot.set(m_strafe_offset[1][idx]);
@@ -1020,7 +1023,7 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
         {
             const float transition_time = _max(hi->m_measures.m_sprint_offset[2].y, 0.01f);
             const float step = clampr(Device.fTimeDelta / transition_time, 0.f, 1.f);
-            const bool sprinting = (iMovingState & mcSprint) && !IsZoomed();
+            const bool sprinting = procedural_sprint;
 
             Fvector target_offset{}, target_rotation{};
             if (sprinting)

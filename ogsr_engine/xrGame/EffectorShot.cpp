@@ -320,9 +320,10 @@ void CCameraShotEffector::Shot(float angle, float state_multiplier)
 
     // ARC9 spreads each camera kick across a fixed 30 ms interval. Its
     // multiplier of 25 therefore produces 0.75 degrees per recoil unit.
-    m_camera_impulse.x = deg2rad(m_recoil_up * 0.75f);
-    m_camera_impulse.y = deg2rad(m_recoil_side * 0.75f);
-    m_camera_impulse_time = 0.03f;
+    // X-Ray pitch grows in the opposite direction to Source/GMod pitch.
+    m_camera_impulse.x = -deg2rad(m_recoil_up * 0.75f * m_modern_params.camera_recoil_scale);
+    m_camera_impulse.y = deg2rad(m_recoil_side * 0.75f * m_modern_params.camera_recoil_scale);
+    m_camera_impulse_time = m_modern_params.camera_impulse_duration;
 
     const float transition = clampr((float(m_burst_shots) - float(m_modern_params.shots_to_full_auto)) * 0.5f, 0.f, 1.f);
     const float visual_up_value = m_modern_params.visual_recoil_up_semi * (1.f - transition) +
@@ -340,16 +341,19 @@ void CCameraShotEffector::Shot(float angle, float state_multiplier)
     const float bump_up = zoomed ? m_modern_params.visual_recoil_bump_up : m_modern_params.visual_recoil_bump_up_hip;
     const float position_bump = m_modern_params.visual_recoil_position_bump * 0.66f;
 
-    m_hud_rotation.add(Fvector().set(visual_up, visual_side * 15.f, visual_roll));
+    // Source pitch has the opposite sign. Positions remain in Source axes
+    // here (X right, Y forward, Z up) and are mapped once in GetHudRecoil.
+    m_hud_rotation.add(Fvector().set(-visual_up, visual_side * 15.f, visual_roll));
     m_hud_position.x += visual_side;
-    m_hud_position.y -= visual_up * bump_up * position_bump;
-    m_hud_position.z -= visual_punch * position_bump;
+    m_hud_position.y -= visual_punch * position_bump;
+    m_hud_position.z -= visual_up * bump_up * position_bump;
 
     if (m_modern_params.subtle_visual_recoil > 0.f)
     {
         const float subtle = m_modern_params.subtle_visual_recoil * 0.75f * (zoomed ? 1.f : 2.f);
         const float direction_scale = 1.3f - _min(m_recoil_amount, 4.5f) / 4.5f;
-        m_subtle_position.add(Fvector().set(::Random.randF(-0.05f, 0.03f), ::Random.randF(-0.06f, 0.03f), -1.f).mul(subtle));
+        m_subtle_position.add(Fvector().set(::Random.randF(-0.05f, 0.03f), -1.f,
+            ::Random.randF(-0.06f, 0.03f)).mul(subtle));
         m_subtle_rotation.add(Fvector().set(::Random.randF(0.1f, 0.2f), 0.f,
             m_modern_params.subtle_visual_recoil_direction * direction_scale + ::Random.randF(-1.35f, 1.35f)).mul(subtle));
     }
@@ -377,7 +381,7 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
     if (m_camera_impulse_time > 0.f)
     {
         const float step = _min(dt, m_camera_impulse_time);
-        const float fraction = step / 0.03f;
+        const float fraction = step / m_modern_params.camera_impulse_duration;
         m_camera_offset.x += m_camera_impulse.x * fraction;
         m_camera_offset.y += m_camera_impulse.y * fraction;
         m_camera_impulse_time -= step;

@@ -1373,6 +1373,8 @@ void CWeapon::Load(LPCSTR section)
     modernRecoil.recoil_dissipation_rate = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_dissipation_rate", modernRecoil.recoil_dissipation_rate);
     modernRecoil.recoil_reset_time = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_reset_time", modernRecoil.recoil_reset_time);
     modernRecoil.recoil_full_reset_time = READ_IF_EXISTS(pSettings, r_float, section, "arc9_recoil_full_reset_time", modernRecoil.recoil_full_reset_time);
+    modernRecoil.camera_recoil_scale = READ_IF_EXISTS(pSettings, r_float, section, "arc9_camera_recoil_scale", modernRecoil.camera_recoil_scale);
+    modernRecoil.camera_impulse_duration = READ_IF_EXISTS(pSettings, r_float, section, "arc9_camera_impulse_time", modernRecoil.camera_impulse_duration);
     modernRecoil.camera_max_pitch = READ_IF_EXISTS(pSettings, r_float, section, "arc9_camera_max_pitch", modernRecoil.camera_max_pitch);
     modernRecoil.camera_max_yaw = READ_IF_EXISTS(pSettings, r_float, section, "arc9_camera_max_yaw", modernRecoil.camera_max_yaw);
 
@@ -1406,6 +1408,8 @@ void CWeapon::Load(LPCSTR section)
     modernRecoil.recoil_dissipation_rate = _max(modernRecoil.recoil_dissipation_rate, 0.f);
     modernRecoil.recoil_reset_time = _max(modernRecoil.recoil_reset_time, 0.f);
     modernRecoil.recoil_full_reset_time = _max(modernRecoil.recoil_full_reset_time, modernRecoil.recoil_reset_time);
+    modernRecoil.camera_recoil_scale = _max(modernRecoil.camera_recoil_scale, 0.f);
+    modernRecoil.camera_impulse_duration = _max(modernRecoil.camera_impulse_duration, 0.01f);
     modernRecoil.camera_max_pitch = _max(modernRecoil.camera_max_pitch, 0.1f);
     modernRecoil.camera_max_yaw = _max(modernRecoil.camera_max_yaw, 0.1f);
     modernRecoil.visual_recoil_spring_constant = _max(modernRecoil.visual_recoil_spring_constant, 0.f);

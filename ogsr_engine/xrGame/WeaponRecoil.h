@@ -17,6 +17,8 @@ struct SModernRecoilParams
     float recoil_dissipation_rate{10.f};
     float recoil_reset_time{0.1f};
     float recoil_full_reset_time{2.f};
+    float camera_recoil_scale{1.f};
+    float camera_impulse_duration{0.03f};
     float camera_max_pitch{12.f};
     float camera_max_yaw{8.f};
 

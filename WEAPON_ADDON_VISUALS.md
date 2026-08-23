@@ -384,4 +384,6 @@ sprint_hud_offset_enabled   = true
 
 Основные параметры камеры: `arc9_recoil`, `arc9_recoil_up`, `arc9_recoil_side`, `arc9_recoil_random_up`, `arc9_recoil_random_side`, `arc9_recoil_auto_control`, `arc9_recoil_pattern_drift`, `arc9_recoil_reset_time` и `arc9_recoil_full_reset_time`.
 
+Для адаптации исходного 30-миллисекундного импульса ARC9 к камере X-Ray предусмотрены `arc9_camera_recoil_scale` и `arc9_camera_impulse_time`. Меньший scale ослабляет камеру, большее время делает толчок мягче, не меняя паттерн.
+
 Визуальная отдача настраивается через `arc9_visual_recoil_*`: отдельные значения `up/side` для первых выстрелов и полного автомата, `roll`, `punch`, центр вращения, масштаб и три параметра пружины. `arc9_subtle_visual_recoil*` включает малую высокочастотную составляющую ARC9.
