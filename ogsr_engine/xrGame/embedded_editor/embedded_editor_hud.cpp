@@ -71,6 +71,86 @@ void RenderBoneAdjustments(u16 item_idx)
     }
     ImGui::PopID();
 }
+
+void RenderAddonTransforms(CWeapon* weapon, float drag_intensity)
+{
+    if (!weapon)
+        return;
+
+    static int selected_visual = -1;
+    static bool hud_mode = true;
+    xr_vector<u8> installed;
+    for (u8 index = 0; index < CWeapon::AddonVisualCount; ++index)
+    {
+        shared_str section, slot, parent;
+        Fvector position{}, rotation{};
+        float scale = 1.f;
+        if (weapon->GetAddonEditorTransform(index, hud_mode, section, slot, parent, position, rotation, scale))
+            installed.push_back(index);
+    }
+
+    if (installed.empty())
+    {
+        selected_visual = -1;
+        ImGui::TextDisabled("No separately rendered addons installed");
+        return;
+    }
+    if (std::find(installed.begin(), installed.end(), static_cast<u8>(selected_visual)) == installed.end())
+        selected_visual = installed.front();
+
+    ImGui::Checkbox("HUD transform", &hud_mode);
+    shared_str selected_section, selected_slot, selected_parent;
+    Fvector position{}, rotation{};
+    float scale = 1.f;
+    weapon->GetAddonEditorTransform(static_cast<u8>(selected_visual), hud_mode, selected_section, selected_slot, selected_parent,
+        position, rotation, scale);
+
+    string256 preview{};
+    xr_sprintf(preview, "%s: %s", selected_slot.c_str(), selected_section.c_str());
+    if (ImGui::BeginCombo("Addon", preview))
+    {
+        for (u8 index : installed)
+        {
+            shared_str section, slot, parent;
+            Fvector candidate_position{}, candidate_rotation{};
+            float candidate_scale = 1.f;
+            weapon->GetAddonEditorTransform(index, hud_mode, section, slot, parent, candidate_position, candidate_rotation, candidate_scale);
+            string256 label{};
+            xr_sprintf(label, "%s: %s", slot.c_str(), section.c_str());
+            const bool selected = index == selected_visual;
+            if (ImGui::Selectable(label, selected))
+                selected_visual = index;
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    // Refresh after a selection made inside the combo.
+    weapon->GetAddonEditorTransform(static_cast<u8>(selected_visual), hud_mode, selected_section, selected_slot, selected_parent,
+        position, rotation, scale);
+    bool changed = ImGui::DragFloat3("Attach position", (float*)&position, drag_intensity, 0.f, 0.f, "%.6f");
+    changed |= ImGui::DragFloat3("Attach rotation (deg)", (float*)&rotation, 0.05f, 0.f, 0.f, "%.3f");
+    changed |= ImGui::DragFloat("Attach scale", &scale, 0.001f, 0.001f, 100.f, "%.6f");
+    if (changed)
+        weapon->SetAddonEditorTransform(static_cast<u8>(selected_visual), hud_mode, position, rotation, scale);
+
+    if (ImGui::Button("Reset addon transform"))
+        weapon->ResetAddonEditorTransform(static_cast<u8>(selected_visual), hud_mode);
+    ImGui::SameLine();
+    if (ImGui::Button("Copy config lines"))
+    {
+        string1024 config{};
+        LPCSTR prefix = hud_mode ? "hud_" : "world_";
+        xr_sprintf(config,
+            "%sattach_position = %.6f, %.6f, %.6f\n%sattach_rotation = %.3f, %.3f, %.3f\n%sattach_scale = %.6f",
+            prefix, position.x, position.y, position.z, prefix, rotation.x, rotation.y, rotation.z, prefix, scale);
+        ImGui::SetClipboardText(config);
+    }
+
+    ImGui::TextDisabled("Config section: [%s]", selected_section.c_str());
+    ImGui::TextDisabled("Parent: %s", selected_parent.c_str() ? selected_parent.c_str() : "weapon");
+}
 } // namespace
 
 
@@ -107,12 +187,21 @@ void CImGuiHudEditorWnd::Render()
 		ImGui::DragFloat3("aim_hud_offset_rot 0",			(float*)&item->m_measures.m_hands_offset[1][1],		drag_intensity, NULL, NULL, "%.6f");
 		ImGui::DragFloat3("gl_hud_offset_pos 0",			(float*)&item->m_measures.m_hands_offset[0][2],		drag_intensity, NULL, NULL, "%.6f");
 		ImGui::DragFloat3("gl_hud_offset_rot 0",			(float*)&item->m_measures.m_hands_offset[1][2],		drag_intensity, NULL, NULL, "%.6f");
+		ImGui::DragFloat3("sprint_hud_offset_pos 0",        (float*)&item->m_measures.m_sprint_offset[0],       drag_intensity, NULL, NULL, "%.6f");
+		ImGui::DragFloat3("sprint_hud_offset_rot 0",        (float*)&item->m_measures.m_sprint_offset[1],       0.05f, NULL, NULL, "%.3f");
+        bool sprint_offset_enabled = item->m_measures.m_sprint_offset[2].x > 0.f;
+        if (ImGui::Checkbox("sprint_hud_offset_enabled 0", &sprint_offset_enabled))
+            item->m_measures.m_sprint_offset[2].x = sprint_offset_enabled ? 1.f : 0.f;
+        ImGui::DragFloat("sprint_hud_offset_time 0", &item->m_measures.m_sprint_offset[2].y, 0.01f, 0.01f, 5.f, "%.2f");
 		ImGui::DragFloat3("fire_point 0",					(float*)&item->m_measures.m_fire_point_offset[0],	drag_intensity, NULL, NULL, "%.6f");
 		ImGui::DragFloat3("fire_point2 0",					(float*)&item->m_measures.m_fire_point2_offset[0],	drag_intensity, NULL, NULL, "%.6f");
 		ImGui::DragFloat3("shell_point 0",					(float*)&item->m_measures.m_shell_point_offset[0],	drag_intensity, NULL, NULL, "%.6f");
 
         if (ImGui::CollapsingHeader("Bone transforms 0"))
             RenderBoneAdjustments(0);
+
+        if (Wpn && ImGui::CollapsingHeader("Addon transforms"))
+            RenderAddonTransforms(Wpn, drag_intensity);
 
         if (Wpn)
         {

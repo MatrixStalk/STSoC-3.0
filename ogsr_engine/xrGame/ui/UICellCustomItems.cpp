@@ -227,7 +227,7 @@ CUIWeaponCellItem::CUIWeaponCellItem(CWeapon* itm) : inherited(itm)
     if (itm->GrenadeLauncherAttachable())
         m_addon_offset[eLauncher].set(object()->GetGrenadeLauncherX(), object()->GetGrenadeLauncherY());
 
-    constexpr LPCSTR custom_slot_names[CWeapon::eCustomAddonCount] = {"magazine", "foregrip", "side_rail"};
+    constexpr LPCSTR custom_slot_names[CWeapon::eCustomAddonCount] = {"magazine", "foregrip", "side_rail", "handguard"};
     for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
     {
         string64 key_x{}, key_y{};

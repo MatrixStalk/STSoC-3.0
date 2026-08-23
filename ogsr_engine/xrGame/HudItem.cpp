@@ -473,6 +473,13 @@ void CHudItem::PlayAnimIdle()
 
 void CHudItem::PlayAnimSprintStart()
 {
+    if (UseSprintHudOffset())
+    {
+        SprintType = true;
+        SwitchState(eIdle);
+        return;
+    }
+
     auto wpn = smart_cast<CWeapon*>(this);
     string128 guns_sprint_start_anm;
     xr_strconcat(guns_sprint_start_anm, "anm_idle_sprint_start",
@@ -491,6 +498,13 @@ void CHudItem::PlayAnimSprintStart()
 
 void CHudItem::PlayAnimSprintEnd()
 {
+    if (UseSprintHudOffset())
+    {
+        SprintType = false;
+        SwitchState(eIdle);
+        return;
+    }
+
     auto wpn = smart_cast<CWeapon*>(this);
     string128 guns_sprint_end_anm;
     xr_strconcat(guns_sprint_end_anm, "anm_idle_sprint_end",
@@ -514,8 +528,18 @@ bool CHudItem::TryPlayAnimIdle()
         if (auto pActor = smart_cast<CActor*>(object().H_Parent()))
         {
             const u32 State = pActor->get_state();
+            const bool use_sprint_offset = UseSprintHudOffset();
+            if (!(State & mcSprint) && use_sprint_offset)
+                SprintType = false;
+
             if (State & mcSprint)
             {
+                if (use_sprint_offset)
+                {
+                    SprintType = true;
+                    return false;
+                }
+
                 if (!SprintType)
                 {
                     SwitchState(eSprintStart);
@@ -553,6 +577,12 @@ bool CHudItem::TryPlayAnimIdle()
         }
     }
     return false;
+}
+
+bool CHudItem::UseSprintHudOffset() const
+{
+    const attachable_hud_item* hi = HudItemData();
+    return hi && hi->m_measures.m_sprint_offset[2].x > 0.f;
 }
 
 /*void CHudItem::PlayAnimBore()
@@ -849,7 +879,18 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
     if (!need_update_collision)
         return;
 
-    UpdateInertion(trans);
+    const CActor* actor = smart_cast<const CActor*>(object().H_Parent());
+    const bool procedural_sprint = UseSprintHudOffset() && actor && (actor->MovingState() & mcSprint);
+
+    // The coordinate sprint pose is an absolute HUD pose. Feeding camera
+    // direction inertia into it made the weapon drift farther away for as
+    // long as sprint was held. Keep the inertia history in sync so entering
+    // and leaving sprint is seamless; movement layers are intentionally not
+    // touched here.
+    if (procedural_sprint)
+        inert_st_last_dir.set(trans.k);
+    else
+        UpdateInertion(trans);
 
     Fvector summary_offset{}, summary_rotate{};
 
@@ -925,6 +966,30 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
 
             summary_offset.add(current_strafe[0]);
             summary_rotate.add(current_strafe[1]);
+        }
+    }
+
+    //============= Координатное опускание оружия в спринте =============//
+    {
+        const bool bEnabled = hi->m_measures.m_sprint_offset[2].x > 0.f;
+        if (bEnabled)
+        {
+            const float transition_time = _max(hi->m_measures.m_sprint_offset[2].y, 0.01f);
+            const float step = clampr(Device.fTimeDelta / transition_time, 0.f, 1.f);
+            const bool sprinting = (iMovingState & mcSprint) && !IsZoomed();
+
+            Fvector target_offset{}, target_rotation{};
+            if (sprinting)
+            {
+                target_offset = hi->m_measures.m_sprint_offset[0];
+                target_rotation = hi->m_measures.m_sprint_offset[1];
+                target_rotation.mul(-PI / 180.f);
+            }
+
+            current_sprint[0].lerp(current_sprint[0], target_offset, step);
+            current_sprint[1].lerp(current_sprint[1], target_rotation, step);
+            summary_offset.add(current_sprint[0]);
+            summary_rotate.add(current_sprint[1]);
         }
     }
 

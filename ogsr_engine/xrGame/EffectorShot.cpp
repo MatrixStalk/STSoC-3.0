@@ -173,23 +173,56 @@ void CWeaponShotEffector::ApplyDeltaAngles(float* pitch, float* yaw)
 //-----------------------------------------------------------------------------
 namespace
 {
-void update_recoil_spring(float& value, float& velocity, const float target, const float frequency, const float damping, float dt)
+void update_arc9_spring(Fvector& value, Fvector& velocity, Fvector& acceleration, const float spring_constant,
+    const float spring_magnitude, const float spring_damping, float dt)
 {
-    // Sub-stepping keeps the spring stable after frame stalls without making
-    // its response dependent on the current frame rate.
     while (dt > 0.f)
     {
         const float step = _min(dt, 1.f / 120.f);
-        const float acceleration = (target - value) * frequency * frequency - 2.f * damping * frequency * velocity;
-        velocity += acceleration * step;
-        value += velocity * step;
+
+        Fvector next_value = value;
+        next_value.mad(velocity, step);
+        next_value.mad(acceleration, step * step * 0.5f);
+
+        Fvector drag = velocity;
+        drag.mul(-velocity.magnitude() * 0.5f);
+
+        Fvector restoring = next_value;
+        const float value_length = restoring.magnitude();
+        restoring.mul(-value_length * spring_constant);
+        if (value_length > EPS_S)
+        {
+            Fvector constant_return = next_value;
+            constant_return.mul(-spring_magnitude / value_length);
+            restoring.add(constant_return);
+        }
+        restoring.mad(velocity, -spring_damping);
+
+        Fvector next_acceleration = drag;
+        next_acceleration.add(restoring);
+        velocity.mad(acceleration, step * 0.5f);
+        velocity.mad(next_acceleration, step * 0.5f);
+        value = next_value;
+        acceleration = next_acceleration;
+
+        const float limit = 210.f;
+        clamp(value.x, -limit, limit);
+        clamp(value.y, -limit, limit);
+        clamp(value.z, -limit, limit);
+        clamp(velocity.x, -limit, limit);
+        clamp(velocity.y, -limit, limit);
+        clamp(velocity.z, -limit, limit);
+        clamp(acceleration.x, -limit, limit);
+        clamp(acceleration.y, -limit, limit);
+        clamp(acceleration.z, -limit, limit);
         dt -= step;
     }
 }
 
-bool recoil_value_settled(const float value, const float velocity, const float epsilon)
+bool recoil_vector_settled(const Fvector& value, const Fvector& velocity, const Fvector& acceleration)
 {
-    return _abs(value) < epsilon && _abs(velocity) < epsilon;
+    return value.square_magnitude() < EPS_S * EPS_S && velocity.square_magnitude() < EPS_S * EPS_S &&
+        acceleration.square_magnitude() < EPS_S * EPS_S;
 }
 } // namespace
 
@@ -219,7 +252,7 @@ BOOL CCameraShotEffector::ProcessCam(SCamEffectorInfo& info)
         camera_basis.set(info.r, info.n, info.d, Fvector().set(0.f, 0.f, 0.f));
         float heading, pitch, bank;
         camera_basis.getHPB(heading, pitch, bank);
-        camera_basis.setHPB(heading + m_camera_offset.y, pitch + m_camera_offset.x, bank + m_camera_roll);
+        camera_basis.setHPB(heading + m_camera_offset.y, pitch + m_camera_offset.x, bank);
         info.r.set(camera_basis.i).normalize_safe();
         info.n.set(camera_basis.j).normalize_safe();
         info.d.set(camera_basis.k).normalize_safe();
@@ -263,61 +296,64 @@ void CCameraShotEffector::Shot(float angle, float state_multiplier)
     }
 
     const float now = Device.fTimeGlobal;
-    if (now - m_last_shot_time > m_modern_params.burst_reset_time)
+    if (now - m_last_shot_time > m_modern_params.recoil_full_reset_time)
     {
         m_burst_shots = 0;
-        m_horizontal_direction = ::Random.randF(-1.f, 1.f) < 0.f ? -1.f : 1.f;
+        m_recoil_amount = 0.f;
+        m_pattern_direction = 0.f;
     }
-    else if (::Random.randF(0.f, 1.f) < m_modern_params.horizontal_change_chance)
+
+    const u32 shot = u32(floorf(m_recoil_amount)) + 1;
+    if (shot > 1)
+        m_pattern_direction += ::Random.randF(-m_modern_params.recoil_pattern_drift, m_modern_params.recoil_pattern_drift);
+
+    const float direction = deg2rad(m_pattern_direction - 90.f);
+    m_recoil_up = (sinf(direction) * m_modern_params.recoil_up +
+                      ::Random.randF(-1.f, 0.f) * m_modern_params.recoil_random_up) *
+        m_modern_params.recoil * state_multiplier;
+    m_recoil_side = (cosf(direction) * m_modern_params.recoil_side +
+                        ::Random.randF(-1.f, 1.f) * m_modern_params.recoil_random_side) *
+        m_modern_params.recoil * state_multiplier;
+    m_recoil_amount += m_modern_params.recoil_per_shot;
+
+    // ARC9 spreads each camera kick across a fixed 30 ms interval. Its
+    // multiplier of 25 therefore produces 0.75 degrees per recoil unit.
+    m_camera_impulse.x = deg2rad(m_recoil_up * 0.75f);
+    m_camera_impulse.y = deg2rad(m_recoil_side * 0.75f);
+    m_camera_impulse_time = 0.03f;
+
+    const float transition = clampr((float(m_burst_shots) - float(m_modern_params.shots_to_full_auto)) * 0.5f, 0.f, 1.f);
+    const float visual_up_value = m_modern_params.visual_recoil_up_semi * (1.f - transition) +
+        m_modern_params.visual_recoil_up * transition;
+    const float visual_side_value = m_modern_params.visual_recoil_side_semi * (1.f - transition) +
+        m_modern_params.visual_recoil_side * transition;
+    const float visual_up = visual_up_value * m_modern_params.visual_recoil;
+    const float visual_side = visual_side_value * m_modern_params.visual_recoil * m_recoil_side;
+    const float visual_roll = m_modern_params.visual_recoil_roll * ::Random.randF(-1.f, 1.f) * 0.1f *
+        m_modern_params.visual_recoil;
+    const float visual_punch = (m_pActor && m_pActor->inventory().ActiveItem() &&
+            smart_cast<CWeapon*>(m_pActor->inventory().ActiveItem())->IsZoomed() ?
+            m_modern_params.visual_recoil_punch_sights : m_modern_params.visual_recoil_punch) *
+        m_modern_params.visual_recoil;
+    const bool zoomed = m_pActor && m_pActor->inventory().ActiveItem() &&
+        smart_cast<CWeapon*>(m_pActor->inventory().ActiveItem()) &&
+        smart_cast<CWeapon*>(m_pActor->inventory().ActiveItem())->IsZoomed();
+    const float bump_up = zoomed ? m_modern_params.visual_recoil_bump_up : m_modern_params.visual_recoil_bump_up_hip;
+    const float position_bump = m_modern_params.visual_recoil_position_bump * 0.66f;
+
+    m_hud_rotation.add(Fvector().set(visual_up, visual_side * 15.f, visual_roll));
+    m_hud_position.x += visual_side;
+    m_hud_position.y -= visual_up * bump_up * position_bump;
+    m_hud_position.z -= visual_punch * position_bump;
+
+    if (m_modern_params.subtle_visual_recoil > 0.f)
     {
-        m_horizontal_direction = -m_horizontal_direction;
+        const float subtle = m_modern_params.subtle_visual_recoil * 0.75f * (zoomed ? 1.f : 2.f);
+        const float direction_scale = 1.3f - _min(m_recoil_amount, 4.5f) / 4.5f;
+        m_subtle_position.add(Fvector().set(::Random.randF(-0.05f, 0.03f), ::Random.randF(-0.06f, 0.03f), -1.f).mul(subtle));
+        m_subtle_rotation.add(Fvector().set(::Random.randF(0.1f, 0.2f), 0.f,
+            m_modern_params.subtle_visual_recoil_direction * direction_scale + ::Random.randF(-1.35f, 1.35f)).mul(subtle));
     }
-
-    const float burst_multiplier = _min(1.f + m_modern_params.burst_growth * float(m_burst_shots), m_modern_params.burst_growth_limit);
-    const float first_shot_multiplier = m_burst_shots == 0 ? m_modern_params.first_shot_multiplier : 1.f;
-    const float vertical_random = ::Random.randF(1.f - m_modern_params.vertical_random, 1.f + m_modern_params.vertical_random);
-    const float vertical_kick = angle * state_multiplier * burst_multiplier * first_shot_multiplier * vertical_random;
-
-    const float horizontal_random = ::Random.randF(1.f - m_modern_params.horizontal_random, 1.f + m_modern_params.horizontal_random);
-    const float horizontal_kick =
-        angle * state_multiplier * m_modern_params.horizontal_factor * horizontal_random * m_horizontal_direction;
-
-    // Old weapon configs often allow 30-50 degrees because the legacy recoil
-    // relaxes linearly. Keep those values as an outer safety limit, but use
-    // tighter modern-recoil limits so a long burst can never overturn the view.
-    const float pitch_limit = _min(fAngleVertMax, m_modern_params.camera_max_pitch);
-    const float yaw_limit = _min(_abs(fAngleHorzMax), m_modern_params.camera_max_yaw);
-    m_camera_target.x += vertical_kick;
-    m_camera_target.y += horizontal_kick;
-    clamp(m_camera_target.x, 0.f, pitch_limit);
-    clamp(m_camera_target.y, -yaw_limit, yaw_limit);
-    m_camera_roll_target -= horizontal_kick * m_modern_params.roll_factor;
-    clamp(m_camera_roll_target, -yaw_limit * m_modern_params.roll_factor, yaw_limit * m_modern_params.roll_factor);
-
-    // A short angular-velocity impulse supplies the sharp initial snap. The
-    // target spring then carries the heavier, slower view rise through the
-    // rest of the shot, avoiding both an instant teleport and a mushy delay.
-    const float camera_impulse = m_modern_params.camera_frequency * m_modern_params.camera_impulse;
-    m_camera_velocity.x += vertical_kick * camera_impulse;
-    m_camera_velocity.y += horizontal_kick * camera_impulse;
-    m_camera_roll_velocity -= horizontal_kick * m_modern_params.roll_factor * camera_impulse;
-
-    // HUD kick is deliberately faster than view recoil. The direct displacement
-    // supplies the sharp mechanical impulse; the under-damped spring supplies
-    // the receiver/stock weight and a small natural overshoot.
-    const float normalized_kick = _max(angle / deg2rad(0.25f), 0.1f) * state_multiplier * burst_multiplier;
-    m_hud_position.z -= m_modern_params.hud_kick * normalized_kick;
-    m_hud_position.y += m_modern_params.hud_up * normalized_kick;
-    m_hud_position.x -= m_modern_params.hud_kick * 0.16f * normalized_kick * m_horizontal_direction;
-    m_hud_rotation.x += m_modern_params.hud_pitch * normalized_kick;
-    m_hud_rotation.y += m_modern_params.hud_yaw * normalized_kick * m_horizontal_direction;
-    m_hud_rotation.z += m_modern_params.hud_roll * normalized_kick * m_horizontal_direction;
-    clamp(m_hud_position.x, -0.04f, 0.04f);
-    clamp(m_hud_position.y, -0.02f, 0.05f);
-    clamp(m_hud_position.z, -0.10f, 0.02f);
-    clamp(m_hud_rotation.x, -deg2rad(12.f), deg2rad(12.f));
-    clamp(m_hud_rotation.y, -deg2rad(7.f), deg2rad(7.f));
-    clamp(m_hud_rotation.z, -deg2rad(9.f), deg2rad(9.f));
 
     m_last_shot_time = now;
     ++m_burst_shots;
@@ -339,26 +375,45 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
     clamp(dt, 0.f, 0.05f);
     const Fvector2 previous_camera_offset = m_camera_offset;
 
-    if (Device.fTimeGlobal - m_last_shot_time >= m_modern_params.return_delay)
+    if (m_camera_impulse_time > 0.f)
     {
-        const float decay = expf(-m_modern_params.return_speed * dt);
-        m_camera_target.mul(decay);
-        m_camera_roll_target *= decay;
+        const float step = _min(dt, m_camera_impulse_time);
+        const float fraction = step / 0.03f;
+        m_camera_offset.x += m_camera_impulse.x * fraction;
+        m_camera_offset.y += m_camera_impulse.y * fraction;
+        m_camera_impulse_time -= step;
     }
 
-    update_recoil_spring(m_camera_offset.x, m_camera_velocity.x, m_camera_target.x, m_modern_params.camera_frequency,
-        m_modern_params.camera_damping, dt);
-    update_recoil_spring(m_camera_offset.y, m_camera_velocity.y, m_camera_target.y, m_modern_params.camera_frequency,
-        m_modern_params.camera_damping, dt);
-    update_recoil_spring(m_camera_roll, m_camera_roll_velocity, m_camera_roll_target, m_modern_params.camera_frequency,
-        m_modern_params.camera_damping, dt);
+    // ARC9's RecoilRise auto-control continuously pulls only the recoil-added
+    // view angle back toward zero, leaving the player's own mouse input alone.
+    const float control = clampr(m_modern_params.recoil_auto_control * dt * 2.f, 0.f, 1.f);
+    m_camera_offset.mul(1.f - control);
+    clamp(m_camera_offset.x, -deg2rad(m_modern_params.camera_max_pitch), deg2rad(m_modern_params.camera_max_pitch));
+    clamp(m_camera_offset.y, -deg2rad(m_modern_params.camera_max_yaw), deg2rad(m_modern_params.camera_max_yaw));
 
-    update_recoil_spring(m_hud_position.x, m_hud_position_velocity.x, 0.f, m_modern_params.hud_frequency, m_modern_params.hud_damping, dt);
-    update_recoil_spring(m_hud_position.y, m_hud_position_velocity.y, 0.f, m_modern_params.hud_frequency, m_modern_params.hud_damping, dt);
-    update_recoil_spring(m_hud_position.z, m_hud_position_velocity.z, 0.f, m_modern_params.hud_frequency, m_modern_params.hud_damping, dt);
-    update_recoil_spring(m_hud_rotation.x, m_hud_rotation_velocity.x, 0.f, m_modern_params.hud_frequency, m_modern_params.hud_damping, dt);
-    update_recoil_spring(m_hud_rotation.y, m_hud_rotation_velocity.y, 0.f, m_modern_params.hud_frequency, m_modern_params.hud_damping, dt);
-    update_recoil_spring(m_hud_rotation.z, m_hud_rotation_velocity.z, 0.f, m_modern_params.hud_frequency, m_modern_params.hud_damping, dt);
+    const float recoil_decay = _max(0.f, 1.f - dt * 10.f);
+    m_recoil_up *= recoil_decay;
+    m_recoil_side *= recoil_decay;
+    if (Device.fTimeGlobal - m_last_shot_time > m_modern_params.recoil_reset_time)
+        m_recoil_amount = _max(0.f, m_recoil_amount - dt * m_modern_params.recoil_dissipation_rate);
+    if (Device.fTimeGlobal - m_last_shot_time > m_modern_params.recoil_full_reset_time)
+    {
+        m_recoil_amount = 0.f;
+        m_burst_shots = 0;
+        m_pattern_direction = 0.f;
+    }
+
+    update_arc9_spring(m_hud_position, m_hud_position_velocity, m_hud_position_acceleration,
+        m_modern_params.visual_recoil_spring_constant, m_modern_params.visual_recoil_spring_magnitude,
+        m_modern_params.visual_recoil_spring_damping, dt);
+    update_arc9_spring(m_hud_rotation, m_hud_rotation_velocity, m_hud_rotation_acceleration,
+        m_modern_params.visual_recoil_spring_constant, m_modern_params.visual_recoil_spring_magnitude,
+        m_modern_params.visual_recoil_spring_damping, dt);
+    update_arc9_spring(m_subtle_position, m_subtle_position_velocity, m_subtle_position_acceleration,
+        150.f * m_modern_params.subtle_visual_recoil_speed, 0.3f, 2.8f, dt);
+    update_arc9_spring(m_subtle_rotation, m_subtle_rotation_velocity, m_subtle_rotation_acceleration,
+        150.f * m_modern_params.subtle_visual_recoil_speed, 0.3f, 2.8f, dt);
+    m_subtle_rotation.x *= 0.25f;
 
     // Preserve the old query API used by third-person actor orientation and
     // scripts, while the camera itself is driven by the spring values above.
@@ -367,34 +422,60 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
     fLastDeltaVert = m_camera_offset.x - previous_camera_offset.x;
     fLastDeltaHorz = m_camera_offset.y - previous_camera_offset.y;
 
-    const bool camera_settled = recoil_value_settled(m_camera_offset.x, m_camera_velocity.x, EPS_S) &&
-        recoil_value_settled(m_camera_offset.y, m_camera_velocity.y, EPS_S) &&
-        recoil_value_settled(m_camera_roll, m_camera_roll_velocity, EPS_S) && m_camera_target.magnitude() < EPS_S;
-    const bool hud_settled = m_hud_position.square_magnitude() < EPS_S * EPS_S && m_hud_position_velocity.square_magnitude() < EPS_S * EPS_S &&
-        m_hud_rotation.square_magnitude() < EPS_S * EPS_S && m_hud_rotation_velocity.square_magnitude() < EPS_S * EPS_S;
+    const bool camera_settled = m_camera_offset.magnitude() < EPS_S && m_camera_impulse_time <= 0.f;
+    const bool hud_settled = recoil_vector_settled(m_hud_position, m_hud_position_velocity, m_hud_position_acceleration) &&
+        recoil_vector_settled(m_hud_rotation, m_hud_rotation_velocity, m_hud_rotation_acceleration) &&
+        recoil_vector_settled(m_subtle_position, m_subtle_position_velocity, m_subtle_position_acceleration) &&
+        recoil_vector_settled(m_subtle_rotation, m_subtle_rotation_velocity, m_subtle_rotation_acceleration);
 
-    if (camera_settled && hud_settled && Device.fTimeGlobal - m_last_shot_time > m_modern_params.burst_reset_time)
+    if (camera_settled && hud_settled && Device.fTimeGlobal - m_last_shot_time > m_modern_params.recoil_full_reset_time)
         bActive = FALSE;
 }
 
 void CCameraShotEffector::GetHudRecoil(Fmatrix& transform) const
 {
-    transform.setHPB(m_hud_rotation.y, m_hud_rotation.x, m_hud_rotation.z);
-    transform.translate_over(m_hud_position);
+    Fvector rotation = m_hud_rotation;
+    rotation.add(m_subtle_rotation);
+    rotation.mul(deg2rad(1.f) * 2.5f);
+    rotation.y = -rotation.y;
+
+    Fvector position = m_hud_position;
+    position.add(m_subtle_position);
+    position.mul(m_modern_params.visual_recoil_scale);
+
+    Fvector center;
+    center.set(m_modern_params.visual_recoil_center.x, m_modern_params.visual_recoil_center.z,
+        m_modern_params.visual_recoil_center.y);
+    center.mul(m_modern_params.visual_recoil_scale);
+
+    transform.setHPB(rotation.y, rotation.x, rotation.z);
+    Fvector rotated_center;
+    transform.transform_dir(rotated_center, center);
+    transform.c.sub(center, rotated_center);
+    transform.c.add(position.x, position.z, position.y);
 }
 
 void CCameraShotEffector::Clear()
 {
     CWeaponShotEffector::Clear();
     m_camera_offset.set(0.f, 0.f);
-    m_camera_target.set(0.f, 0.f);
-    m_camera_velocity.set(0.f, 0.f);
-    m_camera_roll = 0.f;
-    m_camera_roll_target = 0.f;
-    m_camera_roll_velocity = 0.f;
+    m_camera_impulse.set(0.f, 0.f);
+    m_camera_impulse_time = 0.f;
+    m_recoil_amount = 0.f;
+    m_recoil_up = 0.f;
+    m_recoil_side = 0.f;
+    m_pattern_direction = 0.f;
     m_hud_position.set(0.f, 0.f, 0.f);
     m_hud_position_velocity.set(0.f, 0.f, 0.f);
+    m_hud_position_acceleration.set(0.f, 0.f, 0.f);
     m_hud_rotation.set(0.f, 0.f, 0.f);
     m_hud_rotation_velocity.set(0.f, 0.f, 0.f);
+    m_hud_rotation_acceleration.set(0.f, 0.f, 0.f);
+    m_subtle_position.set(0.f, 0.f, 0.f);
+    m_subtle_position_velocity.set(0.f, 0.f, 0.f);
+    m_subtle_position_acceleration.set(0.f, 0.f, 0.f);
+    m_subtle_rotation.set(0.f, 0.f, 0.f);
+    m_subtle_rotation_velocity.set(0.f, 0.f, 0.f);
+    m_subtle_rotation_acceleration.set(0.f, 0.f, 0.f);
     m_burst_shots = 0;
 }

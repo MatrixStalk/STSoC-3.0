@@ -88,6 +88,9 @@ struct hud_item_measures
     };
     Fvector m_hands_offset[m_hands_offset_size][m_hands_offset_type_size]{};
 
+    // Procedural sprint pose: position, rotation (degrees), enabled/transition time.
+    Fvector m_sprint_offset[3]{};
+
     u16 m_fire_bone;
     Fvector m_fire_point_offset;
     u16 m_fire_bone2;

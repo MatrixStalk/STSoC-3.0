@@ -51,6 +51,7 @@ public:
         eMagazine,
         eForegrip,
         eSideRail,
+        eHandguard,
         eMaxAddon
     };
     CUIStatic* m_addons[eMaxAddon];

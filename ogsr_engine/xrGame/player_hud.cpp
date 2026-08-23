@@ -161,6 +161,19 @@ bool is_source_arm_helper_bone(LPCSTR bone_name)
     return bone_name && (strstr(bone_name, "_ulna") || strstr(bone_name, "_wrist"));
 }
 
+bool is_arc9_hand_pose_bone(LPCSTR bone_name, LPCSTR side_prefix, size_t side_prefix_length)
+{
+    if (!bone_name || strncmp(bone_name, side_prefix, side_prefix_length))
+        return false;
+
+    // Keep this equivalent to ARC9.LHIKBones/RHIKBones. In particular, ARC9
+    // deliberately leaves the clavicle on the base animation: overriding it
+    // tears vertices shared with Spine4 at the shoulder seam.
+    LPCSTR suffix = bone_name + side_prefix_length;
+    return !xr_strcmp(suffix, "upperarm") || !xr_strcmp(suffix, "forearm") || !xr_strcmp(suffix, "wrist") ||
+        !xr_strcmp(suffix, "ulna") || !xr_strcmp(suffix, "hand") || !strncmp(suffix, "finger", xr_strlen("finger"));
+}
+
 bool same_source_bind_transform(const Fmatrix& left, const Fmatrix& right)
 {
     // Only rigs exported from the same reference pose may use the legacy copy
@@ -769,6 +782,22 @@ void hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     if (pSettings->line_exist(sect_name, val_name) && pSettings->line_exist(sect_name, val_name2))
         m_hands_offset[m_hands_offset_rot][m_hands_offset_type_gl_normal_scope] = Fvector{pSettings->r_float(sect_name, val_name), pSettings->r_float(sect_name, val_name2)};
     //
+
+    strconcat(sizeof(val_name), val_name, "sprint_hud_offset_pos", _prefix);
+    if (is_16x9 && !pSettings->line_exist(sect_name, val_name))
+        xr_strcpy(val_name, "sprint_hud_offset_pos");
+    const bool has_sprint_pos = pSettings->line_exist(sect_name, val_name);
+    m_sprint_offset[0] = READ_IF_EXISTS(pSettings, r_fvector3, sect_name, val_name, Fvector{});
+
+    strconcat(sizeof(val_name), val_name, "sprint_hud_offset_rot", _prefix);
+    if (is_16x9 && !pSettings->line_exist(sect_name, val_name))
+        xr_strcpy(val_name, "sprint_hud_offset_rot");
+    const bool has_sprint_rot = pSettings->line_exist(sect_name, val_name);
+    m_sprint_offset[1] = READ_IF_EXISTS(pSettings, r_fvector3, sect_name, val_name, Fvector{});
+
+    const bool sprint_offset_enabled = READ_IF_EXISTS(pSettings, r_bool, sect_name, "sprint_hud_offset_enabled", has_sprint_pos || has_sprint_rot);
+    const float sprint_transition_time = READ_IF_EXISTS(pSettings, r_float, sect_name, "sprint_hud_offset_time", 0.25f);
+    m_sprint_offset[2].set(sprint_offset_enabled ? 1.f : 0.f, _max(sprint_transition_time, 0.01f), 0.f);
 
     if (useCopFirePoint) // cop configs
     {
@@ -2123,10 +2152,16 @@ void player_hud::apply_addon_hand_pose_ik(u16 hand_idx)
     // every deforming arm/finger bone receives a mutually compatible matrix.
     const LPCSTR side_prefix = hand_idx == 0 ? "valvebiped.bip01_r_" : "valvebiped.bip01_l_";
     const size_t side_prefix_length = xr_strlen(side_prefix);
-    for (u16 target_bone_id = 0; target_bone_id < target->LL_BoneCount(); ++target_bone_id)
+    const u16 bone_count = target->LL_BoneCount();
+    xr_vector<Fmatrix> before(bone_count);
+    xr_vector<u8> moved(bone_count, 0);
+    for (u16 bone_id = 0; bone_id < bone_count; ++bone_id)
+        before[bone_id].set(target->LL_GetBoneInstance(bone_id).mTransform);
+
+    for (u16 target_bone_id = 0; target_bone_id < bone_count; ++target_bone_id)
     {
         LPCSTR bone_name = target->LL_BoneName(target_bone_id);
-        if (strncmp(bone_name, side_prefix, side_prefix_length))
+        if (!is_arc9_hand_pose_bone(bone_name, side_prefix, side_prefix_length))
             continue;
 
         // Use the exact ValveBiped bone from the proxy, as ARC9 does. Source
@@ -2141,15 +2176,79 @@ void player_hud::apply_addon_hand_pose_ik(u16 hand_idx)
 
         CBoneInstance& target_bone = target->LL_GetBoneInstance(target_bone_id);
         Fquaternion animated_rotation, proxy_rotation, blended_rotation;
-        animated_rotation.set(target_bone.mTransform).normalize();
+        animated_rotation.set(before[target_bone_id]).normalize();
         proxy_rotation.set(proxy_transform).normalize();
         blended_rotation.slerp(animated_rotation, proxy_rotation, weight).normalize();
 
         Fvector blended_position;
-        blended_position.lerp(target_bone.mTransform.c, proxy_transform.c, weight);
+        blended_position.lerp(before[target_bone_id].c, proxy_transform.c, weight);
         target_bone.mTransform.rotation(blended_rotation);
         target_bone.mTransform.c.set(blended_position);
         target_bone.mRenderTransform.mul_43(target_bone.mTransform, target->LL_GetData(target_bone_id).m2b_transform);
+        moved[target_bone_id] = 1;
+    }
+
+    // Source attachment proxies do not always export ARC9's optional Wrist,
+    // Ulna and other helper bones. Those bones can still carry skin weights in
+    // the X-Ray hands mesh. Leaving them on the weapon animation tears shared
+    // triangles between the old and proxy poses. Preserve each missing helper's
+    // pre-IK local transform, but make it follow its already blended parent.
+    for (u16 pass = 0; pass < bone_count; ++pass)
+    {
+        bool progressed = false;
+        for (u16 bone_id = 0; bone_id < bone_count; ++bone_id)
+        {
+            if (moved[bone_id])
+                continue;
+            LPCSTR bone_name = target->LL_BoneName(bone_id);
+            if (!is_arc9_hand_pose_bone(bone_name, side_prefix, side_prefix_length))
+                continue;
+
+            const u16 parent_id = target->LL_GetData(bone_id).GetParentID();
+            if (parent_id == BI_NONE || parent_id >= bone_count || !moved[parent_id])
+                continue;
+
+            Fmatrix old_parent_inverse, animated_local;
+            old_parent_inverse.invert(before[parent_id]);
+            animated_local.mul_43(old_parent_inverse, before[bone_id]);
+
+            CBoneInstance& bone = target->LL_GetBoneInstance(bone_id);
+            bone.mTransform.mul_43(target->LL_GetBoneInstance(parent_id).mTransform, animated_local);
+            bone.mRenderTransform.mul_43(bone.mTransform, target->LL_GetData(bone_id).m2b_transform);
+            moved[bone_id] = 1;
+            progressed = true;
+        }
+        if (!progressed)
+            break;
+    }
+
+
+    // The separated-hands HUD renders two copies of the same c_arms mesh and
+    // hides the opposite arm in each copy. Mixed-weight vertices can still be
+    // submitted from that hidden branch. If only the visible copy receives IK,
+    // those vertices follow the old weapon animation and appear as long black
+    // strips. Mirror the final side pose into the hidden duplicate and reset
+    // its temporal matrices so neither skinning nor motion vectors can expose
+    // the stale animation.
+    IKinematics* duplicate = hand_idx == 0 ? m_model_2_kinematics : m_model_kinematics;
+    if (duplicate && duplicate != target)
+    {
+        for (u16 bone_id = 0; bone_id < bone_count; ++bone_id)
+        {
+            if (!moved[bone_id])
+                continue;
+
+            const u16 duplicate_bone_id = duplicate->LL_BoneID(target->LL_BoneName(bone_id));
+            if (duplicate_bone_id == BI_NONE)
+                continue;
+
+            CBoneInstance& duplicate_bone = duplicate->LL_GetBoneInstance(duplicate_bone_id);
+            duplicate_bone.mTransform.set(target->LL_GetBoneInstance(bone_id).mTransform);
+            duplicate_bone.mRenderTransform.mul_43(
+                duplicate_bone.mTransform, duplicate->LL_GetData(duplicate_bone_id).m2b_transform);
+            duplicate_bone.mRenderTransform_old.set(duplicate_bone.mRenderTransform);
+            duplicate_bone.mRenderTransform_tmp.set(duplicate_bone.mRenderTransform);
+        }
     }
 }
 

@@ -264,6 +264,7 @@ public:
     virtual u8 GetCurrentHudOffsetIdx() const { return 0; }
     virtual float GetHudFov(); // Получить HUD FOV от текущего оружия игрока
     void UpdateHudAdditional(Fmatrix&, const bool need_update_collision = false);
+    bool UseSprintHudOffset() const;
     bool HudBobbingAllowed() const { return m_huditem_flags.test(fl_bobbing_allow); }
     bool AnmIdleMovingAllowed() const;
     void AllowHudBobbing(BOOL B) { m_huditem_flags.set(fl_bobbing_allow, B); }
@@ -317,7 +318,7 @@ private:
     Fvector m_nearwall_last_pos{}, m_nearwall_last_rot{};
 
     Fvector m_strafe_offset[3][2]{}, m_lookout_offset[3][2]{}, m_jump_offset[3][2]{}, m_fall_offset[2][2]{}, m_landing_offset[2][2]{}, m_move_offset[3]{}, m_walk_offset[3]{};
-    Fvector current_difference[2]{}, current_strafe[2]{}, current_lookout[2]{}, current_jump[2]{}, current_move[2]{}, current_walk[2]{};
+    Fvector current_difference[2]{}, current_strafe[2]{}, current_lookout[2]{}, current_jump[2]{}, current_move[2]{}, current_walk[2]{}, current_sprint[2]{};
 
     float m_base_fov{};
 

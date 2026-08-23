@@ -1,7 +1,7 @@
 # Separate weapon addon visuals
 
 The renderer works with the existing scope, silencer and grenade-launcher
-attachment states and with the new `magazine`, `foregrip` and `side_rail`
+attachment states and with the `magazine`, `foregrip`, `side_rail` and `handguard`
 inventory slots. It replaces the old requirement that every addon mesh must be
 embedded into every weapon OGF.
 
@@ -14,6 +14,7 @@ List compatible addon item sections in the normal weapon section:
 magazine_addons = mag_ak_standard, mag_ak_extended
 foregrip_addons = grip_vertical, grip_angled
 side_rail_addons = laser_module, flashlight_module
+handguard_addons = handguard_example
 
 ; Optional visual-only scale for a Source-sized world weapon model:
 world_scaling = 0.025
@@ -70,6 +71,55 @@ Custom slots provide inventory state, rendering, icon, weight and cost
 integration. Magazine addons also control ammunition capacity and select reload
 and magazine-check animation sets.
 
+## Nested addons
+
+An installed addon may advertise compatible children with the same slot-list
+keys used by a weapon. The child points back to the parent by section name or
+by the parent's slot name:
+
+```ini
+[handguard_example]
+addon_slot       = handguard
+attach_visual    = weapons\addons\handguard_example
+attach_bone      = mod_handguard
+
+; Children which become attachable while this addon is installed.
+foregrip_addons = grip_vertical
+
+[grip_vertical]
+addon_slot       = foregrip
+attach_parent    = handguard_example ; `handguard` is also accepted
+attach_visual    = weapons\addons\grip_vertical
+attach_space     = weapon_bone
+attach_bone      = grip_rail           ; bone in the parent addon model
+attach_position  = 0, 0, 0
+attach_rotation  = 0, 0, 0
+```
+
+`hud_attach_parent` and `world_attach_parent` can override `attach_parent` when
+the two render models require different chains. A child transform is evaluated
+in its parent's visual space, so animation and scaling are inherited through
+arbitrarily deep chains. With a parent, `attach_space = weapon` means the
+parent visual's origin and `weapon_bone` means a bone in the parent visual.
+
+The compatibility graph is collected recursively at weapon load. The original
+three serialized slot indices remain unchanged and `handguard` is appended as
+the fourth slot. An addon is attachable
+only when either the weapon or a currently installed parent advertises it. A
+parent with installed children cannot be detached; detach the chain from its
+leaves first.
+
+## ImGui addon transform editor
+
+Open `HUD Editor` and expand `Addon transforms`. The panel lists all currently
+installed separately rendered addons, including nested children. `HUD
+transform` switches between first-person and world values. Position, rotation
+in degrees and scale update live.
+
+`Reset addon transform` removes the runtime override. `Copy config lines`
+copies the current mode-specific `hud_attach_*` or `world_attach_*` values for
+pasting into the selected addon's config section.
+
 ## Addon-authored HUD hand pose
 
 A Source addon such as a handguard or foregrip may include an `idle` motion
@@ -78,13 +128,14 @@ section:
 
 ```ini
 [handguard_example]
-addon_slot              = foregrip
+addon_slot              = handguard
 attach_visual           = weapons\addons\handguard_example
 hud_hand_pose           = left
 hud_hand_pose_animation = idle
 hud_hand_pose_blend_in  = 0.18
 hud_hand_pose_blend_out = 0.10
 hud_hand_pose_ik_time   = 0.78
+hud_hand_pose_hold_between_animations = true
 # ARC9-style optional timeline: normalized_time:IK_weight
 hud_hand_pose_ik_timeline = 0:1, 0.12:0, 0.72:0, 1:1
 ```
@@ -121,6 +172,34 @@ attachment model which only contains the addon mesh plus pose bones. Scaling
 arm bones to zero can stretch mixed-weight triangles; a model containing an
 actual visible c_arms mesh should use a separately exported render visual and
 pose proxy instead.
+
+`hud_hand_pose_hold_between_animations` defaults to `true` and prevents a
+one-frame/state-transition drop to the weapon-authored pose while no timed HUD
+motion is active.
+
+Some motions can be driven entirely by the attachment proxy. Their IK weight
+is forced to 1, so the weapon's own arm animation cannot pull the hand away:
+
+```ini
+[handguard_example]
+hud_hand_pose_override_animations = anm_shots, anm_shoot, anm_shoot_aim
+
+# Optional attachment cycles selected while these weapon aliases are active.
+# If omitted, hud_hand_pose_animation (normally idle) remains active.
+hud_hand_pose_animation_anm_shots = fire
+hud_hand_pose_animation_anm_shoot = fire
+```
+
+The weapon HUD section can extend/override the same behaviour:
+
+```ini
+hand_pose_override_animations = anm_shots, anm_shoot
+hand_pose_animation_anm_shots = fire
+```
+
+Names in the override list are the actual `anm_*` aliases stored in
+`m_current_motion`, not raw OGF cycle names. The mapped value (`fire` above) is
+the cycle played on the attachment proxy.
 
 The suffix is the actual `anm_*` alias selected by the weapon. Source addon
 exports commonly contain their authoring c_arms geometry; its left and right
@@ -282,3 +361,17 @@ follow an animated magazine bone and is intended only for stationary parts.
 The older per-weapon `<slot>_attach_*`, `<slot>_replaced_bones` and
 `<slot>_x/y` keys remain supported as fallbacks, but new addons do not need
 them. Addon-section values have priority.
+# Координатное опускание оружия при спринте
+
+Параметры задаются в HUD-секции оружия (той, которая указана в строке `hud = ...`):
+
+```ini
+sprint_hud_offset_pos       = 0.0, -0.12, -0.04
+sprint_hud_offset_rot       = -15.0, 0.0, 0.0
+sprint_hud_offset_time      = 0.25
+sprint_hud_offset_enabled   = true
+```
+
+Поворот задаётся в градусах. `sprint_hud_offset_time` — время плавного входа и выхода в секундах. Если присутствует хотя бы `sprint_hud_offset_pos` или `sprint_hud_offset_rot`, режим включается автоматически; строка `sprint_hud_offset_enabled` нужна только для явного включения или отключения. Поддерживаются варианты координат с суффиксом `_16x9`.
+
+При включённом координатном режиме `anm_idle_sprint_start`, `anm_idle_sprint` и `anm_idle_sprint_end` не проигрываются: используется обычный idle, поверх которого плавно накладывается указанное смещение. Спринтовый movement layer продолжает работать и смешивается с координатной позой.

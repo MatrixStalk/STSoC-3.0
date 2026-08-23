@@ -56,18 +56,26 @@ protected:
     SModernRecoilParams m_modern_params{};
     bool m_modern_enabled{};
     Fvector2 m_camera_offset{};
-    Fvector2 m_camera_target{};
-    Fvector2 m_camera_velocity{};
-    float m_camera_roll{};
-    float m_camera_roll_target{};
-    float m_camera_roll_velocity{};
+    Fvector2 m_camera_impulse{};
+    float m_camera_impulse_time{};
+    float m_recoil_amount{};
+    float m_recoil_up{};
+    float m_recoil_side{};
+    float m_pattern_direction{};
     Fvector m_hud_position{};
     Fvector m_hud_position_velocity{};
+    Fvector m_hud_position_acceleration{};
     Fvector m_hud_rotation{};
     Fvector m_hud_rotation_velocity{};
+    Fvector m_hud_rotation_acceleration{};
+    Fvector m_subtle_position{};
+    Fvector m_subtle_position_velocity{};
+    Fvector m_subtle_position_acceleration{};
+    Fvector m_subtle_rotation{};
+    Fvector m_subtle_rotation_velocity{};
+    Fvector m_subtle_rotation_acceleration{};
     float m_last_shot_time{-1000.f};
     u32 m_burst_shots{};
-    float m_horizontal_direction{1.f};
 
     void UpdateModernRecoil(float dt);
 

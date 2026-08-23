@@ -192,8 +192,18 @@ public:
         eCustomAddonMagazine,
         eCustomAddonForegrip,
         eCustomAddonSideRail,
+        eCustomAddonHandguard,
         eCustomAddonCount
     };
+
+    // Live transform editing for separately rendered addon visuals. Indices
+    // follow the public slot order: scope, silencer, launcher, magazine,
+    // foregrip, side_rail and handguard.
+    static constexpr u8 AddonVisualCount = 3 + eCustomAddonCount;
+    bool GetAddonEditorTransform(u8 visual_index, bool hud_mode, shared_str& section, shared_str& slot, shared_str& parent,
+        Fvector& position, Fvector& rotation, float& scale) const;
+    bool SetAddonEditorTransform(u8 visual_index, bool hud_mode, const Fvector& position, const Fvector& rotation, float scale);
+    void ResetAddonEditorTransform(u8 visual_index, bool hud_mode);
 
     bool CanAttachCustomAddon(const CInventoryItem* item) const;
     bool CanDetachCustomAddon(LPCSTR item_section) const;
@@ -231,19 +241,30 @@ private:
         IRenderVisual* hud{};
         bool world_reported{};
         bool hud_reported{};
+        shared_str hud_pose_animation;
+        Fmatrix world_transform;
+        Fmatrix hud_transform;
+        Fvector editor_position[2]{};
+        Fvector editor_rotation[2]{};
+        float editor_scale[2]{1.f, 1.f};
+        bool editor_override[2]{};
     };
 
     struct SCustomAddonSlot
     {
+        xr_vector<shared_str> root_allowed;
         xr_vector<shared_str> allowed;
         u8 installed_index{}; // 0 = empty, N = allowed[N - 1]
     };
 
     SCustomAddonSlot m_custom_addon_slots[eCustomAddonCount];
-    SAddonVisual m_addon_visuals[3 + eCustomAddonCount];
+    SAddonVisual m_addon_visuals[AddonVisualCount];
     float m_world_scaling{1.f};
     void DestroyAddonVisuals();
     void UpdateAddonReplacementVisibility(bool hud_mode);
+    shared_str GetAddonVisualSection(u8 visual_index) const;
+    shared_str FindAddonParentSection(LPCSTR child_section, bool hud_mode = false) const;
+    bool AddonSectionOffers(LPCSTR provider_section, LPCSTR child_section) const;
 
     xr_vector<shared_str> hidden_bones;
     xr_vector<shared_str> hud_hidden_bones;

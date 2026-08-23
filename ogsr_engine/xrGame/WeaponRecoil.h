@@ -1,37 +1,47 @@
 #pragma once
 
-// Optional modern first-person recoil parameters. Angles are converted to
-// radians by CWeapon::Load; positional HUD values remain in HUD metres.
+// ARC9 first-person recoil parameters. The names and defaults mirror ARC9;
+// angles stay in degrees until the final X-Ray HUD/camera transform.
 struct SModernRecoilParams
 {
     bool enabled{true};
 
-    float camera_frequency{18.f};
-    float camera_damping{0.78f};
-    float camera_impulse{0.55f};
-    float return_delay{0.075f};
-    float return_speed{7.5f};
-    float camera_max_pitch{8.f};
-    float camera_max_yaw{3.f};
+    float recoil{1.f};
+    float recoil_up{1.f};
+    float recoil_side{1.f};
+    float recoil_random_up{0.1f};
+    float recoil_random_side{0.1f};
+    float recoil_auto_control{1.f};
+    float recoil_pattern_drift{12.f};
+    float recoil_per_shot{1.f};
+    float recoil_dissipation_rate{10.f};
+    float recoil_reset_time{0.1f};
+    float recoil_full_reset_time{2.f};
+    float camera_max_pitch{12.f};
+    float camera_max_yaw{8.f};
 
-    float vertical_random{0.10f};
-    float horizontal_factor{0.32f};
-    float horizontal_random{0.45f};
-    float horizontal_change_chance{0.22f};
-    float roll_factor{0.08f};
+    float visual_recoil{1.f};
+    float visual_recoil_up{0.01f};
+    float visual_recoil_up_semi{0.01f};
+    float visual_recoil_side{0.05f};
+    float visual_recoil_side_semi{0.05f};
+    float visual_recoil_roll{0.23f};
+    float visual_recoil_punch{1.5f};
+    float visual_recoil_punch_sights{1.5f};
+    float visual_recoil_spring_constant{120.f};
+    float visual_recoil_spring_magnitude{1.f};
+    float visual_recoil_spring_damping{6.f};
+    float visual_recoil_bump_up{0.08f};
+    float visual_recoil_bump_up_hip{0.08f};
+    float visual_recoil_position_bump{1.5f};
+    float visual_recoil_scale{0.025f};
+    Fvector visual_recoil_center{0.f, 0.f, 0.f};
+    u32 shots_to_full_auto{3};
 
-    float first_shot_multiplier{1.12f};
-    float burst_growth{0.035f};
-    float burst_growth_limit{1.32f};
-    float burst_reset_time{0.20f};
-    float zoom_multiplier{0.72f};
-    float crouch_multiplier{0.82f};
+    float subtle_visual_recoil{0.f};
+    float subtle_visual_recoil_direction{0.f};
+    float subtle_visual_recoil_speed{1.f};
 
-    float hud_kick{0.018f};
-    float hud_up{0.0045f};
-    float hud_pitch{1.15f};
-    float hud_yaw{0.35f};
-    float hud_roll{0.45f};
-    float hud_frequency{23.f};
-    float hud_damping{0.66f};
+    float zoom_multiplier{1.f};
+    float crouch_multiplier{1.f};
 };
