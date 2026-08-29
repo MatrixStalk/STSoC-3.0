@@ -19,6 +19,15 @@ class IRenderVisual;
 class IKinematics;
 class CGameFont;
 
+struct SUIModelRenderParams
+{
+    Frect viewport{}; // physical screen pixels
+    Fvector rotation{}; // radians
+    Fvector offset{}; // model-space offset after centering
+    float scale{1.f};
+    Fvector4 tint{1.f, 1.f, 1.f, 1.f};
+};
+
 extern const float fLightSmoothFactor;
 
 //////////////////////////////////////////////////////////////////////////
@@ -178,6 +187,7 @@ public:
 
     // Main
     virtual void add_Visual(u32 context_id, IRenderable* root, IRenderVisual* V, Fmatrix& m) = 0; // add visual leaf	(no culling performed at all)
+    virtual bool RenderUIModel(IRenderable* object, const SUIModelRenderParams& params) = 0;
     virtual void add_StaticWallmark(const wm_shader& S, const Fvector& P, float s, CDB::TRI* T, Fvector* V) = 0;
     //	Prefer this function when possible
     virtual void add_StaticWallmark(IWallMarkArray* pArray, const Fvector& P, float s, CDB::TRI* T, Fvector* V) = 0;

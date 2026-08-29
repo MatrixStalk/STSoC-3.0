@@ -58,6 +58,7 @@ public:
     virtual void shedule_Update(u32 dt);
 
     virtual void renderable_Render(u32 context_id, IRenderable* root) override;
+    virtual void renderable_RenderUI(u32 context_id, IRenderable* root) override;
     virtual void render_hud_mode(u32 context_id, IRenderable* root) override;
     virtual void OnDrawUI();
     virtual bool need_renderable();
@@ -189,21 +190,49 @@ public:
 
     enum ECustomAddonSlot : u8
     {
+        // Keep these four indices stable for existing saves.
         eCustomAddonMagazine,
         eCustomAddonForegrip,
         eCustomAddonSideRail,
         eCustomAddonHandguard,
-        eCustomAddonCount
+        eCustomAddonStock,
+        eCustomAddonLoadGrip,
+        eCustomAddonMuzzle,
+        eCustomAddonPistolGrip,
+        eCustomAddonReceiver,
+        eCustomAddonGasBlock,
+        eCustomAddonBackupScope,
+        eCustomAddonDynamicBegin,
+        eCustomAddonCount = 24
     };
 
     // Live transform editing for separately rendered addon visuals. Indices
-    // follow the public slot order: scope, silencer, launcher, magazine,
-    // foregrip, side_rail and handguard.
+    // follow three legacy slots, fixed custom slots and named nested slots.
     static constexpr u8 AddonVisualCount = 3 + eCustomAddonCount;
     bool GetAddonEditorTransform(u8 visual_index, bool hud_mode, shared_str& section, shared_str& slot, shared_str& parent,
         Fvector& position, Fvector& rotation, float& scale) const;
     bool SetAddonEditorTransform(u8 visual_index, bool hud_mode, const Fvector& position, const Fvector& rotation, float scale);
     void ResetAddonEditorTransform(u8 visual_index, bool hud_mode);
+
+    struct SHandPoseIKEditorState
+    {
+        shared_str section;
+        shared_str motion;
+        shared_str timeline;
+        float blend_in{};
+        float blend_out{};
+        float ik_time{};
+        bool hold_between{};
+        bool override_weapon{};
+        bool runtime_override{};
+    };
+    LPCSTR GetCurrentHudMotion() const { return m_current_motion.c_str() ? m_current_motion.c_str() : ""; }
+    float GetCurrentHudMotionProgress() const;
+    bool PreviewHandPoseIKEditorMotion(LPCSTR motion);
+    void CollectHandPoseIKEditorMotions(u8 visual_index, xr_vector<shared_str>& motions) const;
+    bool GetHandPoseIKEditorState(u8 visual_index, LPCSTR motion, SHandPoseIKEditorState& state) const;
+    bool SetHandPoseIKEditorState(u8 visual_index, const SHandPoseIKEditorState& state);
+    void ResetHandPoseIKEditorState(u8 visual_index, LPCSTR motion);
 
     bool CanAttachCustomAddon(const CInventoryItem* item) const;
     bool CanDetachCustomAddon(LPCSTR item_section) const;
@@ -212,6 +241,7 @@ public:
     const shared_str& GetCustomAddonSection(ECustomAddonSlot slot) const;
     const xr_vector<shared_str>& GetCustomAddonAllowed(ECustomAddonSlot slot) const;
     u8 GetCustomAddonIndex(ECustomAddonSlot slot) const;
+    LPCSTR GetCustomAddonSlotName(ECustomAddonSlot slot) const;
 
     u8 GetAddonsState() const { return m_flagsAddOnState; };
     void SetAddonsState(u8 st) { m_flagsAddOnState = st; }
@@ -252,17 +282,33 @@ private:
 
     struct SCustomAddonSlot
     {
+        shared_str name;
+        shared_str provider;
         xr_vector<shared_str> root_allowed;
         xr_vector<shared_str> allowed;
         u8 installed_index{}; // 0 = empty, N = allowed[N - 1]
     };
 
+    struct SHandPoseIKEditorOverride
+    {
+        u8 visual_index{};
+        shared_str motion;
+        shared_str timeline;
+        float blend_in{};
+        float blend_out{};
+        float ik_time{};
+        bool hold_between{};
+        bool override_weapon{};
+    };
+
     SCustomAddonSlot m_custom_addon_slots[eCustomAddonCount];
     SAddonVisual m_addon_visuals[AddonVisualCount];
-    float m_world_scaling{1.f};
+    xr_vector<SHandPoseIKEditorOverride> m_hand_pose_ik_editor_overrides;
+    shared_str m_hand_pose_ik_editor_preview_motion;
     void DestroyAddonVisuals();
     void UpdateAddonReplacementVisibility(bool hud_mode);
     shared_str GetAddonVisualSection(u8 visual_index) const;
+    LPCSTR GetAddonVisualSlotName(u8 visual_index) const;
     shared_str FindAddonParentSection(LPCSTR child_section, bool hud_mode = false) const;
     bool AddonSectionOffers(LPCSTR provider_section, LPCSTR child_section) const;
 

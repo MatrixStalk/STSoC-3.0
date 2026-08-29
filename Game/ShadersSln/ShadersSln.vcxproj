@@ -447,6 +447,9 @@
     <None Include="..\Resources_SoC_1.0006\gamedata\shaders\r3\model_def_lplanes.vs" />
     <None Include="..\Resources_SoC_1.0006\gamedata\shaders\r3\model_def_lq.ps" />
     <None Include="..\Resources_SoC_1.0006\gamedata\shaders\r3\model_def_lq.vs" />
+    <None Include="..\Resources_SoC_1.0006\gamedata\shaders\r3\inventory_icon.ps" />
+    <None Include="..\Resources_SoC_1.0006\gamedata\shaders\r3\inventory_icon_aref.ps" />
+    <None Include="..\Resources_SoC_1.0006\gamedata\shaders\r3\inventory_icon_model.vs" />
     <None Include="..\Resources_SoC_1.0006\gamedata\shaders\r3\model_distort.vs" />
     <None Include="..\Resources_SoC_1.0006\gamedata\shaders\r3\model_distort4ghost.vs" />
     <None Include="..\Resources_SoC_1.0006\gamedata\shaders\r3\model_distort4glass.vs" />

@@ -8,9 +8,11 @@ class CUIInventoryCellItem : public CUICellItem
 
 protected:
     bool b_auto_drag_childs;
+    virtual void Set2DAddonIconsCustomDraw(bool) {}
 
 public:
     CUIInventoryCellItem(CInventoryItem* itm);
+    virtual void Draw() override;
     virtual void Update();
     virtual bool EqualTo(CUICellItem* itm);
     virtual CUIDragItem* CreateDragItem();
@@ -49,15 +51,13 @@ public:
         eScope,
         eLauncher,
         eMagazine,
-        eForegrip,
-        eSideRail,
-        eHandguard,
-        eMaxAddon
+        eMaxAddon = eMagazine + CWeapon::eCustomAddonCount
     };
     CUIStatic* m_addons[eMaxAddon];
 
 protected:
     Fvector2 m_addon_offset[eMaxAddon];
+    void Set2DAddonIconsCustomDraw(bool value) override;
     void CreateIcon(eAddonType, CIconParams& params);
     void DestroyIcon(eAddonType);
     CUIStatic* GetIcon(eAddonType);

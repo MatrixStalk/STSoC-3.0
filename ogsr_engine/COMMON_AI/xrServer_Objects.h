@@ -152,8 +152,9 @@
 // 118 - CALifeHumanBrain				removed property m_tpKnownCustomers, sad but true
 // 119 - CSE_ALifeItemWeapon            added magazine/foregrip/side-rail addon indices
 // 120 - CSE_ALifeItemWeapon            added handguard addon index
+// 121 - CSE_ALifeItemWeapon            expanded fixed and named nested addon slots
 //------------------------------------------------------------------------------
-#define SPAWN_VERSION u16(120)
+#define SPAWN_VERSION u16(121)
 
 SERVER_ENTITY_DECLARE_BEGIN2(CSE_Shape, ISE_Shape, CShapeData)
 public:

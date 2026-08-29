@@ -361,6 +361,42 @@ follow an animated magazine bone and is intended only for stationary parts.
 The older per-weapon `<slot>_attach_*`, `<slot>_replaced_bones` and
 `<slot>_x/y` keys remain supported as fallbacks, but new addons do not need
 them. Addon-section values have priority.
+
+## Слоты модульного оружия
+
+Фиксированные корневые слоты новой системы:
+
+```ini
+stock_addons        = stock_a, stock_b
+load_grip_addons    = charging_handle_a
+magazine_addons     = magazine_a
+muzzle_addons       = muzzle_brake_a, suppressor_a
+pistolgrip_addons   = pistolgrip_a
+receiver_addons     = receiver_cover_a
+gas_block_addons    = gas_block_a
+backup_scope_addons = backup_sight_a
+```
+
+Соответствующие значения `addon_slot`: `stock`, `load_grip`, `magazine`, `muzzle`, `pistolgrip`, `receiver`, `gas_block` и `backup_scope`. Основной `scope` и `launcher` продолжают использовать штатные слоты X-Ray, поскольку с ними связана отдельная игровая логика прицеливания и подствольного оружия. Старые `foregrip`, `side_rail` и `handguard` оставлены совместимыми с уже созданными конфигами и сохранениями.
+
+Для attach-on-attach имя точки больше не должно быть известно движку. Любая строка `<произвольное_имя>_addons` в секции аттача автоматически создаёт именованную точку именно на этом аттаче:
+
+```ini
+[handguard_a]
+addon_slot         = gas_block
+bottom_rail_addons = foregrip_a, bipod_a
+right_rail_addons  = flashlight_a
+
+[foregrip_a]
+addon_slot    = bottom_rail
+attach_parent = handguard_a
+
+[flashlight_a]
+addon_slot    = right_rail
+attach_parent = handguard_a
+```
+
+Имена `bottom_rail` и `right_rail` здесь полностью конфиговые. Одинаковое имя на двух разных родительских аттачах создаёт две независимые точки. Одновременно доступно до 13 произвольных точек на одном дереве оружия; фиксированные слоты в этот лимит не входят. Снимать дерево нужно от листьев к корню.
 # Координатное опускание оружия при спринте
 
 Параметры задаются в HUD-секции оружия (той, которая указана в строке `hud = ...`):

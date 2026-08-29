@@ -81,6 +81,25 @@ void CInventoryItem::Load(LPCSTR section)
     CHitImmunity::LoadImmunities(pSettings->r_string(section, "immunities_sect"), pSettings);
     m_icon_params.Load(section);
 
+    m_icon_3d_enabled = READ_IF_EXISTS(pSettings, r_bool, "dragdrop", "use_3d_icons", true);
+    m_icon_3d_rotation.set(15.f, 110.f, -5.f);
+    m_icon_3d_offset.set(0.f, 0.f, 0.f);
+    m_icon_3d_scale = READ_IF_EXISTS(pSettings, r_float, "dragdrop", "icon_3d_scale", 1.f);
+    m_icon_3d_rotation_speed = READ_IF_EXISTS(pSettings, r_float, "dragdrop", "icon_3d_rotation_speed", 0.f);
+
+    if (pSettings->line_exist("dragdrop", "icon_3d_rotation"))
+        m_icon_3d_rotation = pSettings->r_fvector3("dragdrop", "icon_3d_rotation");
+    if (pSettings->line_exist("dragdrop", "icon_3d_offset"))
+        m_icon_3d_offset = pSettings->r_fvector3("dragdrop", "icon_3d_offset");
+
+    m_icon_3d_enabled = READ_IF_EXISTS(pSettings, r_bool, section, "inv_icon_3d", m_icon_3d_enabled);
+    m_icon_3d_scale = READ_IF_EXISTS(pSettings, r_float, section, "inv_icon_3d_scale", m_icon_3d_scale);
+    m_icon_3d_rotation_speed = READ_IF_EXISTS(pSettings, r_float, section, "inv_icon_3d_rotation_speed", m_icon_3d_rotation_speed);
+    if (pSettings->line_exist(section, "inv_icon_3d_rotation"))
+        m_icon_3d_rotation = pSettings->r_fvector3(section, "inv_icon_3d_rotation");
+    if (pSettings->line_exist(section, "inv_icon_3d_offset"))
+        m_icon_3d_offset = pSettings->r_fvector3(section, "inv_icon_3d_offset");
+
     ISpatial* self = smart_cast<ISpatial*>(this);
     if (self)
         self->spatial.type |= STYPE_VISIBLEFORAI;

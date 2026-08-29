@@ -380,7 +380,7 @@ void CSE_ALifeItemWeapon::STATE_Read(NET_Packet& tNetPacket, u16 size)
 
     if (m_wVersion > 118)
     {
-        const u8 count = m_wVersion >= 120 ? static_cast<u8>(std::size(m_custom_addon_indices)) : 3;
+        const u8 count = m_wVersion >= 121 ? static_cast<u8>(std::size(m_custom_addon_indices)) : (m_wVersion >= 120 ? 4 : 3);
         for (u8 i = 0; i < count; ++i)
             m_custom_addon_indices[i] = tNetPacket.r_u8();
     }

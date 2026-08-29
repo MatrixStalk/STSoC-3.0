@@ -69,6 +69,16 @@ void CBlender_Model_EbB::Compile(CBlender_Compile& C)
 {
     IBlender::Compile(C);
 
+    if (C.iElement == 5)
+    {
+        C.r_Pass("inventory_icon_model", oBlend.value ? "inventory_icon_aref" : "inventory_icon", TRUE, TRUE, TRUE, TRUE, D3DBLEND_SRCALPHA,
+            D3DBLEND_INVSRCALPHA, TRUE, 8);
+        C.r_dx10Texture("s_base", C.L_textures[0]);
+        C.r_dx10Sampler("smp_base");
+        C.r_End();
+        return;
+    }
+
     if (oBlend.value)
     {
         // forward

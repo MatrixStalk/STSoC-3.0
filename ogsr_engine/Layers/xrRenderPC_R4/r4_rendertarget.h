@@ -30,6 +30,7 @@ public:
     // Base targets
     xr_vector<ref_rt> rt_base;
     ref_rt rt_Base_Depth;
+    ref_rt rt_UIModelDepth;
 
     // MRT-path
 

@@ -151,6 +151,223 @@ void RenderAddonTransforms(CWeapon* weapon, float drag_intensity)
     ImGui::TextDisabled("Config section: [%s]", selected_section.c_str());
     ImGui::TextDisabled("Parent: %s", selected_parent.c_str() ? selected_parent.c_str() : "weapon");
 }
+
+struct SIKEditorPoint
+{
+    float time{};
+    float weight{};
+};
+
+void ParseIKEditorTimeline(LPCSTR value, xr_vector<SIKEditorPoint>& points, float fallback_ik_time)
+{
+    points.clear();
+    string64 item{};
+    for (int i = 0, count = value && value[0] ? _GetItemCount(value) : 0; i < count; ++i)
+    {
+        _GetItem(value, i, item);
+        SIKEditorPoint point;
+        if (sscanf(item, "%f:%f", &point.time, &point.weight) == 2)
+        {
+            point.time = clampr(point.time, 0.f, 1.f);
+            point.weight = clampr(point.weight, 0.f, 1.f);
+            points.push_back(point);
+        }
+    }
+    if (points.empty())
+    {
+        const float return_time = clampr(fallback_ik_time, 0.f, 1.f);
+        points.push_back({0.f, 1.f});
+        points.push_back({_min(0.1f, return_time), 0.f});
+        points.push_back({return_time, 0.f});
+        points.push_back({1.f, 1.f});
+    }
+}
+
+xr_string BuildIKEditorTimeline(xr_vector<SIKEditorPoint>& points)
+{
+    std::stable_sort(points.begin(), points.end(), [](const SIKEditorPoint& left, const SIKEditorPoint& right) {
+        return left.time < right.time;
+    });
+    xr_string result;
+    string64 item{};
+    for (const SIKEditorPoint& point : points)
+    {
+        xr_sprintf(item, "%s%.4g:%.4g", result.empty() ? "" : ", ", point.time, point.weight);
+        result += item;
+    }
+    return result;
+}
+
+void RenderHandPoseIKTransitions(CWeapon* weapon)
+{
+    if (!weapon)
+        return;
+
+    static CWeapon* selected_weapon{};
+    static int selected_visual = -1;
+    static shared_str selected_motion;
+    static bool follow_active_motion = true;
+    static bool loop_preview = false;
+    if (selected_weapon != weapon)
+    {
+        selected_weapon = weapon;
+        selected_visual = -1;
+        selected_motion = nullptr;
+        loop_preview = false;
+    }
+
+    xr_vector<u8> visuals;
+    xr_vector<shared_str> scratch_motions;
+    for (u8 visual = 0; visual < CWeapon::AddonVisualCount; ++visual)
+    {
+        weapon->CollectHandPoseIKEditorMotions(visual, scratch_motions);
+        if (!scratch_motions.empty())
+            visuals.push_back(visual);
+    }
+    if (visuals.empty())
+    {
+        ImGui::TextDisabled("No installed addon with hud_hand_pose");
+        return;
+    }
+    if (std::find(visuals.begin(), visuals.end(), static_cast<u8>(selected_visual)) == visuals.end())
+        selected_visual = visuals.front();
+
+    weapon->CollectHandPoseIKEditorMotions(static_cast<u8>(selected_visual), scratch_motions);
+    CWeapon::SHandPoseIKEditorState preview_state;
+    LPCSTR preview_motion = weapon->GetCurrentHudMotion();
+    if ((!preview_motion || !preview_motion[0]) && !scratch_motions.empty())
+        preview_motion = scratch_motions.front().c_str();
+    weapon->GetHandPoseIKEditorState(static_cast<u8>(selected_visual), preview_motion, preview_state);
+
+    if (ImGui::BeginCombo("IK addon", preview_state.section.c_str() ? preview_state.section.c_str() : "<addon>"))
+    {
+        for (u8 visual : visuals)
+        {
+            xr_vector<shared_str> motions;
+            weapon->CollectHandPoseIKEditorMotions(visual, motions);
+            CWeapon::SHandPoseIKEditorState candidate;
+            if (motions.empty() || !weapon->GetHandPoseIKEditorState(visual, motions.front().c_str(), candidate))
+                continue;
+            const bool selected = visual == selected_visual;
+            if (ImGui::Selectable(candidate.section.c_str(), selected))
+            {
+                selected_visual = visual;
+                selected_motion = nullptr;
+            }
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    weapon->CollectHandPoseIKEditorMotions(static_cast<u8>(selected_visual), scratch_motions);
+    ImGui::Checkbox("Follow active animation", &follow_active_motion);
+    if (follow_active_motion)
+    {
+        LPCSTR active_motion = weapon->GetCurrentHudMotion();
+        if (active_motion && active_motion[0])
+            selected_motion = active_motion;
+        ImGui::Text("Animation: %s", selected_motion.c_str() ? selected_motion.c_str() : "<none>");
+    }
+    else
+    {
+        const auto selected_it = std::find_if(scratch_motions.begin(), scratch_motions.end(), [](const shared_str& motion) {
+            return selected_motion.c_str() && !_stricmp(motion.c_str(), selected_motion.c_str());
+        });
+        if (selected_it == scratch_motions.end() && !scratch_motions.empty())
+            selected_motion = scratch_motions.front();
+        if (ImGui::BeginCombo("Animation", selected_motion.c_str() ? selected_motion.c_str() : "<none>"))
+        {
+            for (const shared_str& motion : scratch_motions)
+            {
+                const bool selected = selected_motion.c_str() && !_stricmp(motion.c_str(), selected_motion.c_str());
+                if (ImGui::Selectable(motion.c_str(), selected))
+                    selected_motion = motion;
+                if (selected)
+                    ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+    }
+
+    CWeapon::SHandPoseIKEditorState state;
+    if (!selected_motion.c_str() || !weapon->GetHandPoseIKEditorState(static_cast<u8>(selected_visual), selected_motion.c_str(), state))
+    {
+        ImGui::TextDisabled("No HUD animation selected");
+        return;
+    }
+
+    const bool selected_is_active = !_stricmp(selected_motion.c_str(), weapon->GetCurrentHudMotion());
+    const float progress = selected_is_active ? weapon->GetCurrentHudMotionProgress() : 0.f;
+    string64 progress_text{};
+    xr_sprintf(progress_text, "%.1f%%", progress * 100.f);
+    ImGui::ProgressBar(progress, ImVec2(-1.f, 0.f), progress_text);
+    if (ImGui::Button("Preview / restart"))
+        weapon->PreviewHandPoseIKEditorMotion(selected_motion.c_str());
+    ImGui::SameLine();
+    ImGui::Checkbox("Loop preview", &loop_preview);
+    if (loop_preview && selected_is_active && progress >= 0.995f)
+        weapon->PreviewHandPoseIKEditorMotion(selected_motion.c_str());
+
+    bool changed = false;
+    changed |= ImGui::DragFloat("Blend in (sec)", &state.blend_in, 0.005f, 0.f, 5.f, "%.3f");
+    changed |= ImGui::DragFloat("Blend out (sec)", &state.blend_out, 0.005f, 0.f, 5.f, "%.3f");
+    changed |= ImGui::DragFloat("Fallback IK return time", &state.ik_time, 0.005f, -1.f, 1.f, "%.3f");
+    changed |= ImGui::Checkbox("Hold pose between animations", &state.hold_between);
+    changed |= ImGui::Checkbox("Override weapon hand animation", &state.override_weapon);
+
+    xr_vector<SIKEditorPoint> points;
+    ParseIKEditorTimeline(state.timeline.c_str(), points, state.ik_time);
+    ImGui::SeparatorText("Normalized IK timeline");
+    int remove_point = -1;
+    for (u32 index = 0; index < points.size(); ++index)
+    {
+        ImGui::PushID(static_cast<int>(index));
+        ImGui::SetNextItemWidth(115.f);
+        changed |= ImGui::DragFloat("Time", &points[index].time, 0.0025f, 0.f, 1.f, "%.4f");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(115.f);
+        changed |= ImGui::DragFloat("Weight", &points[index].weight, 0.005f, 0.f, 1.f, "%.3f");
+        ImGui::SameLine();
+        if (ImGui::SmallButton("X"))
+            remove_point = static_cast<int>(index);
+        ImGui::PopID();
+    }
+    if (remove_point >= 0 && points.size() > 1)
+    {
+        points.erase(points.begin() + remove_point);
+        changed = true;
+    }
+    if (ImGui::Button("Add timeline point"))
+    {
+        points.push_back({selected_is_active ? progress : 0.5f, 1.f});
+        changed = true;
+    }
+
+    if (changed)
+    {
+        const xr_string timeline = BuildIKEditorTimeline(points);
+        state.timeline = timeline.c_str();
+        weapon->SetHandPoseIKEditorState(static_cast<u8>(selected_visual), state);
+    }
+
+    if (ImGui::Button("Reset runtime values"))
+        weapon->ResetHandPoseIKEditorState(static_cast<u8>(selected_visual), selected_motion.c_str());
+    ImGui::SameLine();
+    if (ImGui::Button("Copy IK config"))
+    {
+        const xr_string timeline = BuildIKEditorTimeline(points);
+        string2048 config{};
+        xr_sprintf(config,
+            "hud_hand_pose_blend_in = %.3f\nhud_hand_pose_blend_out = %.3f\nhud_hand_pose_hold_between_animations = %s\n"
+            "hand_pose_ik_time_%s = %.3f\nhand_pose_ik_timeline_%s = %s",
+            state.blend_in, state.blend_out, state.hold_between ? "true" : "false", state.motion.c_str(), state.ik_time,
+            state.motion.c_str(), timeline.c_str());
+        ImGui::SetClipboardText(config);
+    }
+    ImGui::TextDisabled("Runtime override: %s", state.runtime_override ? "yes" : "no");
+    ImGui::TextDisabled("Timeline uses normalized animation time (0..1) and IK weight (0..1)");
+}
 } // namespace
 
 
@@ -202,6 +419,9 @@ void CImGuiHudEditorWnd::Render()
 
         if (Wpn && ImGui::CollapsingHeader("Addon transforms"))
             RenderAddonTransforms(Wpn, drag_intensity);
+
+        if (Wpn && ImGui::CollapsingHeader("Addon hand-pose IK transitions"))
+            RenderHandPoseIKTransitions(Wpn);
 
         if (Wpn)
         {

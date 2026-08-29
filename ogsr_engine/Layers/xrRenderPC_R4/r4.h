@@ -142,6 +142,14 @@ private:
     };
     xr_vector<Puddle> current_level_puddles;
 
+    struct UIModelSubmission
+    {
+        dxRender_Visual* visual{};
+        Fmatrix transform{};
+    };
+    bool ui_model_collecting{};
+    xr_vector<UIModelSubmission> ui_model_submissions;
+
     // Loading / Unloading
     void LoadBuffers(CStreamReader* fs, BOOL _alternative);
     void LoadVisuals(IReader* fs);
@@ -264,6 +272,7 @@ public:
 
     // Main
     virtual void add_Visual(u32 context_id, IRenderable* root, IRenderVisual* V, Fmatrix& m); // add visual leaf	(no culling performed at all)
+    bool RenderUIModel(IRenderable* object, const SUIModelRenderParams& params) override;
 
     // wallmarks
     virtual void add_StaticWallmark(IWallMarkArray* pArray, const Fvector& P, float s, CDB::TRI* T, Fvector* V);

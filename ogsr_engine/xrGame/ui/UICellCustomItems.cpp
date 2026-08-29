@@ -10,6 +10,8 @@
 #include "../Actor.h"
 #include "UIInventoryWnd.h"
 #include "UICursor.h"
+#include "../HUDManager.h"
+#include "../../xr_3da/Render.h"
 
 #define INV_GRID_WIDTHF 50.0f
 #define INV_GRID_HEIGHTF 50.0f
@@ -33,6 +35,54 @@ CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
 
     m_grid_size.set(itm->GetGridWidth(), itm->GetGridHeight());
     b_auto_drag_childs = true;
+}
+
+void CUIInventoryCellItem::Draw()
+{
+    CInventoryItem* item = object();
+    if (!item || !item->m_icon_3d_enabled || !item->object().Visual())
+    {
+        inherited::Draw();
+        return;
+    }
+
+    Frect ui_rect;
+    GetAbsoluteRect(ui_rect);
+
+    SUIModelRenderParams params;
+    UI()->ClientToScreenScaled(params.viewport.lt, ui_rect.x1, ui_rect.y1);
+    UI()->ClientToScreenScaled(params.viewport.rb, ui_rect.x2, ui_rect.y2);
+    const Fvector2 animation_offset = UIRender->GetAnimationOffset();
+    params.viewport.lt.add(animation_offset);
+    params.viewport.rb.add(animation_offset);
+
+    params.rotation.set(deg2rad(item->m_icon_3d_rotation.x), deg2rad(item->m_icon_3d_rotation.y), deg2rad(item->m_icon_3d_rotation.z));
+    params.rotation.y += Device.fTimeGlobal * deg2rad(item->m_icon_3d_rotation_speed);
+    params.offset = item->m_icon_3d_offset;
+    params.scale = _max(item->m_icon_3d_scale, 0.05f);
+
+    const u32 color = GetColor();
+    constexpr float byte_to_float = 1.f / 255.f;
+    params.tint.set(color_get_R(color) * byte_to_float, color_get_G(color) * byte_to_float, color_get_B(color) * byte_to_float,
+                    color_get_A(color) * byte_to_float * UIRender->GetAnimationAlpha());
+
+    UI()->PushScissor(ui_rect);
+    const bool rendered = Render->RenderUIModel(smart_cast<IRenderable*>(&item->object()), params);
+    UI()->PopScissor();
+
+    if (!rendered)
+    {
+        inherited::Draw();
+        return;
+    }
+
+    // The model replaces only the atlas image. Counts, condition bars and
+    // other overlays retain their normal UI ordering above it.
+    TextureOff();
+    Set2DAddonIconsCustomDraw(true);
+    inherited::Draw();
+    Set2DAddonIconsCustomDraw(false);
+    TextureOn();
 }
 
 bool CUIInventoryCellItem::EqualTo(CUICellItem* itm)
@@ -227,12 +277,14 @@ CUIWeaponCellItem::CUIWeaponCellItem(CWeapon* itm) : inherited(itm)
     if (itm->GrenadeLauncherAttachable())
         m_addon_offset[eLauncher].set(object()->GetGrenadeLauncherX(), object()->GetGrenadeLauncherY());
 
-    constexpr LPCSTR custom_slot_names[CWeapon::eCustomAddonCount] = {"magazine", "foregrip", "side_rail", "handguard"};
     for (u8 slot = 0; slot < CWeapon::eCustomAddonCount; ++slot)
     {
+        LPCSTR slot_name = object()->GetCustomAddonSlotName(static_cast<CWeapon::ECustomAddonSlot>(slot));
+        if (!slot_name || !slot_name[0])
+            continue;
         string64 key_x{}, key_y{};
-        xr_sprintf(key_x, "%s_x", custom_slot_names[slot]);
-        xr_sprintf(key_y, "%s_y", custom_slot_names[slot]);
+        xr_sprintf(key_x, "%s_x", slot_name);
+        xr_sprintf(key_y, "%s_y", slot_name);
         m_addon_offset[eMagazine + slot].set(READ_IF_EXISTS(pSettings, r_float, object()->cNameSect(), key_x, 0.f),
                                              READ_IF_EXISTS(pSettings, r_float, object()->cNameSect(), key_y, 0.f));
     }
@@ -261,6 +313,13 @@ void CUIWeaponCellItem::DestroyIcon(eAddonType t)
 {
     DetachChild(m_addons[t]);
     m_addons[t] = NULL;
+}
+
+void CUIWeaponCellItem::Set2DAddonIconsCustomDraw(bool value)
+{
+    for (CUIStatic* addon : m_addons)
+        if (addon)
+            addon->SetCustomDraw(value);
 }
 
 CUIStatic* CUIWeaponCellItem::GetIcon(eAddonType t) { return m_addons[t]; }

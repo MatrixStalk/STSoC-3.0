@@ -59,7 +59,8 @@ void CAttachableItem::OnH_A_Chield()
 
 void CAttachableItem::renderable_Render(u32 context_id, IRenderable* root)
 {
-    ::Render->add_Visual(context_id, root, object().Visual(), object().XFORM());
+    Fmatrix world_transform = object().renderable_WorldTransform();
+    ::Render->add_Visual(context_id, root, object().Visual(), world_transform);
 }
 
 void CAttachableItem::OnH_A_Independent()

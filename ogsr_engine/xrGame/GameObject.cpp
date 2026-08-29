@@ -678,7 +678,8 @@ void CGameObject::dbg_DrawSkeleton()
 void CGameObject::renderable_Render(u32 context_id, IRenderable* root)
 {
     inherited::renderable_Render(context_id, root);
-    ::Render->add_Visual(context_id, root, Visual(), XFORM());
+    Fmatrix world_transform = renderable_WorldTransform();
+    ::Render->add_Visual(context_id, root, Visual(), world_transform);
     Visual()->getVisData().hom_frame = Device.dwFrame;
 }
 

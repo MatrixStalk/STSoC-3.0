@@ -95,7 +95,9 @@ namespace
 {
 constexpr u32 legacy_addon_visual_count = 3;
 constexpr u32 addon_visual_count = legacy_addon_visual_count + CWeapon::eCustomAddonCount;
-constexpr LPCSTR addon_slot_names[addon_visual_count] = {"scope", "silencer", "launcher", "magazine", "foregrip", "side_rail", "handguard"};
+constexpr LPCSTR legacy_addon_slot_names[legacy_addon_visual_count] = {"scope", "silencer", "launcher"};
+constexpr LPCSTR fixed_custom_slot_names[CWeapon::eCustomAddonDynamicBegin] = {
+    "magazine", "foregrip", "side_rail", "handguard", "stock", "load_grip", "muzzle", "pistolgrip", "receiver", "gas_block", "backup_scope"};
 
 u16 find_addon_bone(IKinematics* model, LPCSTR bone_name)
 {
@@ -320,6 +322,23 @@ bool addon_list_contains(LPCSTR provider_section, LPCSTR key, LPCSTR child_secti
     }
     return false;
 }
+
+void play_world_idle(IRenderVisual* visual, LPCSTR section)
+{
+    IKinematicsAnimated* animated = visual ? visual->dcast_PKinematicsAnimated() : nullptr;
+    if (!animated)
+        return;
+
+    const MotionID idle = animated->ID_Cycle_Safe("idle");
+    if (!idle.valid())
+    {
+        Msg("! Weapon addon [%s]: HUD world visual [%s] has no [idle] animation", section, visual->getDebugName().c_str());
+        return;
+    }
+
+    animated->PlayCycle(idle, FALSE);
+    animated->dcast_PKinematics()->CalculateBones_Invalidate();
+}
 } // namespace
 
 void CWeapon::DestroyAddonVisuals()
@@ -354,6 +373,15 @@ shared_str CWeapon::GetAddonVisualSection(u8 visual_index) const
     return GetCustomAddonSection(static_cast<ECustomAddonSlot>(visual_index - legacy_addon_visual_count));
 }
 
+LPCSTR CWeapon::GetAddonVisualSlotName(u8 visual_index) const
+{
+    if (visual_index < legacy_addon_visual_count)
+        return legacy_addon_slot_names[visual_index];
+    if (visual_index >= addon_visual_count)
+        return "";
+    return GetCustomAddonSlotName(static_cast<ECustomAddonSlot>(visual_index - legacy_addon_visual_count));
+}
+
 bool CWeapon::AddonSectionOffers(LPCSTR provider_section, LPCSTR child_section) const
 {
     if (!provider_section || !child_section || !pSettings->section_exist(child_section) ||
@@ -380,7 +408,7 @@ shared_str CWeapon::FindAddonParentSection(LPCSTR child_section, bool hud_mode) 
             const shared_str installed = GetAddonVisualSection(i);
             if (!installed.c_str() || !_stricmp(installed.c_str(), child_section))
                 continue;
-            if (!_stricmp(configured_parent, installed.c_str()) || !_stricmp(configured_parent, addon_slot_names[i]))
+            if (!_stricmp(configured_parent, installed.c_str()) || !_stricmp(configured_parent, GetAddonVisualSlotName(i)))
                 return installed;
         }
         return shared_str();
@@ -394,7 +422,7 @@ shared_str CWeapon::FindAddonParentSection(LPCSTR child_section, bool hud_mode) 
         LPCSTR slot_name = pSettings->r_string(child_section, "addon_slot");
         for (u8 slot = 0; slot < eCustomAddonCount; ++slot)
         {
-            if (_stricmp(slot_name, addon_slot_names[legacy_addon_visual_count + slot]))
+            if (_stricmp(slot_name, GetCustomAddonSlotName(static_cast<ECustomAddonSlot>(slot))))
                 continue;
             const auto& root_allowed = m_custom_addon_slots[slot].root_allowed;
             if (std::find(root_allowed.begin(), root_allowed.end(), child_section) != root_allowed.end())
@@ -421,7 +449,7 @@ bool CWeapon::GetAddonEditorTransform(u8 visual_index, bool hud_mode, shared_str
     if (!section.c_str() || !pSettings->section_exist(section))
         return false;
 
-    slot = addon_slot_names[visual_index];
+    slot = GetAddonVisualSlotName(visual_index);
     parent = FindAddonParentSection(section.c_str(), hud_mode);
     const SAddonVisual& instance = m_addon_visuals[visual_index];
     const u8 mode = hud_mode ? 1 : 0;
@@ -434,9 +462,9 @@ bool CWeapon::GetAddonEditorTransform(u8 visual_index, bool hud_mode, shared_str
     else
     {
         LPCSTR owner_section = hud_mode ? hud_sect.c_str() : cNameSect().c_str();
-        position = read_addon_vector(section.c_str(), owner_section, addon_slot_names[visual_index], "attach_position", "position", hud_mode);
-        rotation = read_addon_vector(section.c_str(), owner_section, addon_slot_names[visual_index], "attach_rotation", "rotation", hud_mode);
-        scale = read_addon_scale(section.c_str(), owner_section, addon_slot_names[visual_index], hud_mode);
+        position = read_addon_vector(section.c_str(), owner_section, GetAddonVisualSlotName(visual_index), "attach_position", "position", hud_mode);
+        rotation = read_addon_vector(section.c_str(), owner_section, GetAddonVisualSlotName(visual_index), "attach_rotation", "rotation", hud_mode);
+        scale = read_addon_scale(section.c_str(), owner_section, GetAddonVisualSlotName(visual_index), hud_mode);
     }
     return true;
 }
@@ -460,6 +488,157 @@ void CWeapon::ResetAddonEditorTransform(u8 visual_index, bool hud_mode)
         m_addon_visuals[visual_index].editor_override[hud_mode ? 1 : 0] = false;
 }
 
+float CWeapon::GetCurrentHudMotionProgress() const
+{
+    if (m_dwMotionEndTm <= m_dwMotionStartTm)
+        return GetState() == eIdle ? 1.f : 0.f;
+    return clampr(float(Device.dwTimeGlobal - m_dwMotionStartTm) / float(m_dwMotionEndTm - m_dwMotionStartTm), 0.f, 1.f);
+}
+
+bool CWeapon::PreviewHandPoseIKEditorMotion(LPCSTR motion)
+{
+    if (!motion || !motion[0] || !GetHUDmode() || !AnimationExist(motion))
+        return false;
+    m_hand_pose_ik_editor_preview_motion = motion;
+    PlayHUDMotion(motion, true, eIdle, false);
+    return true;
+}
+
+void CWeapon::CollectHandPoseIKEditorMotions(u8 visual_index, xr_vector<shared_str>& motions) const
+{
+    motions.clear();
+    if (visual_index >= addon_visual_count)
+        return;
+
+    const shared_str section = GetAddonVisualSection(visual_index);
+    if (!section.c_str() || !pSettings->section_exist(section) || !pSettings->line_exist(section, "hud_hand_pose"))
+        return;
+
+    const auto append_unique = [&motions](LPCSTR motion) {
+        if (!motion || !motion[0])
+            return;
+        const auto found = std::find_if(motions.begin(), motions.end(), [motion](const shared_str& candidate) {
+            return !_stricmp(candidate.c_str(), motion);
+        });
+        if (found == motions.end())
+            motions.emplace_back(motion);
+    };
+    append_unique(GetCurrentHudMotion());
+
+    constexpr LPCSTR prefixes[] = {"hand_pose_ik_timeline_", "hand_pose_ik_time_"};
+    const LPCSTR sections[] = {section.c_str(), hud_sect.c_str()};
+    for (LPCSTR config_section : sections)
+    {
+        if (!config_section || !config_section[0] || !pSettings->section_exist(config_section))
+            continue;
+        for (const auto& line : pSettings->r_section(config_section).Ordered_Data)
+        {
+            LPCSTR key = line.first.c_str();
+            for (LPCSTR prefix : prefixes)
+            {
+                const size_t prefix_length = xr_strlen(prefix);
+                if (!_strnicmp(key, prefix, prefix_length))
+                    append_unique(key + prefix_length);
+            }
+        }
+    }
+    for (const SHandPoseIKEditorOverride& entry : m_hand_pose_ik_editor_overrides)
+    {
+        if (entry.visual_index == visual_index)
+            append_unique(entry.motion.c_str());
+    }
+}
+
+bool CWeapon::GetHandPoseIKEditorState(u8 visual_index, LPCSTR motion, SHandPoseIKEditorState& state) const
+{
+    if (visual_index >= addon_visual_count)
+        return false;
+    const shared_str section = GetAddonVisualSection(visual_index);
+    if (!section.c_str() || !pSettings->section_exist(section) || !pSettings->line_exist(section, "hud_hand_pose"))
+        return false;
+
+    if (!motion || !motion[0])
+        motion = GetCurrentHudMotion();
+    if (!motion || !motion[0])
+        return false;
+
+    state = {};
+    state.section = section;
+    state.motion = motion;
+    state.blend_in = READ_IF_EXISTS(pSettings, r_float, section, "hud_hand_pose_blend_in", 0.18f);
+    state.blend_out = READ_IF_EXISTS(pSettings, r_float, section, "hud_hand_pose_blend_out", 0.1f);
+    state.hold_between = READ_IF_EXISTS(pSettings, r_bool, section, "hud_hand_pose_hold_between_animations", true);
+    state.ik_time = READ_IF_EXISTS(pSettings, r_float, section, "hud_hand_pose_ik_time", 0.8f);
+    LPCSTR timeline = READ_IF_EXISTS(pSettings, r_string, section, "hud_hand_pose_ik_timeline", nullptr);
+
+    string256 key{};
+    xr_sprintf(key, "hand_pose_ik_time_%s", motion);
+    if (pSettings->line_exist(section, key))
+        state.ik_time = pSettings->r_float(section, key);
+    if (pSettings->line_exist(hud_sect, key))
+        state.ik_time = pSettings->r_float(hud_sect, key);
+
+    xr_sprintf(key, "hand_pose_ik_timeline_%s", motion);
+    if (pSettings->line_exist(section, key))
+        timeline = pSettings->r_string(section, key);
+    if (pSettings->line_exist(hud_sect, key))
+        timeline = pSettings->r_string(hud_sect, key);
+    state.timeline = timeline;
+    state.override_weapon = config_list_contains_motion(section.c_str(), "hud_hand_pose_override_animations", motion) ||
+        config_list_contains_motion(hud_sect.c_str(), "hand_pose_override_animations", motion);
+
+    for (const SHandPoseIKEditorOverride& entry : m_hand_pose_ik_editor_overrides)
+    {
+        if (entry.visual_index != visual_index || _stricmp(entry.motion.c_str(), motion))
+            continue;
+        state.timeline = entry.timeline;
+        state.blend_in = entry.blend_in;
+        state.blend_out = entry.blend_out;
+        state.ik_time = entry.ik_time;
+        state.hold_between = entry.hold_between;
+        state.override_weapon = entry.override_weapon;
+        state.runtime_override = true;
+        break;
+    }
+    return true;
+}
+
+bool CWeapon::SetHandPoseIKEditorState(u8 visual_index, const SHandPoseIKEditorState& state)
+{
+    SHandPoseIKEditorState current;
+    if (!GetHandPoseIKEditorState(visual_index, state.motion.c_str(), current))
+        return false;
+
+    auto found = std::find_if(m_hand_pose_ik_editor_overrides.begin(), m_hand_pose_ik_editor_overrides.end(),
+        [visual_index, &state](const SHandPoseIKEditorOverride& entry) {
+            return entry.visual_index == visual_index && !_stricmp(entry.motion.c_str(), state.motion.c_str());
+        });
+    if (found == m_hand_pose_ik_editor_overrides.end())
+    {
+        m_hand_pose_ik_editor_overrides.emplace_back();
+        found = m_hand_pose_ik_editor_overrides.end() - 1;
+    }
+    found->visual_index = visual_index;
+    found->motion = state.motion;
+    found->timeline = state.timeline;
+    found->blend_in = _max(state.blend_in, 0.f);
+    found->blend_out = _max(state.blend_out, 0.f);
+    found->ik_time = clampr(state.ik_time, -1.f, 1.f);
+    found->hold_between = state.hold_between;
+    found->override_weapon = state.override_weapon;
+    return true;
+}
+
+void CWeapon::ResetHandPoseIKEditorState(u8 visual_index, LPCSTR motion)
+{
+    const auto found = std::find_if(m_hand_pose_ik_editor_overrides.begin(), m_hand_pose_ik_editor_overrides.end(),
+        [visual_index, motion](const SHandPoseIKEditorOverride& entry) {
+            return entry.visual_index == visual_index && motion && !_stricmp(entry.motion.c_str(), motion);
+        });
+    if (found != m_hand_pose_ik_editor_overrides.end())
+        m_hand_pose_ik_editor_overrides.erase(found);
+}
+
 const shared_str& CWeapon::GetCustomAddonSection(ECustomAddonSlot slot) const
 {
     static const shared_str empty;
@@ -470,6 +649,14 @@ const shared_str& CWeapon::GetCustomAddonSection(ECustomAddonSlot slot) const
     if (!data.installed_index || data.installed_index > data.allowed.size())
         return empty;
     return data.allowed[data.installed_index - 1];
+}
+
+LPCSTR CWeapon::GetCustomAddonSlotName(ECustomAddonSlot slot) const
+{
+    if (slot >= eCustomAddonCount)
+        return "";
+    LPCSTR name = m_custom_addon_slots[slot].name.c_str();
+    return name ? name : "";
 }
 
 const xr_vector<shared_str>& CWeapon::GetCustomAddonAllowed(ECustomAddonSlot slot) const
@@ -496,10 +683,10 @@ bool CWeapon::CanAttachCustomAddon(const CInventoryItem* item) const
     for (u8 slot = 0; slot < eCustomAddonCount; ++slot)
     {
         const SCustomAddonSlot& data = m_custom_addon_slots[slot];
-        if (_stricmp(slot_name, addon_slot_names[legacy_addon_visual_count + slot]) || data.installed_index)
+        if (_stricmp(slot_name, GetCustomAddonSlotName(static_cast<ECustomAddonSlot>(slot))) || data.installed_index)
             continue;
         if (std::find(data.allowed.begin(), data.allowed.end(), section) == data.allowed.end())
-            return false;
+            continue;
 
         LPCSTR configured_parent = READ_IF_EXISTS(pSettings, r_string, section, "attach_parent", nullptr);
         const bool wants_weapon = !configured_parent || !configured_parent[0] || !_stricmp(configured_parent, "weapon") || !_stricmp(configured_parent, "root");
@@ -511,8 +698,10 @@ bool CWeapon::CanAttachCustomAddon(const CInventoryItem* item) const
             const shared_str provider = GetAddonVisualSection(provider_index);
             if (!provider.c_str() || !AddonSectionOffers(provider.c_str(), section.c_str()))
                 continue;
+            if (data.provider.c_str() && _stricmp(data.provider.c_str(), provider.c_str()))
+                continue;
             if (!configured_parent || !configured_parent[0] || !_stricmp(configured_parent, provider.c_str()) ||
-                !_stricmp(configured_parent, addon_slot_names[provider_index]))
+                !_stricmp(configured_parent, GetAddonVisualSlotName(provider_index)))
                 return true;
         }
         return false;
@@ -557,11 +746,34 @@ bool CWeapon::AttachCustomAddon(const CInventoryItem* item)
     for (u8 slot = 0; slot < eCustomAddonCount; ++slot)
     {
         SCustomAddonSlot& data = m_custom_addon_slots[slot];
-        if (_stricmp(slot_name, addon_slot_names[legacy_addon_visual_count + slot]))
+        if (_stricmp(slot_name, GetCustomAddonSlotName(static_cast<ECustomAddonSlot>(slot))) || data.installed_index)
             continue;
         const auto it = std::find(data.allowed.begin(), data.allowed.end(), section);
         if (it == data.allowed.end())
-            return false;
+            continue;
+
+        LPCSTR configured_parent = READ_IF_EXISTS(pSettings, r_string, section, "attach_parent", nullptr);
+        const bool wants_weapon = !configured_parent || !configured_parent[0] || !_stricmp(configured_parent, "weapon") || !_stricmp(configured_parent, "root");
+        bool valid_target = wants_weapon && std::find(data.root_allowed.begin(), data.root_allowed.end(), section) != data.root_allowed.end();
+        if (!valid_target)
+        {
+            for (u8 provider_index = 0; provider_index < addon_visual_count; ++provider_index)
+            {
+                const shared_str provider = GetAddonVisualSection(provider_index);
+                if (!provider.c_str() || !AddonSectionOffers(provider.c_str(), section.c_str()))
+                    continue;
+                if (data.provider.c_str() && _stricmp(data.provider.c_str(), provider.c_str()))
+                    continue;
+                if (!configured_parent || !configured_parent[0] || !_stricmp(configured_parent, provider.c_str()) ||
+                    !_stricmp(configured_parent, GetAddonVisualSlotName(provider_index)))
+                {
+                    valid_target = true;
+                    break;
+                }
+            }
+        }
+        if (!valid_target)
+            continue;
         data.installed_index = static_cast<u8>(std::distance(data.allowed.begin(), it) + 1);
         return true;
     }
@@ -587,15 +799,15 @@ bool CWeapon::DetachCustomAddon(LPCSTR item_section)
 
 void CWeapon::UpdateAddonReplacementVisibility(bool hud_mode)
 {
+    const bool config_hud_mode = hud_mode || (!hud_mode && UsesHudModelAsWorld());
     IKinematics* model = nullptr;
-    LPCSTR owner_section = cNameSect().c_str();
+    LPCSTR owner_section = config_hud_mode ? hud_sect.c_str() : cNameSect().c_str();
     if (hud_mode)
     {
         attachable_hud_item* hud_item = GetHUDmode() ? HudItemData() : nullptr;
         if (!hud_item)
             return;
         model = hud_item->m_model;
-        owner_section = hud_sect.c_str();
     }
     else
         model = smart_cast<IKinematics*>(Visual());
@@ -616,14 +828,14 @@ void CWeapon::UpdateAddonReplacementVisibility(bool hud_mode)
     {
         xr_vector<shared_str> bones;
         string128 key{};
-        xr_sprintf(key, "%s_replaced_bones", addon_slot_names[i]);
+        xr_sprintf(key, "%s_replaced_bones", GetAddonVisualSlotName(i));
         append_addon_bones(owner_section, key, bones);
 
-        const bool nested_addon = sections[i].c_str() && FindAddonParentSection(sections[i].c_str(), hud_mode).c_str();
+        const bool nested_addon = sections[i].c_str() && FindAddonParentSection(sections[i].c_str(), config_hud_mode).c_str();
         if (sections[i].c_str() && pSettings->section_exist(sections[i]) && !nested_addon)
         {
             append_addon_bones(sections[i].c_str(), "replaced_bones", bones);
-            append_addon_bones(sections[i].c_str(), hud_mode ? "replaced_hud_bones" : "replaced_world_bones", bones);
+            append_addon_bones(sections[i].c_str(), config_hud_mode ? "replaced_hud_bones" : "replaced_world_bones", bones);
         }
 
         for (const shared_str& bone : bones)
@@ -644,13 +856,13 @@ void CWeapon::UpdateAddonReplacementVisibility(bool hud_mode)
         {
             xr_vector<shared_str> bones;
             append_addon_bones(compatible_section.c_str(), "replaced_bones", bones);
-            append_addon_bones(compatible_section.c_str(), hud_mode ? "replaced_hud_bones" : "replaced_world_bones", bones);
+            append_addon_bones(compatible_section.c_str(), config_hud_mode ? "replaced_hud_bones" : "replaced_world_bones", bones);
             for (const shared_str& bone : bones)
                 replacement_bones.emplace(normalize_addon_bone(bone.c_str()), false);
         }
     }
 
-    const xr_vector<shared_str>& permanently_hidden = hud_mode ? hud_hidden_bones : hidden_bones;
+    const xr_vector<shared_str>& permanently_hidden = config_hud_mode ? hud_hidden_bones : hidden_bones;
     for (const auto& [bone_name, should_hide] : replacement_bones)
     {
         const u16 bone_id = find_addon_bone(model, bone_name.c_str());
@@ -663,15 +875,15 @@ void CWeapon::UpdateAddonReplacementVisibility(bool hud_mode)
         // If a replacement list contains one of the legacy embedded addon
         // bones, preserve its normal visibility policy after the external
         // model is detached instead of incorrectly revealing it.
-        const auto& scope_bones = hud_mode ? m_sHud_wpn_scope_bones : m_sWpn_scope_bones;
+        const auto& scope_bones = config_hud_mode ? m_sHud_wpn_scope_bones : m_sWpn_scope_bones;
         if (contains_addon_bone(scope_bones, bone_name.c_str()))
             visible = visible && IsScopeAttached() && m_eScopeStatus != ALife::eAddonDisabled;
 
-        const shared_str& silencer_bone = hud_mode ? m_sHud_wpn_silencer_bone : m_sWpn_silencer_bone;
+        const shared_str& silencer_bone = config_hud_mode ? m_sHud_wpn_silencer_bone : m_sWpn_silencer_bone;
         if (silencer_bone.c_str() && !_stricmp(silencer_bone.c_str(), bone_name.c_str()))
             visible = visible && IsSilencerAttached() && m_eSilencerStatus != ALife::eAddonDisabled;
 
-        const shared_str& launcher_bone = hud_mode ? m_sHud_wpn_launcher_bone : m_sWpn_launcher_bone;
+        const shared_str& launcher_bone = config_hud_mode ? m_sHud_wpn_launcher_bone : m_sWpn_launcher_bone;
         if (launcher_bone.c_str() && !_stricmp(launcher_bone.c_str(), bone_name.c_str()))
             visible = visible && IsGrenadeLauncherAttached() && m_eGrenadeLauncherStatus != ALife::eAddonDisabled;
 
@@ -683,6 +895,7 @@ void CWeapon::UpdateAddonReplacementVisibility(bool hud_mode)
 
 void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mode)
 {
+    const bool config_hud_mode = hud_mode || (!hud_mode && UsesHudModelAsWorld());
     bool active[addon_visual_count] = {IsScopeAttached(), IsSilencerAttached(), IsGrenadeLauncherAttached()};
     shared_str sections[addon_visual_count] = {m_sScopeName, m_sSilencerName, m_sGrenadeLauncherName};
     for (u8 slot = 0; slot < eCustomAddonCount; ++slot)
@@ -693,7 +906,7 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
 
     IKinematics* weapon_model = nullptr;
     Fmatrix weapon_transform;
-    LPCSTR owner_section = cNameSect().c_str();
+    LPCSTR owner_section = config_hud_mode ? hud_sect.c_str() : cNameSect().c_str();
     if (hud_mode)
     {
         attachable_hud_item* hud_item = GetHUDmode() ? HudItemData() : nullptr;
@@ -701,15 +914,11 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             return;
         weapon_model = hud_item->m_model;
         weapon_transform = hud_item->m_item_transform;
-        owner_section = hud_sect.c_str();
     }
     else
     {
         weapon_model = smart_cast<IKinematics*>(Visual());
-        weapon_transform = XFORM();
-        weapon_transform.i.mul(m_world_scaling);
-        weapon_transform.j.mul(m_world_scaling);
-        weapon_transform.k.mul(m_world_scaling);
+        weapon_transform = renderable_WorldTransform();
     }
 
     if (!weapon_model)
@@ -726,8 +935,11 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             if (processed[i] || !active[i] || !sections[i].c_str() || !pSettings->section_exist(sections[i]))
                 continue;
 
-            const shared_str parent_section = FindAddonParentSection(sections[i].c_str(), hud_mode);
-            LPCSTR requested_parent = read_addon_parent(sections[i].c_str(), hud_mode);
+            const bool addon_hud_as_world = !hud_mode && READ_IF_EXISTS(
+                pSettings, r_bool, sections[i], "use_hud_model_as_world", UsesHudModelAsWorld());
+            const bool visual_config_hud = hud_mode || addon_hud_as_world;
+            const shared_str parent_section = FindAddonParentSection(sections[i].c_str(), visual_config_hud);
+            LPCSTR requested_parent = read_addon_parent(sections[i].c_str(), visual_config_hud);
             const bool requires_parent = requested_parent && requested_parent[0] && _stricmp(requested_parent, "weapon") && _stricmp(requested_parent, "root");
             if (requires_parent && !parent_section.c_str())
                 continue;
@@ -764,10 +976,25 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
         }
 
         string128 visual_key{};
-        xr_sprintf(visual_key, "%s_attach_visual", hud_mode ? "hud" : "world");
+        xr_sprintf(visual_key, "%s_attach_visual", visual_config_hud ? "hud" : "world");
         LPCSTR visual_name = pSettings->line_exist(sections[i], visual_key) ? pSettings->r_string(sections[i], visual_key) : nullptr;
         if ((!visual_name || !visual_name[0]) && pSettings->line_exist(sections[i], "attach_visual"))
             visual_name = pSettings->r_string(sections[i], "attach_visual");
+        if ((!visual_name || !visual_name[0]) && addon_hud_as_world && pSettings->line_exist(sections[i], "item_visual"))
+            visual_name = pSettings->r_string(sections[i], "item_visual");
+        if ((!visual_name || !visual_name[0]) && addon_hud_as_world && pSettings->line_exist(sections[i], "hud"))
+        {
+            LPCSTR addon_hud_section = pSettings->r_string(sections[i], "hud");
+            if (pSettings->section_exist(addon_hud_section))
+            {
+                if (pSettings->line_exist(addon_hud_section, "item_visual"))
+                    visual_name = pSettings->r_string(addon_hud_section, "item_visual");
+                else if (pSettings->line_exist(addon_hud_section, "visual"))
+                    visual_name = pSettings->r_string(addon_hud_section, "visual");
+            }
+        }
+        if ((!visual_name || !visual_name[0]) && addon_hud_as_world && pSettings->line_exist(sections[i], "world_attach_visual"))
+            visual_name = pSettings->r_string(sections[i], "world_attach_visual");
         if (!visual_name || !visual_name[0])
             continue;
 
@@ -785,6 +1012,8 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             visual_created = visual != nullptr;
             if (visual && hud_mode)
                 visual->MarkAsHot(false);
+            if (visual && addon_hud_as_world)
+                play_world_idle(visual, sections[i].c_str());
         }
         if (!visual)
             continue;
@@ -802,7 +1031,7 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
                         continue;
                     xr_vector<shared_str> parent_bones;
                     append_addon_bones(candidate.c_str(), "replaced_bones", parent_bones);
-                    append_addon_bones(candidate.c_str(), hud_mode ? "replaced_hud_bones" : "replaced_world_bones", parent_bones);
+                    append_addon_bones(candidate.c_str(), config_hud_mode ? "replaced_hud_bones" : "replaced_world_bones", parent_bones);
                     for (const shared_str& bone : parent_bones)
                     {
                         const u16 bone_id = find_addon_bone(own_model, bone.c_str());
@@ -829,7 +1058,7 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
 
             xr_vector<shared_str> parent_bones;
             append_addon_bones(sections[i].c_str(), "replaced_bones", parent_bones);
-            append_addon_bones(sections[i].c_str(), hud_mode ? "replaced_hud_bones" : "replaced_world_bones", parent_bones);
+            append_addon_bones(sections[i].c_str(), config_hud_mode ? "replaced_hud_bones" : "replaced_world_bones", parent_bones);
             for (const shared_str& bone : parent_bones)
             {
                 const u16 replacement_bone_id = find_addon_bone(attach_model, bone.c_str());
@@ -871,6 +1100,13 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             if (m_current_motion.c_str() && m_current_motion.size())
             {
                 string256 pose_animation_key{};
+                // Attachment sections commonly use the same anm_* aliases as
+                // weapon HUD sections (anm_reload = reload, etc.). Keep the
+                // attachment skeleton on the weapon motion instead of leaving
+                // additional handguard/foregrip bones in idle.
+                if (pSettings->line_exist(sections[i], m_current_motion.c_str()))
+                    pose_animation = pSettings->r_string(sections[i], m_current_motion.c_str());
+
                 xr_sprintf(pose_animation_key, "hud_hand_pose_animation_%s", m_current_motion.c_str());
                 if (pSettings->line_exist(sections[i], pose_animation_key))
                     pose_animation = pSettings->r_string(sections[i], pose_animation_key);
@@ -893,20 +1129,20 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             }
         }
 
-        const EAddonAttachSpace attach_space = read_addon_attach_space(sections[i].c_str(), hud_mode);
+        const EAddonAttachSpace attach_space = read_addon_attach_space(sections[i].c_str(), visual_config_hud);
         const bool needs_target_bone = attach_space != EAddonAttachSpace::Weapon;
-        LPCSTR bone_name = read_addon_bone(sections[i].c_str(), attach_owner_section, addon_slot_names[i], hud_mode);
+        LPCSTR bone_name = read_addon_bone(sections[i].c_str(), attach_owner_section, GetAddonVisualSlotName(i), visual_config_hud);
         if (needs_target_bone && (!bone_name || !bone_name[0]))
         {
             if (i == 0)
             {
-                const auto& scope_bones = hud_mode ? m_sHud_wpn_scope_bones : m_sWpn_scope_bones;
+                const auto& scope_bones = config_hud_mode ? m_sHud_wpn_scope_bones : m_sWpn_scope_bones;
                 bone_name = scope_bones.empty() ? nullptr : scope_bones.front().c_str();
             }
             else if (i == 1)
-                bone_name = (hud_mode ? m_sHud_wpn_silencer_bone : m_sWpn_silencer_bone).c_str();
+                bone_name = (config_hud_mode ? m_sHud_wpn_silencer_bone : m_sWpn_silencer_bone).c_str();
             else if (i == 2)
-                bone_name = (hud_mode ? m_sHud_wpn_launcher_bone : m_sWpn_launcher_bone).c_str();
+                bone_name = (config_hud_mode ? m_sHud_wpn_launcher_bone : m_sWpn_launcher_bone).c_str();
         }
 
         const u16 bone_id = needs_target_bone ? find_addon_bone(attach_model, bone_name) : BI_NONE;
@@ -922,9 +1158,11 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             continue;
         }
 
-        Fvector position = read_addon_vector(sections[i].c_str(), attach_owner_section, addon_slot_names[i], "attach_position", "position", hud_mode);
-        Fvector rotation = read_addon_vector(sections[i].c_str(), attach_owner_section, addon_slot_names[i], "attach_rotation", "rotation", hud_mode);
-        float addon_scale = read_addon_scale(sections[i].c_str(), attach_owner_section, addon_slot_names[i], hud_mode);
+        Fvector position = read_addon_vector(
+            sections[i].c_str(), attach_owner_section, GetAddonVisualSlotName(i), "attach_position", "position", visual_config_hud);
+        Fvector rotation = read_addon_vector(
+            sections[i].c_str(), attach_owner_section, GetAddonVisualSlotName(i), "attach_rotation", "rotation", visual_config_hud);
+        float addon_scale = read_addon_scale(sections[i].c_str(), attach_owner_section, GetAddonVisualSlotName(i), visual_config_hud);
         const u8 editor_mode = hud_mode ? 1 : 0;
         if (instance.editor_override[editor_mode])
         {
@@ -941,7 +1179,21 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
         offset.k.mul(addon_scale);
         offset.translate_over(position);
 
-        LPCSTR visual_bone_name = read_addon_visual_bone(sections[i].c_str(), hud_mode);
+        LPCSTR visual_bone_name = read_addon_visual_bone(sections[i].c_str(), visual_config_hud);
+        IKinematics* visual_model = visual->dcast_PKinematics();
+
+        // Source/ValveBiped attachment exports can contain an arm hierarchy
+        // plus a separate `root` which actually owns the visible addon mesh.
+        // Their model origin belongs to the animation rig, so attaching that
+        // origin to the weapon bone applies the rig offset a second time.
+        // Automatically use the additional root as the visual anchor while
+        // preserving explicit visual_attach_bone settings.
+        if ((!visual_bone_name || !visual_bone_name[0]) && visual_model && attach_space == EAddonAttachSpace::WeaponBone)
+        {
+            const u16 root_bone = find_addon_bone(visual_model, "root");
+            if (root_bone != BI_NONE && root_bone != visual_model->LL_GetBoneRoot())
+                visual_bone_name = "root";
+        }
         bool visual_bone_found = !visual_bone_name || !visual_bone_name[0];
         Fmatrix result;
         if (attach_space == EAddonAttachSpace::Weapon)
@@ -954,6 +1206,20 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             Fmatrix bone_transform;
             bone_transform.mul_43(attach_transform, attach_model->LL_GetTransform(bone_id));
             result.mul_43(bone_transform, offset);
+
+            if (visual_bone_name && visual_bone_name[0])
+            {
+                const u16 visual_bone_id = find_addon_bone(visual_model, visual_bone_name);
+                if (visual_bone_id != BI_NONE)
+                {
+                    visual_bone_found = true;
+                    visual_model->CalculateBones();
+                    Fmatrix inverse_visual_bone, aligned_result;
+                    inverse_visual_bone.invert(visual_model->LL_GetTransform(visual_bone_id));
+                    aligned_result.mul_43(result, inverse_visual_bone);
+                    result = aligned_result;
+                }
+            }
         }
         else
         {
@@ -965,7 +1231,6 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             // animated weapon bone while compensating for a non-zero anchor in
             // the separately exported addon model:
             // visual_world * visual_anchor = weapon_bone_world * offset.
-            IKinematics* visual_model = visual->dcast_PKinematics();
             const u16 visual_bone_id = find_addon_bone(visual_model, visual_bone_name);
             if (visual_bone_id != BI_NONE)
             {
@@ -1005,9 +1270,9 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
                 weapon_inverse.invert(weapon_transform);
                 source_to_weapon.mul_43(weapon_inverse, result);
 
-                const float blend_in = READ_IF_EXISTS(pSettings, r_float, sections[i], "hud_hand_pose_blend_in", 0.18f);
-                const float blend_out = READ_IF_EXISTS(pSettings, r_float, sections[i], "hud_hand_pose_blend_out", 0.1f);
-                const bool hold_between = READ_IF_EXISTS(pSettings, r_bool, sections[i], "hud_hand_pose_hold_between_animations", true);
+                float blend_in = READ_IF_EXISTS(pSettings, r_float, sections[i], "hud_hand_pose_blend_in", 0.18f);
+                float blend_out = READ_IF_EXISTS(pSettings, r_float, sections[i], "hud_hand_pose_blend_out", 0.1f);
+                bool hold_between = READ_IF_EXISTS(pSettings, r_bool, sections[i], "hud_hand_pose_hold_between_animations", true);
                 float ik_time = READ_IF_EXISTS(pSettings, r_float, sections[i], "hud_hand_pose_ik_time", 0.8f);
                 LPCSTR ik_timeline = READ_IF_EXISTS(pSettings, r_string, sections[i], "hud_hand_pose_ik_timeline", nullptr);
                 string256 motion_ik_key{};
@@ -1027,13 +1292,31 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
                         ik_timeline = pSettings->r_string(hud_sect, motion_timeline_key);
                 }
 
-                const bool motion_overrides_weapon = m_current_motion.c_str() && m_current_motion.size() &&
+                bool motion_overrides_weapon = m_current_motion.c_str() && m_current_motion.size() &&
                     (config_list_contains_motion(sections[i].c_str(), "hud_hand_pose_override_animations", m_current_motion.c_str()) ||
                         config_list_contains_motion(hud_sect.c_str(), "hand_pose_override_animations", m_current_motion.c_str()));
+                if (m_current_motion.c_str() && m_current_motion.size())
+                {
+                    const auto editor_override = std::find_if(m_hand_pose_ik_editor_overrides.begin(), m_hand_pose_ik_editor_overrides.end(),
+                        [i, this](const SHandPoseIKEditorOverride& entry) {
+                            return entry.visual_index == i && !_stricmp(entry.motion.c_str(), m_current_motion.c_str());
+                        });
+                    if (editor_override != m_hand_pose_ik_editor_overrides.end())
+                    {
+                        blend_in = editor_override->blend_in;
+                        blend_out = editor_override->blend_out;
+                        hold_between = editor_override->hold_between;
+                        ik_time = editor_override->ik_time;
+                        ik_timeline = editor_override->timeline.c_str();
+                        motion_overrides_weapon = editor_override->override_weapon;
+                    }
+                }
+                const bool editor_preview = m_hand_pose_ik_editor_preview_motion.c_str() && m_current_motion.c_str() &&
+                    !_stricmp(m_hand_pose_ik_editor_preview_motion.c_str(), m_current_motion.c_str()) && m_dwMotionEndTm > m_dwMotionStartTm;
                 float target_weight = GetState() == eIdle || motion_overrides_weapon ||
                     (hold_between && m_dwMotionEndTm <= m_dwMotionStartTm) ? 1.f : 0.f;
                 bool timeline_driven = false;
-                if (!motion_overrides_weapon && GetState() != eIdle && m_dwMotionEndTm > m_dwMotionStartTm)
+                if (!motion_overrides_weapon && (editor_preview || GetState() != eIdle) && m_dwMotionEndTm > m_dwMotionStartTm)
                 {
                     const float motion_progress = clampr(float(Device.dwTimeGlobal - m_dwMotionStartTm) /
                         float(m_dwMotionEndTm - m_dwMotionStartTm), 0.f, 1.f);
@@ -1223,18 +1506,20 @@ void CWeapon::Load(LPCSTR section)
     inherited::Load(section);
     CShootingObject::Load(section);
 
-    m_world_scaling = READ_IF_EXISTS(pSettings, r_float, section, "world_scaling", 1.f);
-    clamp(m_world_scaling, 0.001f, 100.f);
-
     for (u8 slot = 0; slot < eCustomAddonCount; ++slot)
     {
         SCustomAddonSlot& data = m_custom_addon_slots[slot];
+        data.name = slot < eCustomAddonDynamicBegin ? fixed_custom_slot_names[slot] : nullptr;
+        data.provider = nullptr;
         data.root_allowed.clear();
         data.allowed.clear();
         data.installed_index = 0;
 
+        if (slot >= eCustomAddonDynamicBegin)
+            continue;
+
         string128 key{};
-        xr_sprintf(key, "%s_addons", addon_slot_names[legacy_addon_visual_count + slot]);
+        xr_sprintf(key, "%s_addons", GetCustomAddonSlotName(static_cast<ECustomAddonSlot>(slot)));
         if (!pSettings->line_exist(section, key))
             continue;
 
@@ -1262,23 +1547,58 @@ void CWeapon::Load(LPCSTR section)
         const shared_str provider = providers[provider_index];
         if (!provider.c_str() || !pSettings->section_exist(provider))
             continue;
-        for (u8 slot = 0; slot < eCustomAddonCount; ++slot)
+        const auto& provider_data = pSettings->r_section(provider).Ordered_Data;
+        for (const auto& line : provider_data)
         {
-            string64 key{};
-            xr_sprintf(key, "%s_addons", addon_slot_names[legacy_addon_visual_count + slot]);
-            if (!pSettings->line_exist(provider, key))
+            const xr_string key = line.first.c_str();
+            constexpr LPCSTR suffix = "_addons";
+            constexpr size_t suffix_length = 7;
+            if (key.size() <= suffix_length || key.compare(key.size() - suffix_length, suffix_length, suffix))
                 continue;
 
-            LPCSTR value = pSettings->r_string(provider, key);
+            const xr_string slot_name = key.substr(0, key.size() - suffix_length);
+            u8 target_index = u8(-1);
+            for (u8 slot = 0; slot < eCustomAddonDynamicBegin; ++slot)
+            {
+                if (!_stricmp(slot_name.c_str(), GetCustomAddonSlotName(static_cast<ECustomAddonSlot>(slot))))
+                {
+                    target_index = slot;
+                    break;
+                }
+            }
+            if (target_index == u8(-1))
+            {
+                for (u8 slot = eCustomAddonDynamicBegin; slot < eCustomAddonCount; ++slot)
+                {
+                    SCustomAddonSlot& candidate = m_custom_addon_slots[slot];
+                    if (candidate.name.c_str() && !_stricmp(candidate.name.c_str(), slot_name.c_str()) &&
+                        candidate.provider.c_str() && !_stricmp(candidate.provider.c_str(), provider.c_str()))
+                    {
+                        target_index = slot;
+                        break;
+                    }
+                    if (target_index == u8(-1) && !candidate.name.c_str())
+                        target_index = slot;
+                }
+                R_ASSERT3(target_index != u8(-1), "Too many named addon slots; increase CWeapon::eCustomAddonCount", provider.c_str());
+                SCustomAddonSlot& dynamic_slot = m_custom_addon_slots[target_index];
+                if (!dynamic_slot.name.c_str())
+                {
+                    dynamic_slot.name = slot_name.c_str();
+                    dynamic_slot.provider = provider;
+                }
+            }
+
+            LPCSTR value = line.second.c_str();
             string128 child{};
             for (int i = 0, count = _GetItemCount(value); i < count; ++i)
             {
                 _GetItem(value, i, child);
-                ASSERT_FMT(pSettings->section_exist(child), "Child addon section [%s] from [%s]:%s does not exist", child, provider.c_str(), key);
-                SCustomAddonSlot& target_slot = m_custom_addon_slots[slot];
+                ASSERT_FMT(pSettings->section_exist(child), "Child addon section [%s] from [%s]:%s does not exist", child, provider.c_str(), key.c_str());
+                SCustomAddonSlot& target_slot = m_custom_addon_slots[target_index];
                 if (std::find(target_slot.allowed.begin(), target_slot.allowed.end(), child) != target_slot.allowed.end())
                     continue;
-                ASSERT_FMT(target_slot.allowed.size() < u8(-1), "Too many recursively reachable addons in [%s]", key);
+                ASSERT_FMT(target_slot.allowed.size() < u8(-1), "Too many recursively reachable addons in [%s]", key.c_str());
                 target_slot.allowed.emplace_back(child);
                 providers.emplace_back(child);
             }
@@ -1901,7 +2221,9 @@ void CWeapon::save(NET_Packet& output_packet)
     const u8 saved_addon_state = m_flagsAddOnState | custom_addon_save_marker | extended_custom_addon_save_marker;
     save_data(saved_addon_state, output_packet);
     save_data(m_ammoType, output_packet);
-    save_data(m_bZoomMode, output_packet);
+    constexpr u8 named_custom_addon_save_marker = 1 << 7;
+    const u8 saved_zoom_state = (m_bZoomMode ? 1 : 0) | named_custom_addon_save_marker;
+    save_data(saved_zoom_state, output_packet);
     for (const SCustomAddonSlot& slot : m_custom_addon_slots)
         save_data(slot.installed_index, output_packet);
 }
@@ -1918,11 +2240,15 @@ void CWeapon::load(IReader& input_packet)
     const bool has_extended_custom_addon_data = !!(saved_addon_state & extended_custom_addon_save_marker);
     m_flagsAddOnState = saved_addon_state & ~(custom_addon_save_marker | extended_custom_addon_save_marker);
     load_data(m_ammoType, input_packet);
-    load_data(m_bZoomMode, input_packet);
+    constexpr u8 named_custom_addon_save_marker = 1 << 7;
+    u8 saved_zoom_state{};
+    load_data(saved_zoom_state, input_packet);
+    const bool has_named_custom_addon_data = !!(saved_zoom_state & named_custom_addon_save_marker);
+    m_bZoomMode = !!(saved_zoom_state & 1);
     for (u8 slot_index = 0; slot_index < eCustomAddonCount; ++slot_index)
     {
         u8 index{};
-        if (has_custom_addon_data && (slot_index < 3 || has_extended_custom_addon_data))
+        if (has_custom_addon_data && (has_named_custom_addon_data || slot_index < 3 || (has_extended_custom_addon_data && slot_index < 4)))
             load_data(index, input_packet);
         SCustomAddonSlot& slot = m_custom_addon_slots[slot_index];
         slot.installed_index = index <= slot.allowed.size() ? index : 0;
@@ -2287,14 +2613,21 @@ void CWeapon::renderable_Render(u32 context_id, IRenderable* root)
 
     if (render_world_weapon)
     {
-        Fmatrix world_transform = XFORM();
-        world_transform.i.mul(m_world_scaling);
-        world_transform.j.mul(m_world_scaling);
-        world_transform.k.mul(m_world_scaling);
+        Fmatrix world_transform = renderable_WorldTransform();
         ::Render->add_Visual(context_id, root, Visual(), world_transform);
         Visual()->getVisData().hom_frame = Device.dwFrame;
         RenderAddonVisuals(context_id, root, false);
     }
+}
+
+void CWeapon::renderable_RenderUI(u32 context_id, IRenderable* root)
+{
+    if (!Visual())
+        return;
+
+    Fmatrix world_transform = renderable_WorldTransform();
+    ::Render->add_Visual(context_id, root, Visual(), world_transform);
+    RenderAddonVisuals(context_id, root, false);
 }
 
 void CWeapon::render_hud_mode(u32 context_id, IRenderable* root)
@@ -3007,6 +3340,12 @@ void CWeapon::reload(LPCSTR section)
 
 void CWeapon::create_physic_shell()
 {
+    if (PHForceAutoGeneratedCollision())
+    {
+        CPHShellSimpleCreator::CreatePhysicsShell();
+        return;
+    }
+
     // xrKrodin: Временный? "фикс" для оружия из ганслингера, валяющегося на земле. По непонятным причинам (много костей или хз от чего ещё) в некоторых случаях при рассчетах
     // физики происходят краши в ode которые исправить невозможно.
     if (is_gunslinger_weapon || IS_OGSR_GA)

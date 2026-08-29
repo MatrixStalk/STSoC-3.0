@@ -3,6 +3,7 @@
 // Base targets
 #define r2_RT_base "$user$base_"
 #define r2_RT_base_depth "$user$base_depth"
+#define r2_RT_ui_model_depth "$user$ui_model_depth"
 
 #define r2_RT_velocity "$user$velocity" // Motion Vectors
 #define r2_RT_zbuffer "$user$zbuffer"

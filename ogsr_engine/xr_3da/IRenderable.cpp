@@ -27,3 +27,9 @@ IRender_ObjectSpecific* IRenderable::renderable_ROS()
         renderable.pROS = Render->ros_create(this);
     return renderable.pROS;
 }
+
+void IRenderable::renderable_RenderUI(u32 context_id, IRenderable* root)
+{
+    if (renderable.visual)
+        Render->add_Visual(context_id, root, renderable.visual, renderable.xform);
+}

@@ -209,6 +209,7 @@ CRenderTarget::CRenderTarget()
             rt_base[i].create(temp, w, h, DXGI_FORMAT_R8G8B8A8_UNORM, 1, {CRT::CreateBase});
         }
         rt_Base_Depth.create(r2_RT_base_depth, w, h, DXGI_FORMAT_R24G8_TYPELESS);
+        rt_UIModelDepth.create(r2_RT_ui_model_depth, w, h, DXGI_FORMAT_R24G8_TYPELESS);
 
         rt_Position.create(r2_RT_P, w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
 

@@ -5,6 +5,7 @@
 #include "../../xr_3da/igame_persistent.h"
 #include "../../xr_3da/environment.h"
 #include "../xrRender/SkeletonCustom.h"
+#include "../xrRender/FHierrarhyVisual.h"
 #include "../xrRender/LightTrack.h"
 #include "../xrRender/dxRenderDeviceRender.h"
 #include "../xrRender/dxWallMarkArray.h"
@@ -17,6 +18,84 @@
 #include "../../xr_3da/x_ray.h"
 
 CRender RImplementation;
+
+namespace
+{
+void merge_ui_model_visual_bounds(dxRender_Visual* visual, const Fmatrix& transform, Fbox& bounds)
+{
+    if (!visual || !visual->getRZFlag())
+        return;
+
+    switch (visual->Type)
+    {
+    case MT_HIERRARHY:
+        for (dxRender_Visual* child : smart_cast<FHierrarhyVisual*>(visual)->children)
+            merge_ui_model_visual_bounds(child, transform, bounds);
+        return;
+    case MT_SKELETON_ANIM:
+    case MT_SKELETON_RIGID: {
+        auto* kinematics = smart_cast<CKinematics*>(visual);
+        kinematics->CalculateBones(TRUE);
+        for (dxRender_Visual* child : kinematics->children)
+            merge_ui_model_visual_bounds(child, transform, bounds);
+        return;
+    }
+    default: break;
+    }
+
+    // A skeletal container's bounds include all animated helper bones. Source
+    // hand-pose attachments may therefore be tens of times larger than their
+    // only visible mesh. Leaf bounds describe the geometry actually submitted
+    // by render_ui_model_visual and keep icon fitting independent of rig size.
+    ShaderElement* element = visual->shader ? visual->shader->E[5]._get() : nullptr;
+    if (!element || element->passes.empty())
+        return;
+
+    Fbox part_bounds;
+    part_bounds.xform(visual->getVisData().box, transform);
+    bounds.merge(part_bounds);
+}
+
+u32 render_ui_model_visual(CBackend& cmd_list, dxRender_Visual* visual, const Fmatrix& world, const Fvector4& tint, const Irect& scissor)
+{
+    if (!visual || !visual->getRZFlag())
+        return 0;
+
+    switch (visual->Type)
+    {
+    case MT_HIERRARHY: {
+        u32 rendered = 0;
+        for (dxRender_Visual* child : smart_cast<FHierrarhyVisual*>(visual)->children)
+            rendered += render_ui_model_visual(cmd_list, child, world, tint, scissor);
+        return rendered;
+    }
+    case MT_SKELETON_ANIM:
+    case MT_SKELETON_RIGID: {
+        auto* kinematics = smart_cast<CKinematics*>(visual);
+        kinematics->CalculateBones(TRUE);
+
+        u32 rendered = 0;
+        for (dxRender_Visual* child : kinematics->children)
+            rendered += render_ui_model_visual(cmd_list, child, world, tint, scissor);
+        return rendered;
+    }
+    default: break;
+    }
+
+    ShaderElement* element = visual->shader ? visual->shader->E[5]._get() : nullptr;
+    if (!element || element->passes.empty())
+        return 0;
+
+    cmd_list.set_Element(element);
+    cmd_list.set_xform_world(world);
+    cmd_list.set_xform_world_old(world);
+    cmd_list.set_c("inventory_icon_tint", tint);
+    cmd_list.set_Scissor(const_cast<Irect*>(&scissor));
+    cmd_list.StateManager.OverrideScissoring(TRUE, TRUE);
+    visual->Render(cmd_list, 1.f, false);
+    return 1;
+}
+} // namespace
 
 float r_dtex_paralax_range = 50.f;
 //////////////////////////////////////////////////////////////////////////
@@ -328,9 +407,159 @@ IRender_Light* CRender::light_create() { return Lights.Create(); }
 
 void CRender::add_Visual(u32 context_id, IRenderable* root, IRenderVisual* V, Fmatrix& m)
 {
+    if (ui_model_collecting)
+    {
+        if (V)
+            ui_model_submissions.push_back({smart_cast<dxRender_Visual*>(V), m});
+        return;
+    }
+
     // TODO: this whole function should be replaced by a list of renderables+xforms returned from `renderable_Render` call
     auto& dsgraph = get_context(context_id);
     dsgraph.add_leafs_dynamic(root, smart_cast<dxRender_Visual*>(V), m);
+}
+
+bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& params)
+{
+    if (!object || ui_model_collecting || !Target || !Target->rt_UIModelDepth || !Target->rt_UIModelDepth->valid())
+        return false;
+
+    Frect viewport_rect = params.viewport;
+    viewport_rect.x1 = clampr(viewport_rect.x1, 0.f, float(Device.dwWidth));
+    viewport_rect.y1 = clampr(viewport_rect.y1, 0.f, float(Device.dwHeight));
+    viewport_rect.x2 = clampr(viewport_rect.x2, 0.f, float(Device.dwWidth));
+    viewport_rect.y2 = clampr(viewport_rect.y2, 0.f, float(Device.dwHeight));
+    if (viewport_rect.width() < 2.f || viewport_rect.height() < 2.f)
+        return false;
+
+    ui_model_submissions.clear();
+    ui_model_collecting = true;
+    object->renderable_RenderUI(CHW::IMM_CTX_ID, object);
+    ui_model_collecting = false;
+
+    if (ui_model_submissions.empty() || !ui_model_submissions.front().visual)
+        return false;
+
+    Fmatrix base_inverse;
+    base_inverse.invert(ui_model_submissions.front().transform);
+
+    xr_vector<Fmatrix> local_transforms;
+    local_transforms.reserve(ui_model_submissions.size());
+    Fbox bounds;
+    bounds.invalidate();
+    for (const UIModelSubmission& submission : ui_model_submissions)
+    {
+        Fmatrix local;
+        local.mul_43(base_inverse, submission.transform);
+        local_transforms.push_back(local);
+
+        merge_ui_model_visual_bounds(submission.visual, local, bounds);
+    }
+    if (!bounds.is_valid())
+        return false;
+
+    Fvector center;
+    bounds.getcenter(center);
+
+    Fmatrix center_transform;
+    center_transform.translate(Fvector().invert(center));
+    Fmatrix rotation;
+    rotation.setXYZ(params.rotation);
+    Fmatrix preview_transform;
+    preview_transform.mul_43(rotation, center_transform);
+    preview_transform.c.add(params.offset);
+
+    Fbox fitted_bounds = bounds;
+    fitted_bounds.sub(center);
+    fitted_bounds.xform(rotation);
+    Fvector fitted_size;
+    fitted_bounds.getsize(fitted_size);
+
+    const float aspect = viewport_rect.width() / viewport_rect.height();
+    const float fit_height = _max(fitted_size.y, fitted_size.x / _max(aspect, EPS_S));
+    const float ortho_height = _max(fit_height / (0.86f * _max(params.scale, 0.05f)), 0.01f);
+    const float depth = _max(fitted_size.z * 2.f + 1.f, 2.f);
+
+    Fmatrix view;
+    view.build_camera_dir(Fvector().set(0.f, 0.f, -depth), Fvector().set(0.f, 0.f, 1.f), Fvector().set(0.f, 1.f, 0.f));
+    Fmatrix projection;
+    projection.build_projection_ortho(ortho_height * aspect, ortho_height, 0.01f, depth * 2.f + fitted_size.z + 1.f);
+
+    auto& cmd_list = get_imm_context().cmd_list;
+    ID3DRenderTargetView* previous_rt[4] = {cmd_list.get_RT(0), cmd_list.get_RT(1), cmd_list.get_RT(2), cmd_list.get_RT(3)};
+    ID3DDepthStencilView* previous_zb = cmd_list.get_ZB();
+    const Fmatrix previous_world = cmd_list.xforms.m_w;
+    const Fmatrix previous_view = cmd_list.xforms.m_v;
+    const Fmatrix previous_projection = cmd_list.xforms.m_p;
+
+    UINT previous_viewport_count = 1;
+    D3D_VIEWPORT previous_viewport{};
+    HW.get_context(cmd_list.context_id)->RSGetViewports(&previous_viewport_count, &previous_viewport);
+    const bool previous_scissor_override = cmd_list.StateManager.IsScissoringOverridden();
+    const BOOL previous_scissor_override_value = cmd_list.StateManager.GetScissoringOverrideValue();
+    UINT previous_scissor_count = 1;
+    RECT previous_scissor{};
+    HW.get_context(cmd_list.context_id)->RSGetScissorRects(&previous_scissor_count, &previous_scissor);
+
+    cmd_list.set_RT(previous_rt[0], 0);
+    cmd_list.set_RT(nullptr, 1);
+    cmd_list.set_RT(nullptr, 2);
+    cmd_list.set_RT(nullptr, 3);
+    cmd_list.set_ZB(Target->rt_UIModelDepth->pZRT[cmd_list.context_id]);
+
+    // Every icon owns the whole temporary depth buffer. Reusing depth from a
+    // previously drawn cell clips a model when cells overlap or are redrawn.
+    cmd_list.ClearZB(Target->rt_UIModelDepth->pZRT[cmd_list.context_id], 1.f, 0);
+
+    D3D_VIEWPORT icon_viewport{};
+    icon_viewport.TopLeftX = viewport_rect.x1;
+    icon_viewport.TopLeftY = viewport_rect.y1;
+    icon_viewport.Width = viewport_rect.width();
+    icon_viewport.Height = viewport_rect.height();
+    icon_viewport.MinDepth = 0.f;
+    icon_viewport.MaxDepth = 1.f;
+    cmd_list.SetViewport(icon_viewport);
+    cmd_list.set_xform_view(view);
+    cmd_list.set_xform_project(projection);
+
+    Irect scissor;
+    scissor.x1 = iFloor(viewport_rect.x1);
+    scissor.y1 = iFloor(viewport_rect.y1);
+    scissor.x2 = iCeil(viewport_rect.x2);
+    scissor.y2 = iCeil(viewport_rect.y2);
+
+    u32 rendered = 0;
+    for (u32 i = 0; i < ui_model_submissions.size(); ++i)
+    {
+        Fmatrix world;
+        world.mul_43(preview_transform, local_transforms[i]);
+        rendered += render_ui_model_visual(cmd_list, ui_model_submissions[i].visual, world, params.tint, scissor);
+    }
+
+    if (previous_scissor_count)
+    {
+        Irect restored_scissor;
+        restored_scissor.set(previous_scissor.left, previous_scissor.top, previous_scissor.right, previous_scissor.bottom);
+        cmd_list.set_Scissor(&restored_scissor);
+    }
+    else
+        cmd_list.set_Scissor(nullptr);
+    cmd_list.StateManager.OverrideScissoring(previous_scissor_override, previous_scissor_override_value);
+
+    cmd_list.set_RT(previous_rt[0], 0);
+    cmd_list.set_RT(previous_rt[1], 1);
+    cmd_list.set_RT(previous_rt[2], 2);
+    cmd_list.set_RT(previous_rt[3], 3);
+    cmd_list.set_ZB(previous_zb);
+    if (previous_viewport_count)
+        HW.get_context(cmd_list.context_id)->RSSetViewports(previous_viewport_count, &previous_viewport);
+    cmd_list.set_xform_world(previous_world);
+    cmd_list.set_xform_world_old(previous_world);
+    cmd_list.set_xform_view(previous_view);
+    cmd_list.set_xform_project(previous_projection);
+
+    ui_model_submissions.clear();
+    return rendered != 0;
 }
 
 void CRender::add_StaticWallmark(ref_shader& S, const Fvector& P, float s, CDB::TRI* T, Fvector* verts)

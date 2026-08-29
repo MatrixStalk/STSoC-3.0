@@ -141,6 +141,12 @@ public:
     shared_str m_Description;
     CUIInventoryCellItem* m_cell_item;
 
+    bool m_icon_3d_enabled{true};
+    Fvector m_icon_3d_rotation{};
+    Fvector m_icon_3d_offset{};
+    float m_icon_3d_scale{1.f};
+    float m_icon_3d_rotation_speed{};
+
     shared_str m_name;
     shared_str m_nameShort;
     shared_str m_nameComplex;

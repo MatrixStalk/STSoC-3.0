@@ -193,6 +193,16 @@ dont_switch_active_task_by_prio = false
 
 
 [dragdrop]
+; Рендерить реальные 3D-модели вместо атласных иконок во всех списках
+; инвентаря, торговли и обыска. Для отдельного предмета можно переопределить:
+; inv_icon_3d, inv_icon_3d_rotation, inv_icon_3d_offset,
+; inv_icon_3d_scale и inv_icon_3d_rotation_speed.
+use_3d_icons = true
+icon_3d_rotation = 15, 110, -5
+icon_3d_offset = 0, 0, 0
+icon_3d_scale = 1.0
+icon_3d_rotation_speed = 0.0
+
 ; ЗП-стайл подсветки ячеек инвентаря зависят от текстуры ui\ui_grid.dds. В ней нарисованы 7 клеток, по порядку слева направо:
 ; 1. Обычная клетка инвентаря
 ; 2. При наведении курсора на предмет

@@ -86,6 +86,19 @@ void CBlender_deffer_model::Compile(CBlender_Compile& C)
 {
     IBlender::Compile(C);
 
+    // Element 5 is reserved for the direct, forward-rendered inventory preview.
+    // It deliberately bypasses the deferred scene buffers so models can be
+    // composited over an already drawn UI window.
+    if (C.iElement == 5)
+    {
+        C.r_Pass("inventory_icon_model", oBlend.value ? "inventory_icon_aref" : "inventory_icon", TRUE, TRUE, TRUE, TRUE, D3DBLEND_SRCALPHA,
+            D3DBLEND_INVSRCALPHA, TRUE, 8);
+        C.r_dx10Texture("s_base", C.L_textures[0]);
+        C.r_dx10Sampler("smp_base");
+        C.r_End();
+        return;
+    }
+
     BOOL bForward = FALSE;
     if (oBlend.value && oAREF.value < 16)
         bForward = TRUE;

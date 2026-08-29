@@ -1,0 +1,23 @@
+#include "common.h"
+
+float4 inventory_icon_tint;
+
+struct v2p
+{
+    float2 tc0 : TEXCOORD0;
+    float3 normal : TEXCOORD1;
+};
+
+float4 main(v2p I) : SV_Target
+{
+    const float4 base = s_base.Sample(smp_base, I.tc0);
+    const float alpha = inventory_icon_tint.a;
+
+    const float3 normal = normalize(I.normal);
+    const float3 light_direction = normalize(float3(-0.45f, 0.75f, -0.5f));
+    const float diffuse = saturate(dot(normal, light_direction));
+    const float rim = pow(1.f - saturate(abs(normal.z)), 3.f);
+    const float3 lighting = 0.38f + diffuse * 0.85f + rim * 0.18f;
+    const float3 color = saturate(base.rgb * inventory_icon_tint.rgb * lighting);
+    return float4(color, alpha);
+}

@@ -115,6 +115,7 @@ public:
     ICF const Fvector& Position() const { return renderable.xform.c; }
     virtual float Radius() const;
     virtual const Fbox& BoundingBox() const;
+    virtual Fmatrix renderable_WorldTransform() const { return renderable.xform; }
 
     IC IRender_Sector::sector_id_t Sector() { return H_Root()->spatial.sector_id; }
     IC IRender_ObjectSpecific* ROS() { return renderable_ROS(); }
