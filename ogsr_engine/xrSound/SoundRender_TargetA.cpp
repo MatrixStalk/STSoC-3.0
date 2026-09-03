@@ -112,7 +112,7 @@ void CSoundRender_TargetA::apply_equalizer(void* data, u32 bytes, const WAVEFORM
     }
 }
 
-FMOD_RESULT F_CALLBACK CSoundRender_TargetA::pcm_read(FMOD_SOUND* sound, void* data, unsigned int bytes)
+FMOD_RESULT F_CALL CSoundRender_TargetA::pcm_read(FMOD_SOUND* sound, void* data, unsigned int bytes)
 {
     void* user = nullptr;
     reinterpret_cast<FMOD::Sound*>(sound)->getUserData(&user);
@@ -127,7 +127,7 @@ FMOD_RESULT F_CALLBACK CSoundRender_TargetA::pcm_read(FMOD_SOUND* sound, void* d
     return FMOD_OK;
 }
 
-FMOD_RESULT F_CALLBACK CSoundRender_TargetA::pcm_seek(FMOD_SOUND*, int, unsigned int, FMOD_TIMEUNIT) { return FMOD_OK; }
+FMOD_RESULT F_CALL CSoundRender_TargetA::pcm_seek(FMOD_SOUND*, int, unsigned int, FMOD_TIMEUNIT) { return FMOD_OK; }
 
 bool CSoundRender_TargetA::create_stream()
 {

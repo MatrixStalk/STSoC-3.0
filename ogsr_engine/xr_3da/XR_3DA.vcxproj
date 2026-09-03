@@ -186,6 +186,7 @@
     <PostBuildEvent>
       <Command>
         copy /Y "$(SolutionDir)\3rd_party\Src\FMOD\FMOD Studio API Windows\api\core\lib\x64\fmodL.dll" "$(OutDir)fmodL.dll"
+        copy /Y "$(SolutionDir)\3rd_party\Src\FMOD\FMOD Studio API Windows\api\core\lib\x64\fmod.dll" "$(OutDir)fmod.dll"
         copy /Y "$(SolutionDir)\3rd_party\Src\SteamAudio\FMOD\steamaudio_fmod\lib\windows-x64\phonon.dll" "$(OutDir)phonon.dll"
         copy /Y "$(SolutionDir)\3rd_party\Src\SteamAudio\FMOD\steamaudio_fmod\lib\windows-x64\phonon_fmod.dll" "$(OutDir)phonon_fmod.dll"
         copy /Y "$(SolutionDir)\3rd_party\Src\NVIDIA_DLSS\DLSS\lib\Windows_x86_64\dev\nvngx_dlss.dll" "$(OutDir)nvngx_dlss.dll"

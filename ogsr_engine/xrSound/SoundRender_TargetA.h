@@ -28,8 +28,8 @@ class CSoundRender_TargetA : public CSoundRender_Target
     bool create_stream();
     void release_stream();
     void attach_steam_audio();
-    static FMOD_RESULT F_CALLBACK pcm_read(FMOD_SOUND* sound, void* data, unsigned int bytes);
-    static FMOD_RESULT F_CALLBACK pcm_seek(FMOD_SOUND* sound, int subsound, unsigned int position, FMOD_TIMEUNIT unit);
+    static FMOD_RESULT F_CALL pcm_read(FMOD_SOUND* sound, void* data, unsigned int bytes);
+    static FMOD_RESULT F_CALL pcm_seek(FMOD_SOUND* sound, int subsound, unsigned int position, FMOD_TIMEUNIT unit);
 
 public:
     CSoundRender_TargetA();
