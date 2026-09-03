@@ -216,10 +216,33 @@ void CSoundRender_TargetA::attach_steam_audio()
     auto* core = static_cast<CSoundRender_CoreA*>(SoundRender);
     if (!core->SteamAudioSpatializer())
         return;
-    if (core->FmodSystem()->createDSPByPlugin(core->SteamAudioSpatializer(), &steam_audio_dsp) != FMOD_OK)
+    FMOD_RESULT result = core->FmodSystem()->createDSPByPlugin(core->SteamAudioSpatializer(), &steam_audio_dsp);
+    if (result != FMOD_OK)
+    {
+        Msg("! Steam Audio: cannot create spatializer DSP: %s", FMOD_ErrorString(result));
         return;
-    fmod_channel->addDSP(FMOD_CHANNELCONTROL_DSP_HEAD, steam_audio_dsp);
-    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_DISTANCEATTENUATION, 1);
+    }
+
+    result = fmod_channel->addDSP(FMOD_CHANNELCONTROL_DSP_HEAD, steam_audio_dsp);
+    if (result != FMOD_OK)
+    {
+        Msg("! Steam Audio: cannot attach spatializer DSP: %s", FMOD_ErrorString(result));
+        steam_audio_dsp->release();
+        steam_audio_dsp = nullptr;
+        return;
+    }
+
+    // A low-level FMOD channel can still be mono at DSP_HEAD. Force the
+    // spatializer to render to the final output layout (normally stereo),
+    // otherwise Steam Audio cannot initialize its binaural/panning path and
+    // returns a silent buffer for every 3D source.
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_OUTPUT_FORMAT, 1);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_DIRECT_MIXLEVEL, 1.f);
+
+    // Curve-driven attenuation preserves the min/max ranges authored for
+    // X-Ray sounds. Physics-based inverse falloff made distant shots and NPCs
+    // much quieter than the engine's original attenuation model.
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_DISTANCEATTENUATION, 2);
     steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_AIRABSORPTION, core->AirAbsorptionEnabled() ? 1 : 0);
     steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_OCCLUSION, core->OcclusionEnabled() ? 2 : 0);
     steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_HRTF_INTERPOLATION, 1);
@@ -350,8 +373,8 @@ void CSoundRender_TargetA::fill_parameters(CSoundRender_Core* base_core)
 
 void CSoundRender_TargetA::source_changed()
 {
-    // Called from the mixer callback while an attached tail is being selected.
-    // Source loading normalizes tails to the active PCM format, so only the
+    // The PCM ring is produced on the engine sound-update thread. Source
+    // loading normalizes tails to the active PCM format, so only the
     // compressed stream reader must be rebound here.
     dettach();
     attach();
