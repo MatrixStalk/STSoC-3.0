@@ -4,7 +4,16 @@
 /3rd_party/_TEMP
 /ogsr_engine/_LIB
 /ogsr_engine/_TEMP
-/bin*
+/bin
+
+# Любые временные build-папки _TEMP в любом месте
+**/_TEMP/
+
+# Downloaded SDK archives
+/3rd_party/downloads/*.zip
+
+# Compiler garbage
+*.pch*
 
 # Precompiled Headers
 *.ipch
