@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "../COMMON_AI/ai_sounds.h"
 #include "..\Include/xrRender/KinematicsAnimated.h"
 #include "step_manager_defs.h"
 #include "step_manager.h"
@@ -79,7 +80,9 @@ class CEftFootstepLibrary
             if (!sound_name[0])
                 continue;
             ref_sound sound;
-            ::Sound->create(sound, sound_name, st_Effect, SOUND_TYPE_STEP);
+            // Footsteps must carry a top-level AI sound category as well as
+            // the STEP subtype; a bare SOUND_TYPE_STEP is not a valid event.
+            ::Sound->create(sound, sound_name, st_Effect, SOUND_TYPE_MONSTER_STEP);
             sounds.push_back(sound);
         }
     }
