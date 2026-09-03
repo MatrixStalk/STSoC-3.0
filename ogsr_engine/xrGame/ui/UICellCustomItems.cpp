@@ -40,9 +40,26 @@ CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
 void CUIInventoryCellItem::Draw()
 {
     CInventoryItem* item = object();
-    if (!item || !item->m_icon_3d_enabled || !item->object().Visual())
+    if (!item || !item->m_icon_3d_enabled)
     {
         inherited::Draw();
+        return;
+    }
+
+    const auto draw_overlays_without_atlas = [this]() {
+        // A 3D-enabled item must never fall back to its atlas texture. Keep
+        // counters, condition bars and other cell overlays available.
+        TextureOff();
+        Set2DAddonIconsCustomDraw(true);
+        inherited::Draw();
+        Set2DAddonIconsCustomDraw(false);
+        TextureOn();
+    };
+
+    CGameObject& game_object = item->object();
+    if (!g_pGameLevel || Level().is_removing_objects() || game_object.getDestroy() || !game_object.m_spawned || !game_object.Visual())
+    {
+        draw_overlays_without_atlas();
         return;
     }
 
@@ -67,22 +84,12 @@ void CUIInventoryCellItem::Draw()
                     color_get_A(color) * byte_to_float * UIRender->GetAnimationAlpha());
 
     UI()->PushScissor(ui_rect);
-    const bool rendered = Render->RenderUIModel(smart_cast<IRenderable*>(&item->object()), params);
+    Render->RenderUIModel(smart_cast<IRenderable*>(&game_object), params);
     UI()->PopScissor();
-
-    if (!rendered)
-    {
-        inherited::Draw();
-        return;
-    }
 
     // The model replaces only the atlas image. Counts, condition bars and
     // other overlays retain their normal UI ordering above it.
-    TextureOff();
-    Set2DAddonIconsCustomDraw(true);
-    inherited::Draw();
-    Set2DAddonIconsCustomDraw(false);
-    TextureOn();
+    draw_overlays_without_atlas();
 }
 
 bool CUIInventoryCellItem::EqualTo(CUICellItem* itm)

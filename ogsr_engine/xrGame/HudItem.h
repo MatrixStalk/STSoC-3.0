@@ -170,6 +170,11 @@ public:
     u32 PlayHUDMotion(const char* M, const bool bMixIn, const u32 state, const bool randomAnim = true, float speed = 1.f);
     u32 PlayHUDMotion_noCB(const shared_str& M, const bool bMixIn, const bool randomAnim = true, float speed = 1.f);
 
+    // Called after the engine has resolved an animation fallback to the
+    // actual motion that will be played. Weapons use this for data-driven
+    // per-animation sound timelines.
+    virtual void OnHudMotionStart(LPCSTR motion, float speed) {}
+
     bool AnimationExist(const char* M) const;
     void StopCurrentAnimWithoutCallback();
 
@@ -320,6 +325,9 @@ private:
 
     Fvector m_strafe_offset[3][2]{}, m_lookout_offset[3][2]{}, m_jump_offset[3][2]{}, m_fall_offset[2][2]{}, m_landing_offset[2][2]{}, m_move_offset[3]{}, m_walk_offset[3]{};
     Fvector current_difference[2]{}, current_strafe[2]{}, current_lookout[2]{}, current_jump[2]{}, current_move[2]{}, current_walk[2]{}, current_sprint[2]{};
+    Fvector m_cached_addon_aim[2]{};
+    bool m_cached_addon_aim_valid{};
+    u8 m_last_hud_offset_idx{};
 
 	struct shooting_hud_effect_params
     {

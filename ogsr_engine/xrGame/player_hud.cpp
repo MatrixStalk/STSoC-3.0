@@ -7,6 +7,7 @@
 #include "ui_base.h"
 #include "level.h"
 #include "weapon.h"
+#include "../xr_3da/camerabase.h"
 
 void hud_apply_bone_adjustments(IKinematics* model, const attachable_hud_item* item, IKinematics* authoritative_source = nullptr);
 
@@ -696,6 +697,16 @@ void hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     else
         m_hands_offset[m_hands_offset_rot][m_hands_offset_type_aim] = READ_IF_EXISTS(pSettings, r_fvector3, sect_name, val_name, Fvector{});
 
+    strconcat(sizeof(val_name), val_name, "lowered_hud_offset_pos", _prefix);
+    if (is_16x9 && !pSettings->line_exist(sect_name, val_name))
+        xr_strcpy(val_name, "lowered_hud_offset_pos");
+    m_hands_offset[m_hands_offset_pos][m_hands_offset_type_lowered] = READ_IF_EXISTS(pSettings, r_fvector3, sect_name, val_name, Fvector{});
+
+    strconcat(sizeof(val_name), val_name, "lowered_hud_offset_rot", _prefix);
+    if (is_16x9 && !pSettings->line_exist(sect_name, val_name))
+        xr_strcpy(val_name, "lowered_hud_offset_rot");
+    m_hands_offset[m_hands_offset_rot][m_hands_offset_type_lowered] = READ_IF_EXISTS(pSettings, r_fvector3, sect_name, val_name, Fvector{});
+
     strconcat(sizeof(val_name), val_name, "gl_hud_offset_pos", _prefix);
     if (is_16x9 && !pSettings->line_exist(sect_name, val_name))
         xr_strcpy(val_name, "gl_hud_offset_pos");
@@ -807,10 +818,12 @@ void hud_item_measures::load(const shared_str& sect_name, IKinematics* K)
     }
 
     m_prop_flags.set(e_16x9_mode_now, is_16x9);
+    m_fFreelookZOffset = READ_IF_EXISTS(pSettings, r_float, sect_name, "freelook_z_offset_mul", 0.f);
 }
 
 attachable_hud_item::~attachable_hud_item()
 {
+    Msg("~ player_hud: deleting pooled item [%s]", m_sect_name.c_str());
     IRenderVisual* v = m_model->dcast_RenderVisual();
     ::Render->model_Delete(v);
     m_model = nullptr;
@@ -1022,9 +1035,23 @@ player_hud::player_hud()
 
 player_hud::~player_hud()
 {
+    Msg("~ player_hud: begin (%u pooled items)", static_cast<u32>(m_pool.size()));
+
+    // Source merge callbacks keep pointers to this player_hud and to item
+    // skeletons. Disconnect them before either side enters the model pool.
+    clear_source_skeleton_merge();
+    m_addon_hand_pose_sources[0] = nullptr;
+    m_addon_hand_pose_sources[1] = nullptr;
+    m_addon_hand_pose_owners[0] = nullptr;
+    m_addon_hand_pose_owners[1] = nullptr;
+    m_attached_items[0] = nullptr;
+    m_attached_items[1] = nullptr;
+
+    Msg("~ player_hud: deleting hand models");
     if (m_model_kinematics)
     {
         IRenderVisual* v = m_model_kinematics->dcast_RenderVisual();
+        v->MarkAsHot(false);
         ::Render->model_Delete(v);
         m_model = nullptr;
         m_model_kinematics = nullptr;
@@ -1032,11 +1059,13 @@ player_hud::~player_hud()
     if (m_model_2_kinematics)
     {
         IRenderVisual* v2 = m_model_2_kinematics->dcast_RenderVisual();
+        v2->MarkAsHot(false);
         ::Render->model_Delete(v2);
         m_model_2 = nullptr;
         m_model_2_kinematics = nullptr;
     }
 
+    Msg("~ player_hud: deleting pooled item models");
     auto it = m_pool.begin();
     auto it_e = m_pool.end();
     for (; it != it_e; ++it)
@@ -1048,6 +1077,7 @@ player_hud::~player_hud()
 
     delete_data(m_script_layers);
     delete_data(m_movement_layers);
+    Msg("~ player_hud: complete");
 }
 
 void player_hud::load(const shared_str& player_hud_sect, bool force)
@@ -1266,6 +1296,9 @@ u32 player_hud::motion_length(const motion_params& P, const motion_descr& M, con
     return 0;
 }
 
+extern float g_freelook_z_offset;
+extern float psHUD_FOV;
+
 void player_hud::update(const Fmatrix& cam_trans)
 {
     //Костыли для правильной работы системы коллизии худа. Это всё плохо и надо будет как-то переделать в будущем. Здесь два апдейта худа подряд делаются для того, чтобы менеджер
@@ -1278,6 +1311,40 @@ void player_hud::update(const Fmatrix& cam_trans)
 
     Fmatrix trans = cam_trans;
     Fmatrix trans_b = cam_trans;
+
+    float& control_factor = Actor()->freelook_cam_control;
+    const u8 freelook_state = Actor()->cam_freelook;
+    float sub_z = 0.f;
+
+    if (control_factor > 0.f)
+    {
+        Fvector new_direction;
+        const float old_pitch = trans.k.getP();
+        const float new_pitch = old_pitch > 0.f ? old_pitch * (1.f - psHUD_FOV) : old_pitch * (1.f - psHUD_FOV / 2.f);
+        const float final_pitch = angle_lerp(old_pitch, new_pitch, control_factor);
+        const float body_yaw = -angle_normalize_signed(Actor()->old_torso_yaw);
+        const float camera_yaw = -angle_normalize_signed(Actor()->cam_FirstEye()->yaw);
+        const float yaw_difference = angle_difference_signed(body_yaw, camera_yaw);
+
+        if (final_pitch < 0.f)
+            sub_z += final_pitch * 0.35f;
+        sub_z -= abs(yaw_difference) * 0.1f;
+        clamp(sub_z, -0.2f, 0.f);
+
+        const float new_yaw = trans.k.getH() + yaw_difference * psHUD_FOV;
+        const float final_yaw = angle_lerp(body_yaw, new_yaw, control_factor);
+        new_direction.setHP(final_yaw, final_pitch);
+        trans.k.lerp(trans.k, new_direction, control_factor);
+        Fvector::generate_orthonormal_basis_normalized(trans.k, trans.j, trans.i);
+    }
+
+    static u32 freelook_update_frame = 0;
+    if (freelook_update_frame != Device.dwFrame)
+    {
+        control_factor += (freelook_state == eflEnabling || freelook_state == eflEnabled ? 1.f : -1.f) * Device.fTimeDelta / 0.3f;
+        clamp(control_factor, 0.f, 1.f);
+        freelook_update_frame = Device.dwFrame;
+    }
     
     auto attach_pos = [this](size_t part) {
         if (m_attached_items[part])
@@ -1301,6 +1368,27 @@ void player_hud::update(const Fmatrix& cam_trans)
 
     Fvector m2pos = attach_pos(1);
     Fvector m2rot = attach_rot(1);
+
+    if ((m_attached_items[0] || m_attached_items[1]) && control_factor > 0.f && sub_z < 0.f)
+    {
+        const attachable_hud_item* first = m_attached_items[m_attached_items[0] ? 0 : 1];
+        const attachable_hud_item* second = m_attached_items[m_attached_items[1] ? 1 : 0];
+        float z1 = g_freelook_z_offset ? g_freelook_z_offset : first->m_measures.m_fFreelookZOffset;
+        float z2 = g_freelook_z_offset ? g_freelook_z_offset : second->m_measures.m_fFreelookZOffset;
+        if (Actor()->is_safemode())
+        {
+            z1 = fmaxf(z1, 0.5f);
+            if (!m_attached_items[1])
+                z2 = fmaxf(z2, 0.5f);
+        }
+
+        z1 *= sub_z * control_factor;
+        z2 *= sub_z * control_factor;
+        m1pos.z += z1;
+        m2pos.z += z2;
+        m1pos.y += z1 / 2.f;
+        m2pos.y += z2 / 2.f;
+    }
 
     Fmatrix trans_2 = trans;
 

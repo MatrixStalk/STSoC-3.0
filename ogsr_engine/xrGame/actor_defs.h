@@ -23,6 +23,15 @@ enum EActorCameras
     eacFreeLook,
     eacMaxCam
 };
+
+enum EFreelookStates
+{
+    eflDisabled,
+    eflEnabled,
+    eflEnabling,
+    eflDisabling,
+};
+
 enum EDamages
 {
     DAMAGE_FX_COUNT = 12

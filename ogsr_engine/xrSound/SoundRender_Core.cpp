@@ -5,11 +5,6 @@
 #include "soundrender_source.h"
 #include "soundrender_emitter.h"
 
-#pragma warning(push)
-#pragma warning(disable : 4995)
-#include <eax.h>
-#pragma warning(pop)
-
 BOOL bSenvironmentXrExport{};
 int psSoundTargets = 256; // 512; //--#SM+#-- //32;
 Flags32 psSoundFlags = {/*ss_Hardware*/};
@@ -29,25 +24,9 @@ BOOL snd_enable_float_pcm{TRUE};
 CSoundRender_Core* SoundRender = 0;
 CSound_manager_interface* Sound = 0;
 
-//////////////////////////////////////////////////
-#include <efx.h>
-#define LOAD_PROC(x, type) ((x) = (type)alGetProcAddress(#x))
-static LPALEFFECTF alEffectf;
-static LPALEFFECTI alEffecti;
-static LPALDELETEEFFECTS alDeleteEffects;
-static LPALISEFFECT alIsEffect;
-static LPALGENEFFECTS alGenEffects;
-static LPALISAUXILIARYEFFECTSLOT alIsAuxiliaryEffectSlot;
-static LPALDELETEAUXILIARYEFFECTSLOTS alDeleteAuxiliaryEffectSlots;
-static LPALGENAUXILIARYEFFECTSLOTS alGenAuxiliaryEffectSlots;
-static LPALAUXILIARYEFFECTSLOTI alAuxiliaryEffectSloti;
-//////////////////////////////////////////////////
-
 CSoundRender_Core::CSoundRender_Core()
 {
     bPresent = FALSE;
-    bEAX = FALSE;
-    bDeferredEAX = FALSE;
     geom_MODEL = NULL;
     geom_ENV = NULL;
     geom_SOM = NULL;
@@ -64,28 +43,10 @@ CSoundRender_Core::CSoundRender_Core()
     fTimer_Delta = 0.0f;
     m_iPauseCounter = 1;
 
-    efx_reverb = EFX_REVERB_PRESET_GENERIC;
-    bEFX = false;
-    effect = 0;
-    slot = 0;
-}
-
-void CSoundRender_Core::release_efx_objects() const
-{
-    if (alIsEffect(effect))
-        alDeleteEffects(1, &effect);
-
-    if (alIsAuxiliaryEffectSlot(slot))
-        alDeleteAuxiliaryEffectSlots(1, &slot);
 }
 
 CSoundRender_Core::~CSoundRender_Core()
 {
-    // if (bEFX)
-    {
-        //release_efx_objects();
-    }
-
     xr_delete(geom_ENV);
     xr_delete(geom_SOM);
 }
@@ -94,12 +55,64 @@ void CSoundRender_Core::_initialize(int stage)
 {
     Timer.Start();
 
+    if (stage == 1)
+        equalizer_load();
+
     // load environment
     env_load();
 
     // Cache
     cache_bytes_per_line = (sdef_target_block / 8) * 352800 / 1000;
     cache.initialize(psSoundCacheSizeMB * 1024, cache_bytes_per_line);
+}
+
+void CSoundRender_Core::equalizer_load()
+{
+    string_path path;
+    FS.update_path(path, "$game_config$", "sound_equalizer.ltx");
+    if (!FS.exist(path))
+        return;
+
+    CInifile ini(path, TRUE, TRUE, FALSE);
+    if (!ini.section_exist("equalizer"))
+        return;
+    equalizer.enabled = ini.line_exist("equalizer", "enabled") ? ini.r_bool("equalizer", "enabled") : false;
+    equalizer.preamp_db = ini.line_exist("equalizer", "preamp_db") ? ini.r_float("equalizer", "preamp_db") : 0.f;
+    constexpr LPCSTR names[4]{"low", "low_mid", "high_mid", "high"};
+    for (u32 i = 0; i < 4; ++i)
+    {
+        string64 key;
+        xr_sprintf(key, "%s_frequency", names[i]);
+        if (ini.line_exist("equalizer", key))
+            equalizer.bands[i].frequency = ini.r_float("equalizer", key);
+        xr_sprintf(key, "%s_gain_db", names[i]);
+        if (ini.line_exist("equalizer", key))
+            equalizer.bands[i].gain_db = ini.r_float("equalizer", key);
+        xr_sprintf(key, "%s_q", names[i]);
+        if (ini.line_exist("equalizer", key))
+            equalizer.bands[i].q = ini.r_float("equalizer", key);
+    }
+    ++equalizer.revision;
+}
+
+void CSoundRender_Core::equalizer_save() const
+{
+    string_path path;
+    FS.update_path(path, "$game_config$", "sound_equalizer.ltx");
+    CInifile ini(path, FALSE, FS.exist(path) != nullptr, TRUE);
+    ini.w_bool("equalizer", "enabled", !!equalizer.enabled);
+    ini.w_float("equalizer", "preamp_db", equalizer.preamp_db);
+    constexpr LPCSTR names[4]{"low", "low_mid", "high_mid", "high"};
+    for (u32 i = 0; i < 4; ++i)
+    {
+        string64 key;
+        xr_sprintf(key, "%s_frequency", names[i]);
+        ini.w_float("equalizer", key, equalizer.bands[i].frequency);
+        xr_sprintf(key, "%s_gain_db", names[i]);
+        ini.w_float("equalizer", key, equalizer.bands[i].gain_db);
+        xr_sprintf(key, "%s_q", names[i]);
+        ini.w_float("equalizer", key, equalizer.bands[i].q);
+    }
 }
 
 extern xr_vector<u8> g_target_temp_data;
@@ -322,8 +335,6 @@ void CSoundRender_Core::attach_tail(ref_sound& S, const char* fName)
         return;
     string_path fn;
     xr_strcpy(fn, fName);
-    if (strext(fn))
-        *strext(fn) = 0;
     if (S._p->fn_attached[0].size() && S._p->fn_attached[1].size())
     {
 #ifdef DEBUG
@@ -433,8 +444,6 @@ void CSoundRender_Core::_create_data(ref_sound_data& S, LPCSTR fName, esound_typ
 {
     string_path fn;
     xr_strcpy(fn, fName);
-    if (strext(fn))
-        *strext(fn) = 0;
     S.handle = (CSound_source*)SoundRender->i_create_source(fn);
     S.g_type = (game_type == sg_SourceType) ? S.handle->game_type() : game_type;
     S.s_type = sound_type;
@@ -533,6 +542,7 @@ void CSoundRender_Core::env_apply()
 
 void CSoundRender_Core::update_listener(const Fvector& P, const Fvector& D, const Fvector& N, float dt) {}
 
+#if 0 // Legacy OpenAL EAX/EFX backend retained only as migration reference.
 //////////////////////////////////////////////////
 void CSoundRender_Core::InitAlEFXAPI()
 {
@@ -669,6 +679,7 @@ void CSoundRender_Core::i_eax_commit_setting()
     if (bDeferredEAX)
         i_eax_set(&DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_COMMITDEFERREDSETTINGS, NULL, 0);
 }
+#endif
 
 void CSoundRender_Core::object_relcase(CObject* obj)
 {

@@ -3,394 +3,281 @@
 #include "soundrender_coreA.h"
 #include "soundrender_targetA.h"
 
-#include <efx.h>
+#include <fmod_errors.h>
 
-CSoundRender_CoreA::CSoundRender_CoreA()
+namespace
 {
-    pDevice = nullptr;
-    pDeviceList = nullptr;
-    pContext = nullptr;
-    eaxSet = nullptr;
-    eaxGet = nullptr;
-}
-
-CSoundRender_CoreA::~CSoundRender_CoreA() {}
-
-BOOL CSoundRender_CoreA::EAXQuerySupport(BOOL bDeferred, const GUID* guid, u32 prop, void* val, u32 sz)
+bool fmod_ok(FMOD_RESULT result, LPCSTR operation)
 {
-    if (AL_NO_ERROR != eaxGet(guid, prop, 0, val, sz))
-        return FALSE;
-    if (AL_NO_ERROR != eaxSet(guid, (bDeferred ? DSPROPERTY_EAXLISTENER_DEFERRED : 0) | prop, 0, val, sz))
-        return FALSE;
-    return TRUE;
-}
-
-BOOL CSoundRender_CoreA::EAXTestSupport(BOOL bDeferred)
-{
-    EAXLISTENERPROPERTIES ep;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_ROOM, &ep.lRoom, sizeof(LONG)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_ROOMHF, &ep.lRoomHF, sizeof(LONG)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_ROOMROLLOFFFACTOR, &ep.flRoomRolloffFactor, sizeof(float)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_DECAYTIME, &ep.flDecayTime, sizeof(float)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_DECAYHFRATIO, &ep.flDecayHFRatio, sizeof(float)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_REFLECTIONS, &ep.lReflections, sizeof(LONG)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_REFLECTIONSDELAY, &ep.flReflectionsDelay, sizeof(float)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_REVERB, &ep.lReverb, sizeof(LONG)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_REVERBDELAY, &ep.flReverbDelay, sizeof(float)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_ENVIRONMENTDIFFUSION, &ep.flEnvironmentDiffusion, sizeof(float)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_AIRABSORPTIONHF, &ep.flAirAbsorptionHF, sizeof(float)))
-        return FALSE;
-    if (!EAXQuerySupport(bDeferred, &DSPROPSETID_EAX_ListenerProperties, DSPROPERTY_EAXLISTENER_FLAGS, &ep.dwFlags, sizeof(DWORD)))
-        return FALSE;
-    return TRUE;
-}
-
-bool CSoundRender_CoreA::reopen_device(const char* deviceName) const
-{
-    if (alcIsExtensionPresent(pDevice, "ALC_SOFT_reopen_device"))
-    {
-        Msg("- snd has ALC_SOFT_reopen_device");
-
-        typedef ALCboolean(ALC_APIENTRY * alcReopenDeviceSOFT_t)(ALCdevice*, const ALCchar*, const ALCint*);
-
-        const alcReopenDeviceSOFT_t alcReopenDeviceSOFT = reinterpret_cast<alcReopenDeviceSOFT_t>(alcGetProcAddress(pDevice, "alcReopenDeviceSOFT"));
-
-        if (alcReopenDeviceSOFT(pDevice, deviceName, nullptr))
-        {
-            return true;
-        }
-    }
-
+    if (result == FMOD_OK)
+        return true;
+    Msg("! FMOD: %s failed: %s (%d)", operation, FMOD_ErrorString(result), result);
     return false;
 }
 
-void CSoundRender_CoreA::_restart()
+void clear_device_tokens()
 {
-    if (!(bPresent && bReady))
+    if (!snd_devices_token)
+        return;
+    for (xr_token* token = snd_devices_token; token->name; ++token)
+        xr_free(const_cast<char*>(token->name));
+    xr_free(snd_devices_token);
+    snd_devices_token = nullptr;
+}
+
+FMOD_VECTOR fmod_vector(const Fvector& value)
+{
+    return {value.x, value.y, -value.z};
+}
+} // namespace
+
+CSoundRender_CoreA::CSoundRender_CoreA() = default;
+CSoundRender_CoreA::~CSoundRender_CoreA() = default;
+
+void CSoundRender_CoreA::load_settings()
+{
+    string_path path;
+    FS.update_path(path, "$game_config$", "sound_fmod.ltx");
+    if (!FS.exist(path))
         return;
 
-    Msg("SOUND: restarting...");
+    CInifile ini(path, TRUE, TRUE, FALSE);
+    if (!ini.section_exist("fmod"))
+        return;
 
-    inherited::_restart();
+    sample_rate = ini.line_exist("fmod", "sample_rate") ? ini.r_s32("fmod", "sample_rate") : sample_rate;
+    dsp_buffer_length = ini.line_exist("fmod", "dsp_buffer_length") ? ini.r_s32("fmod", "dsp_buffer_length") : dsp_buffer_length;
+    dsp_buffer_count = ini.line_exist("fmod", "dsp_buffer_count") ? ini.r_s32("fmod", "dsp_buffer_count") : dsp_buffer_count;
+    hrtf_enabled = ini.line_exist("fmod", "hrtf") ? ini.r_bool("fmod", "hrtf") : hrtf_enabled;
+    air_absorption_enabled = ini.line_exist("fmod", "air_absorption") ? ini.r_bool("fmod", "air_absorption") : air_absorption_enabled;
+    occlusion_enabled = ini.line_exist("fmod", "occlusion") ? ini.r_bool("fmod", "occlusion") : occlusion_enabled;
 
-    std::scoped_lock<std::mutex> m(m_bLocked);
-
-    if (init_device_list())
-    {
-        pDeviceList->SelectBestDeviceId(/*notification_client.GetDefaultDeviceName().c_str()*/);
-
-        R_ASSERT(snd_device_id >= 0 && snd_device_id < pDeviceList->GetNumDevices());
-        const ALDeviceDesc& deviceDesc = pDeviceList->GetDeviceDesc(snd_device_id);
-
-        if (reopen_device(deviceDesc.name))
-        {
-            const bool is_al_soft = deviceDesc.is_al_soft;
-
-            for (u32 it = 0; it < s_targets.size(); it++)
-            {
-                CSoundRender_Target* T = s_targets[it];
-
-                T->alAuxInit(AL_EFFECTSLOT_NULL);
-
-                T->bEFX = false;
-            }
-
-            release_efx_objects();
-
-            init_device_properties(is_al_soft);
-
-            for (u32 it = 0; it < s_targets.size(); it++)
-            {
-                CSoundRender_Target* T = s_targets[it];
-
-                if (bEFX)
-                {
-                    T->alAuxInit(slot);
-                }
-
-                T->bEFX = bEFX;
-            }
-        }
-        else
-        {
-            Msg("! snd cannot reset device. Restart game to apply changes!");
-
-            Msg("! snd last error %s", alcGetString(pDevice, alcGetError(pDevice)));
-        }
-    }
+    sample_rate = clampr(sample_rate, 22050, 192000);
+    dsp_buffer_length = clampr(dsp_buffer_length, 256, 4096);
+    dsp_buffer_count = clampr(dsp_buffer_count, 2, 8);
 }
 
-bool CSoundRender_CoreA::init_context(const ALDeviceDesc& deviceDesc)
+bool CSoundRender_CoreA::enumerate_devices()
 {
-    // alcOpenDevice can fail without any visible reason. Just try several times
-    for (u32 i{}; i < 100; ++i)
-    {
-        pDevice = alcOpenDevice(deviceDesc.name);
-        if (pDevice != nullptr)
-            break;
-        else
-            Sleep(1);
-    }
-
-    if (!pDevice)
-    {
-        FATAL("SOUND: OpenAL: Failed to create device. Error: [%s]", (LPCSTR)alGetString(alGetError()));
-
-        bPresent = FALSE;
+    if (!fmod_system && !fmod_ok(FMOD::System_Create(&fmod_system), "System_Create"))
         return false;
-    }
 
-    // Get the device specifier.
-    //alcGetString(pDevice, ALC_DEVICE_SPECIFIER);
-
-    // Create context
-    pContext = alcCreateContext(pDevice, nullptr);
-    if (!pContext)
-    {
-        FATAL("SOUND: OpenAL: Failed to create context. Error: [%s]", (LPCSTR)alGetString(alGetError()));
-
-        alcCloseDevice(pDevice);
-        pDevice = nullptr;
-
-        bPresent = FALSE;
+    int count = 0;
+    if (!fmod_ok(fmod_system->getNumDrivers(&count), "getNumDrivers") || count <= 0)
         return false;
+
+    clear_device_tokens();
+    snd_devices_token = xr_alloc<xr_token>(count + 1);
+    for (int i = 0; i < count; ++i)
+    {
+        char name[256]{};
+        fmod_system->getDriverInfo(i, name, sizeof(name), nullptr, nullptr, nullptr, nullptr);
+        snd_devices_token[i].id = i;
+        snd_devices_token[i].name = xr_strdup(name[0] ? name : "FMOD output");
+        Msg("- FMOD output %d: %s", i, snd_devices_token[i].name);
     }
-
-    // clear errors
-    alcGetError(pDevice);
-
-    // Set active context
-    AC_CHK(alcMakeContextCurrent(pContext));
-
-    // clear errors
-    alGetError();
-
-    Msg("~[%s] OpenAL version: %s", __FUNCTION__, alGetString(AL_VERSION));
-
+    snd_devices_token[count].id = -1;
+    snd_devices_token[count].name = nullptr;
+    if (snd_device_id == u32(-1) || snd_device_id >= u32(count) || psSoundFlags.test(ss_UseDefaultDevice))
+        snd_device_id = 0;
     return true;
 }
 
-bool CSoundRender_CoreA::init_device_list()
+bool CSoundRender_CoreA::initialize_steam_audio()
 {
-    xr_delete(pDeviceList);
-    pDeviceList = xr_new<ALDeviceList>();
-
-    if (0 == pDeviceList->GetNumDevices())
+    IPLContextSettings context_settings{};
+    context_settings.version = STEAMAUDIO_VERSION;
+    context_settings.simdLevel = IPL_SIMDLEVEL_AVX2;
+    if (iplContextCreate(&context_settings, &steam_audio_context) != IPL_STATUS_SUCCESS)
     {
-        xr_delete(pDeviceList);
-
-        Msg("SOUND: OpenAL: Can't create sound device.");
-        bPresent = FALSE;
-
+        Msg("! Steam Audio: cannot create context");
         return false;
     }
 
+    IPLAudioSettings audio_settings{};
+    audio_settings.samplingRate = sample_rate;
+    audio_settings.frameSize = dsp_buffer_length;
+    IPLHRTFSettings hrtf_settings{};
+    hrtf_settings.type = IPL_HRTFTYPE_DEFAULT;
+    hrtf_settings.volume = 1.f;
+    hrtf_settings.normType = IPL_HRTFNORMTYPE_RMS;
+    if (iplHRTFCreate(steam_audio_context, &audio_settings, &hrtf_settings, &steam_audio_hrtf) != IPL_STATUS_SUCCESS)
+    {
+        Msg("! Steam Audio: cannot create HRTF");
+        return false;
+    }
+
+    iplFMODInitialize(steam_audio_context);
+    iplFMODSetHRTF(steam_audio_hrtf);
+    iplFMODSetHRTFDisabled(!hrtf_enabled);
+
+    IPLSimulationSettings simulation{};
+    simulation.flags = IPL_SIMULATIONFLAGS_DIRECT;
+    simulation.sceneType = IPL_SCENETYPE_DEFAULT;
+    simulation.reflectionType = IPL_REFLECTIONEFFECTTYPE_CONVOLUTION;
+    simulation.maxNumOcclusionSamples = 32;
+    simulation.samplingRate = sample_rate;
+    simulation.frameSize = dsp_buffer_length;
+    iplFMODSetSimulationSettings(simulation);
+
+    unsigned int major = 0, minor = 0, patch = 0;
+    iplFMODGetVersion(&major, &minor, &patch);
+    Msg("- Steam Audio FMOD integration: %u.%u.%u, HRTF: %s", major, minor, patch, hrtf_enabled ? "on" : "off");
     return true;
 }
 
-void CSoundRender_CoreA::init_device_properties(const bool& is_al_soft)
+bool CSoundRender_CoreA::initialize_fmod()
 {
-    if (is_al_soft)
+    if (!fmod_system && !enumerate_devices())
+        return false;
+
+    fmod_system->setDriver(static_cast<int>(snd_device_id));
+    fmod_system->setSoftwareFormat(sample_rate, FMOD_SPEAKERMODE_DEFAULT, 0);
+    fmod_system->setDSPBufferSize(dsp_buffer_length, dsp_buffer_count);
+    fmod_system->set3DSettings(1.f, 1.f, psSoundRolloff);
+
+    if (!fmod_ok(fmod_system->loadPlugin("phonon_fmod.dll", &steam_audio_plugin), "loadPlugin(phonon_fmod.dll)"))
+        return false;
+
+    int nested_count = 0;
+    fmod_system->getNumNestedPlugins(steam_audio_plugin, &nested_count);
+    for (int i = 0; i < nested_count; ++i)
     {
-        bool efx = alcIsExtensionPresent(pDevice, "ALC_EXT_EFX") == AL_TRUE;
-
-        if (efx)
-        {
-            InitAlEFXAPI();
-
-            bEFX = EFXTestSupport();
-
-            Msg("[OpenAL] EFX: %s", bEFX ? "present" : "absent");
-        }
+        unsigned int nested = 0;
+        char name[128]{};
+        FMOD_PLUGINTYPE type{};
+        fmod_system->getNestedPlugin(steam_audio_plugin, i, &nested);
+        fmod_system->getPluginInfo(nested, &type, name, sizeof(name), nullptr);
+        if (type == FMOD_PLUGINTYPE_DSP && strstr(name, "Steam Audio Spatializer"))
+            steam_audio_spatializer = nested;
     }
-    else
+    if (!steam_audio_spatializer)
     {
-        u32 eax{};
-
-        if (alIsExtensionPresent("EAX5.0"))
-            eax = 5;
-        else if (alIsExtensionPresent("EAX4.0"))
-            eax = 4;
-        else if (alIsExtensionPresent("EAX3.0"))
-            eax = 3;
-        else if (alIsExtensionPresent("EAX2.0"))
-            eax = 2;
-
-        if (eax)
-        {
-            // Check for EAX extension
-            bEAX = true;
-
-            eaxSet = (EAXSet)alGetProcAddress("EAXSet");
-            if (eaxSet == nullptr)
-                bEAX = false;
-            eaxGet = (EAXGet)alGetProcAddress("EAXGet");
-            if (eaxGet == nullptr)
-                bEAX = false;
-
-            if (bEAX)
-            {
-                bDeferredEAX = EAXTestSupport(TRUE);
-                bEAX = EAXTestSupport(FALSE);
-            }
-
-            Msg("[OpenAL] EAX 2.0 extension: %s", bEAX ? "present" : "absent");
-            Msg("[OpenAL] EAX 2.0 deferred: %s", bDeferredEAX ? "present" : "absent");
-        }
+        Msg("! Steam Audio: spatializer DSP was not found in phonon_fmod.dll");
+        return false;
     }
+
+    if (!fmod_ok(fmod_system->init(psSoundTargets, FMOD_INIT_3D_RIGHTHANDED, nullptr), "System::init"))
+        return false;
+    if (!initialize_steam_audio())
+        return false;
+
+    unsigned int version = 0;
+    fmod_system->getVersion(&version);
+    Msg("- FMOD Core initialized: %x, %d Hz, DSP %dx%d", version, sample_rate, dsp_buffer_length, dsp_buffer_count);
+    return true;
 }
-
-#define AL_STOP_SOURCES_ON_DISCONNECT_SOFT 0x19AB  // not in public yet
 
 void CSoundRender_CoreA::_initialize(int stage)
 {
     if (stage == 0)
     {
-        init_device_list();
-
+        load_settings();
+        bPresent = enumerate_devices();
         return;
     }
-
-    pDeviceList->SelectBestDeviceId(/*notification_client.GetDefaultDeviceName().c_str()*/);
-
-    R_ASSERT(snd_device_id >= 0 && snd_device_id < pDeviceList->GetNumDevices());
-    const ALDeviceDesc& deviceDesc = pDeviceList->GetDeviceDesc(snd_device_id);
-
-    if (!init_context(deviceDesc))
-        return;
-
-    // initialize listener
-    A_CHK(alListener3f(AL_POSITION, 0.f, 0.f, 0.f));
-    A_CHK(alListener3f(AL_VELOCITY, 0.f, 0.f, 0.f));
-    constexpr Fvector orient[2] = {{0.f, 0.f, 1.f}, {0.f, 1.f, 0.f}};
-    A_CHK(alListenerfv(AL_ORIENTATION, &orient[0].x));
-    A_CHK(alListenerf(AL_GAIN, 1.f));
-
-#ifdef AL_EXT_float32
-    supports_float_pcm = snd_enable_float_pcm && alIsExtensionPresent("AL_EXT_FLOAT32");
-#endif
-
-    if (supports_float_pcm)
-        Msg("~ xrSound has supports_float_pcm!");
-
-    alDisable(AL_STOP_SOURCES_ON_DISCONNECT_SOFT); // not in public yet
-
-    ALenum err = alGetError();
-    if (err != AL_NO_ERROR)
+    if (!bPresent || !initialize_fmod())
     {
-        Msg("!![%s] OpenAL AL_STOP_SOURCES_ON_DISCONNECT_SOFT error: %s", __FUNCTION__, alGetString(err));
+        bPresent = FALSE;
+        release_backend();
+        return;
     }
 
-    const bool is_al_soft = deviceDesc.is_al_soft;
-    
-    init_device_properties(is_al_soft);
-
+    supports_float_pcm = snd_enable_float_pcm;
     inherited::_initialize(stage);
-
-    if (stage == 1) // first initialize
+    for (u32 i = 0; i < u32(psSoundTargets); ++i)
     {
-        // Pre-create targets
-        CSoundRender_Target* T = nullptr;
-        for (u32 tit = 0; tit < u32(psSoundTargets); tit++)
+        CSoundRender_Target* target = xr_new<CSoundRender_TargetA>();
+        if (!target->_initialize())
         {
-            T = xr_new<CSoundRender_TargetA>();
-            if (T->_initialize())
-            {
-                if (bEFX)
-
-                {
-                    T->alAuxInit(slot);
-                }
-
-                T->bAlSoft = is_al_soft;
-                T->bEFX = bEFX;
-
-                s_targets.push_back(T);
-            }
-            else
-            {
-                Msg("! SOUND: OpenAL: Max targets - [%u]", tit);
-                T->_destroy();
-                xr_delete(T);
-                break;
-            }
+            target->_destroy();
+            xr_delete(target);
+            Msg("! FMOD: maximum targets reached at %u", i);
+            break;
         }
+        s_targets.push_back(target);
     }
-
     bReady = TRUE;
-    //notification_client.Start();
 }
 
-void CSoundRender_CoreA::set_master_volume(float f)
+void CSoundRender_CoreA::set_master_volume(float volume)
 {
-    if (bPresent)
+    if (!fmod_system)
+        return;
+    FMOD::ChannelGroup* master = nullptr;
+    if (fmod_system->getMasterChannelGroup(&master) == FMOD_OK && master)
+        master->setVolume(clampr(volume, 0.f, 1.f));
+}
+
+void CSoundRender_CoreA::release_backend()
+{
+    if (steam_audio_context)
+        iplFMODTerminate();
+    if (steam_audio_hrtf)
+        iplHRTFRelease(&steam_audio_hrtf);
+    if (steam_audio_context)
+        iplContextRelease(&steam_audio_context);
+    if (fmod_system)
     {
-        A_CHK(alListenerf(AL_GAIN, f));
+        fmod_system->close();
+        fmod_system->release();
+        fmod_system = nullptr;
     }
-}
-
-void CSoundRender_CoreA::release_context()
-{
-    if (bEFX)
-        release_efx_objects();
-
-    // Reset the current context to NULL.
-    alcMakeContextCurrent(nullptr);
-
-    // Release the context and the device.
-    alcDestroyContext(pContext);
-    pContext = nullptr;
-    alcCloseDevice(pDevice);
-    pDevice = nullptr;
+    steam_audio_plugin = 0;
+    steam_audio_spatializer = 0;
 }
 
 void CSoundRender_CoreA::_clear()
 {
-    //notification_client.Stop();
     bReady = FALSE;
-
     inherited::_clear();
-
-    // remove targets
-    CSoundRender_Target* T = nullptr;
-    for (u32 tit = 0; tit < s_targets.size(); tit++)
+    for (CSoundRender_Target*& target : s_targets)
     {
-        T = s_targets[tit];
-        T->_destroy();
-        xr_delete(T);
+        target->_destroy();
+        xr_delete(target);
     }
-
-    release_context();
-
-    xr_delete(pDeviceList);
+    s_targets.clear();
+    release_backend();
+    clear_device_tokens();
+    bPresent = FALSE;
 }
 
-void CSoundRender_CoreA::i_eax_set(const GUID* guid, u32 prop, void* val, u32 sz) { eaxSet(guid, prop, 0, val, sz); }
-void CSoundRender_CoreA::i_eax_get(const GUID* guid, u32 prop, void* val, u32 sz) { eaxGet(guid, prop, 0, val, sz); }
+void CSoundRender_CoreA::_restart()
+{
+    if (!bReady || !fmod_system)
+        return;
+    int count = 0;
+    fmod_system->getNumDrivers(&count);
+    if (snd_device_id < u32(count))
+    {
+        const FMOD_RESULT result = fmod_system->setDriver(static_cast<int>(snd_device_id));
+        if (result != FMOD_OK)
+            Msg("! FMOD: output change requires a game restart: %s", FMOD_ErrorString(result));
+    }
+}
+
+void CSoundRender_CoreA::update(const Fvector& P, const Fvector& D, const Fvector& N)
+{
+    inherited::update(P, D, N);
+    if (fmod_system)
+        fmod_system->update();
+}
 
 void CSoundRender_CoreA::update_listener(const Fvector& P, const Fvector& D, const Fvector& N, float dt)
 {
     inherited::update_listener(P, D, N, dt);
-
     if (!Listener.position.similar(P))
     {
         Listener.position.set(P);
         bListenerMoved = TRUE;
     }
-    Listener.orientation[0].set(D.x, D.y, -D.z);
-    Listener.orientation[1].set(N.x, N.y, -N.z);
-
-    A_CHK(alListener3f(AL_POSITION, Listener.position.x, Listener.position.y, -Listener.position.z));
-    A_CHK(alListener3f(AL_VELOCITY, 0.f, 0.f, 0.f));
-    A_CHK(alListenerfv(AL_ORIENTATION, &Listener.orientation[0].x));
+    Listener.orientation[0].set(D);
+    Listener.orientation[1].set(N);
+    if (!fmod_system)
+        return;
+    const FMOD_VECTOR position = fmod_vector(P);
+    const FMOD_VECTOR velocity{};
+    const FMOD_VECTOR forward = fmod_vector(D);
+    const FMOD_VECTOR up = fmod_vector(N);
+    fmod_system->set3DListenerAttributes(0, &position, &velocity, &forward, &up);
 }

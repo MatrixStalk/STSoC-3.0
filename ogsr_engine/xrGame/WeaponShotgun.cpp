@@ -69,8 +69,8 @@ void CWeaponShotgun::OnShot()
 {
     inherited::OnShot();
 
-    if (!m_sndBreech.sounds.empty())
-        PlaySound((IsMisfire() && !m_sndBreechJammed.sounds.empty()) ? m_sndBreechJammed : m_sndBreech, get_LastFP());
+    if (!m_sndBreech.empty())
+        PlaySound((IsMisfire() && !m_sndBreechJammed.empty()) ? m_sndBreechJammed : m_sndBreech, get_LastFP());
 }
 
 void CWeaponShotgun::Fire2Start()
@@ -362,7 +362,6 @@ void CWeaponShotgun::OnAnimationEnd(u32 state)
 
 void CWeaponShotgun::Reload()
 {
-    OnZoomOut();
     if (m_bTriStateReload)
     {
         m_stop_triStateReload = false;
@@ -403,9 +402,9 @@ void CWeaponShotgun::OnStateSwitch(u32 S, u32 oldState)
                 has_anm_reload_jammed = AnimationExist(Anm);
                 if (has_anm_reload_jammed)
                 {
-                    if (iAmmoElapsed == 1 && !sndReloadJammedLast.sounds.empty())
+                    if (iAmmoElapsed == 1 && !sndReloadJammedLast.empty())
                         PlaySound(sndReloadJammedLast, get_LastFP());
-                    else if (!sndReloadJammed.sounds.empty())
+                    else if (!sndReloadJammed.empty())
                         PlaySound(sndReloadJammed, get_LastFP());
 
                     PlayHUDMotion(Anm, true, GetState());
@@ -431,18 +430,18 @@ void CWeaponShotgun::OnStateSwitch(u32 S, u32 oldState)
         {
             if (GetAmmoElapsed() < 1)
             {
-                PlaySound(!m_sndAddCartridgeEmpty.sounds.empty() ? m_sndAddCartridgeEmpty : m_sndAddCartridge, get_LastFP());
+                PlaySound(!m_sndAddCartridgeEmpty.empty() ? m_sndAddCartridgeEmpty : m_sndAddCartridge, get_LastFP());
                 PlayHUDMotion({"anm_add_cartridge_empty", "anim_add_cartridge", "anm_add_cartridge"}, false, GetState());
                 StartCartridge = false;
             }
             else if (SecondCartridge)
             {
-                PlaySound(!m_sndAddCartridgeSecond.sounds.empty() ? m_sndAddCartridgeSecond : m_sndAddCartridge, get_LastFP());
+                PlaySound(!m_sndAddCartridgeSecond.empty() ? m_sndAddCartridgeSecond : m_sndAddCartridge, get_LastFP());
                 PlayHUDMotion({"anm_add_cartridge_second", "anim_add_cartridge", "anm_add_cartridge"}, false, GetState());
             }
             else
             {
-                PlaySound(StartCartridge && !m_sndAddCartridgeStart.sounds.empty() ? m_sndAddCartridgeStart : m_sndAddCartridge, get_LastFP());
+                PlaySound(StartCartridge && !m_sndAddCartridgeStart.empty() ? m_sndAddCartridgeStart : m_sndAddCartridge, get_LastFP());
                 PlayHUDMotion({StartCartridge ? "anm_add_cartridge_start" : "anm_add_cartridge", "anim_add_cartridge", "anm_add_cartridge"}, false, GetState());
                 StartCartridge = false;
             }
@@ -453,7 +452,7 @@ void CWeaponShotgun::OnStateSwitch(u32 S, u32 oldState)
     }
     case eSubstateReloadEnd: {
         PlayHUDMotion({IsMisfire() ? "anm_close_jammed" : (SecondCartridge ? "anm_close_empty" : "nullptr"), "anim_close_weapon", "anm_close"}, true, GetState());
-        PlaySound(((IsMisfire() || SecondCartridge) && !m_sndCloseEmpty.sounds.empty()) ? m_sndCloseEmpty : m_sndClose, get_LastFP());
+        PlaySound(((IsMisfire() || SecondCartridge) && !m_sndCloseEmpty.empty()) ? m_sndCloseEmpty : m_sndClose, get_LastFP());
         SetPending(TRUE);
         SecondCartridge = false;
         break;

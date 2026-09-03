@@ -28,6 +28,13 @@ class CUIStaticItem;
 constexpr float def_min_zoom_k = 0.3f;
 constexpr float def_zoom_step_count = 4.0f;
 
+struct SafemodeAnm
+{
+    LPCSTR name{};
+    float power{};
+    float speed{};
+};
+
 class CWeapon : public CHudItemObject, public CShootingObject
 {
     friend class CWeaponScript;
@@ -68,6 +75,7 @@ public:
     virtual void OnH_B_Independent(bool just_before_destroy);
     virtual void OnH_A_Independent();
     virtual void OnEvent(NET_Packet& P, u16 type); // {inherited::OnEvent(P,type);}
+    virtual void OnStateSwitch(u32 S, u32 oldState) override;
     virtual void OnBeforeDrop() override;
 
     virtual void Hit(SHit* pHDS);
@@ -89,6 +97,8 @@ public:
     virtual void OnHiddenItem();
 
     virtual bool NeedBlendAnm();
+    bool CanBeLowered() const { return m_bCanBeLowered; }
+    float GetSafeModeRotateTime() const { return m_fSafeModeRotateTime; }
 
     //////////////////////////////////////////////////////////////////////////
     //  Network
@@ -174,7 +184,7 @@ public:
 
     // Render separate addon models attached to weapon skeleton bones. This is
     // optional and coexists with the legacy embedded-bone addon visuals.
-    void RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mode);
+    void RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mode, bool ui_preview = false);
 
     //для отоброажения иконок апгрейдов в интерфейсе
     int GetScopeX() { return m_iScopeX; }
@@ -209,8 +219,19 @@ public:
     // Live transform editing for separately rendered addon visuals. Indices
     // follow three legacy slots, fixed custom slots and named nested slots.
     static constexpr u8 AddonVisualCount = 3 + eCustomAddonCount;
+
+    struct SAddonUISlot
+    {
+        u8 visual_index{};
+        shared_str name;
+        shared_str installed_section;
+        Fvector world_position{};
+    };
+    void CollectAddonUISlots(xr_vector<SAddonUISlot>& slots) const;
+
     bool GetAddonEditorTransform(u8 visual_index, bool hud_mode, shared_str& section, shared_str& slot, shared_str& parent,
         Fvector& position, Fvector& rotation, float& scale) const;
+    bool AddonEditorUsesHudConfig(u8 visual_index, bool hud_mode) const;
     bool SetAddonEditorTransform(u8 visual_index, bool hud_mode, const Fvector& position, const Fvector& rotation, float scale);
     void ResetAddonEditorTransform(u8 visual_index, bool hud_mode);
 
@@ -242,6 +263,17 @@ public:
     const xr_vector<shared_str>& GetCustomAddonAllowed(ECustomAddonSlot slot) const;
     u8 GetCustomAddonIndex(ECustomAddonSlot slot) const;
     LPCSTR GetCustomAddonSlotName(ECustomAddonSlot slot) const;
+    shared_str GetInstalledAddonByClass(LPCSTR addon_class) const;
+    shared_str GetInstalledSilencerSection() const;
+    bool IsAddonSectionInstalled(LPCSTR addon_section) const;
+    bool AddonRequirementsSatisfied(LPCSTR addon_section) const;
+    bool CanDetachAddonSection(LPCSTR addon_section) const;
+    bool IsScopeFunctional() const;
+    bool IsAimingThroughAddonScope() const;
+    bool IsSilencerFunctional() const;
+    bool IsGrenadeLauncherFunctional() const;
+    bool HasCriticalAddonComponents() const;
+    bool GetAddonHudAimTransform(bool alternate, Fmatrix& transform, bool& use_bone_rotation) const;
 
     u8 GetAddonsState() const { return m_flagsAddOnState; };
     void SetAddonsState(u8 st) { m_flagsAddOnState = st; }
@@ -274,6 +306,11 @@ private:
         shared_str hud_pose_animation;
         Fmatrix world_transform;
         Fmatrix hud_transform;
+        // Camera-independent addon transform relative to the weapon HUD item.
+        // Keeping this alongside hud_transform prevents ADS calculations from
+        // mixing matrices produced by different player_hud update passes.
+        Fmatrix hud_local_transform;
+        bool hud_local_transform_valid{};
         Fvector editor_position[2]{};
         Fvector editor_rotation[2]{};
         float editor_scale[2]{1.f, 1.f};
@@ -302,6 +339,7 @@ private:
     };
 
     SCustomAddonSlot m_custom_addon_slots[eCustomAddonCount];
+    xr_vector<shared_str> m_critical_addon_classes;
     SAddonVisual m_addon_visuals[AddonVisualCount];
     xr_vector<SHandPoseIKEditorOverride> m_hand_pose_ik_editor_overrides;
     shared_str m_hand_pose_ik_editor_preview_motion;
@@ -417,6 +455,9 @@ protected:
     Fmatrix m_StrapOffset;
     bool m_strapped_mode;
     bool m_can_be_strapped;
+    bool m_bCanBeLowered{};
+    float m_fSafeModeRotateTime{1.f};
+    SafemodeAnm m_safemode_anm[2]{};
 
     Fmatrix m_Offset;
     // 0-используется без участия рук, 1-одна рука, 2-две руки

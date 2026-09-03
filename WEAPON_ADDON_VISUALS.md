@@ -109,6 +109,79 @@ only when either the weapon or a currently installed parent advertises it. A
 parent with installed children cannot be detached; detach the chain from its
 leaves first.
 
+## Gameplay classes, required parts and defaults
+
+`addon_slot` names the physical mounting point. `addon_class` independently
+names the gameplay role. When `addon_class` is omitted it falls back to
+`addon_slot`. Root weapon sections accept arbitrary `<name>_addons` points,
+including `sight_rear`, `sight_front`, `scope`, `silencer` and
+`grenade_launcher`.
+
+```ini
+[wpn_example]
+sight_rear_addons       = rear_sight, optic_example
+muzzle_addons           = muzzle_brake, suppressor_example
+grenade_launcher_addons = launcher_example
+
+critical_addon_classes = magazine, receiver, stock, sight_rear
+preinstalled_addons = magazine_default, receiver_default, stock_default, rear_sight
+
+[optic_example]
+addon_slot  = sight_rear
+addon_class = scope
+required_addons = receiver_default
+incompatible_addons = rear_sight
+
+; Normal X-Ray scope parameters are read from this section.
+scope_zoom_factor   = 20
+scope_dynamic_zoom  = true
+scope_texture       = scope_example
+
+; Aim offsets are derived from this bone in the installed HUD visual.
+aim_from_bone = true
+aim_bone       = mod_aim_camera
+alt_aim_bone   = mod_alt_aim_camera
+
+; Optional mesh bone carrying a collimator reticle. The HUD copy is visible
+; only after ADS has completed through this addon scope; the attachment editor
+; preview keeps it visible. The reticle keeps its authored models\collimsight
+; material and is depth-tested through the models\transparent lens material.
+collimator_bone = reticle
+
+[suppressor_example]
+addon_slot  = muzzle
+addon_class = muzzle
+is_silencer = true
+
+; Normal X-Ray silencer parameters are read from this section.
+bullet_hit_power_k     = 0.9
+bullet_speed_k         = 0.9
+fire_dispersion_base_k = 1.0
+cam_dispersion_k       = 0.8
+
+[launcher_example]
+addon_slot  = grenade_launcher
+addon_class = grenade_launcher
+grenade_vel = 76
+```
+
+`critical_addon_classes` prevents the weapon from entering any inventory
+weapon slot while one of the listed roles is absent. `preinstalled_addons`
+installs a comma-separated set on a newly spawned weapon. A single point can
+instead use `<slot>_installed = addon_section`.
+
+`required_addons` lists addon section names which must already be installed
+before this addon can be attached. A required addon cannot be detached while
+an installed addon still depends on it. `incompatible_addons` lists addon
+sections which cannot be installed together. The incompatibility check is
+bidirectional, so declaring it in either addon section is sufficient. The
+legacy misspelling `incopatible_addons` is accepted as an alias.
+
+For an addon with `is_silencer = true`, firing selects
+`snd_silncer_shot` and, for the actor when present,
+`snd_silncer_shot_actor` from the weapon section. If the silenced sound is
+not configured, the normal shot sound is used as a safe fallback.
+
 ## ImGui addon transform editor
 
 Open `HUD Editor` and expand `Addon transforms`. The panel lists all currently

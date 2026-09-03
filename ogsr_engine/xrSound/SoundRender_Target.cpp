@@ -58,6 +58,17 @@ extern size_t ov_read_func(void* ptr, size_t size, size_t nmemb, void* datasourc
 extern int ov_close_func(void* datasource);
 extern long ov_tell_func(void* datasource);
 
+OggVorbis_File* CSoundRender_Target::get_data()
+{
+    VERIFY(m_pEmitter);
+    if (!m_pEmitter->source()->streamed())
+        return nullptr;
+
+    if (!wave)
+        attach();
+    return &ovf;
+}
+
 void CSoundRender_Target::attach()
 {
     VERIFY(0 == wave);

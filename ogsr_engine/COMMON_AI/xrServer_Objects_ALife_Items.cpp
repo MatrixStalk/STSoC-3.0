@@ -312,6 +312,20 @@ CSE_ALifeItemWeapon::CSE_ALifeItemWeapon(LPCSTR caSection) : CSE_ALifeItem(caSec
         set_visual(pSettings->r_string(caSection, "visual"));
 
     m_addon_flags.zero();
+    bool has_preinstalled_addons = pSettings->line_exist(caSection, "preinstalled_addons");
+    if (!has_preinstalled_addons)
+        for (const auto& line : pSettings->r_section(caSection).Ordered_Data)
+        {
+            const xr_string key = line.first.c_str();
+            if (key.size() > 10 && key.compare(key.size() - 10, 10, "_installed") == 0)
+            {
+                has_preinstalled_addons = true;
+                break;
+            }
+        }
+    if (has_preinstalled_addons)
+        for (u8& index : m_custom_addon_indices)
+            index = u8(-1); // Client keeps the named defaults loaded from the weapon section.
 
     m_scope_status = (EWeaponAddonStatus)pSettings->r_s32(s_name, "scope_status");
     m_silencer_status = (EWeaponAddonStatus)pSettings->r_s32(s_name, "silencer_status");

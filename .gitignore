@@ -4,7 +4,9 @@
 /3rd_party/_TEMP
 /ogsr_engine/_LIB
 /ogsr_engine/_TEMP
-/bin
+/bin/
+/bin_x64/
+/bin_*/
 
 # Любые временные build-папки _TEMP в любом месте
 **/_TEMP/

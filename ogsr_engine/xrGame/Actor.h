@@ -355,6 +355,10 @@ public:
     IC EActorCameras active_cam() { return cam_active; } // KD: need to know which cam active outside actor methods
     CEffectorBobbing* GetEffectorBobbing() { return pCamBobbing; }
 
+    u8 cam_freelook{};
+    float freelook_cam_control{};
+    float old_torso_yaw{};
+
 protected:
     void cam_Set(EActorCameras style);
     void cam_Update(float dt, float fFOV);
@@ -362,6 +366,10 @@ protected:
     void camUpdateLadder(float dt);
     void cam_SetLadder();
     void cam_UnsetLadder();
+    void cam_SetFreelook();
+    void camUpdateFreelook(float dt);
+    void cam_UnsetFreelook();
+    bool CanUseFreelook();
     float currentFOV();
 
     // Cameras
@@ -744,10 +752,14 @@ private:
     // иммунитеты от препаратов, применяемые для ослабления хита
     float m_fDrugPsyProtectionCoeff;
     float m_fDrugRadProtectionCoeff;
+    bool m_bSafemode{};
 
 public:
     IC void SetDrugRadProtection(float _prot) { m_fDrugRadProtectionCoeff = _prot; };
     IC void SetDrugPsyProtection(float _prot) { m_fDrugPsyProtectionCoeff = _prot; };
+    bool is_safemode() const { return m_bSafemode; }
+    bool weapon_hidden_for_npc() const { return is_safemode(); }
+    void set_safemode(bool status);
 };
 
 extern bool isActorAccelerated(u32 mstate, bool ZoomMode);

@@ -1,84 +1,53 @@
 #pragma once
 
 #include "SoundRender_Core.h"
-#include "OpenALDeviceList.h"
-#include <eax.h>
-#include <alext.h>
-
-//#include "NotificationClient.h"
-
-#ifdef DEBUG
-#define A_CHK(expr) \
-    { \
-        alGetError(); \
-        expr; \
-        ALenum error = alGetError(); \
-        VERIFY2(error == AL_NO_ERROR, (LPCSTR)alGetString(error)); \
-    }
-#define AC_CHK(expr) \
-    { \
-        alcGetError(pDevice); \
-        expr; \
-        ALCenum error = alcGetError(pDevice); \
-        VERIFY2(error == ALC_NO_ERROR, (LPCSTR)alcGetString(pDevice, error)); \
-    }
-#else
-#define A_CHK(expr) \
-    { \
-        expr; \
-    }
-#define AC_CHK(expr) \
-    { \
-        expr; \
-    }
-#endif
+#include "SteamAudioFMOD.h"
 
 class CSoundRender_CoreA : public CSoundRender_Core
 {
     typedef CSoundRender_Core inherited;
 
-    EAXSet eaxSet; // EAXSet function, retrieved if EAX Extension is supported
-    EAXGet eaxGet; // EAXGet function, retrieved if EAX Extension is supported
+    FMOD::System* fmod_system{};
+    unsigned int steam_audio_plugin{};
+    unsigned int steam_audio_spatializer{};
+    IPLContext steam_audio_context{};
+    IPLHRTF steam_audio_hrtf{};
 
-    ALCdevice* pDevice;
-    ALCcontext* pContext;
-
-    ALDeviceList* pDeviceList;
+    int sample_rate{48000};
+    int dsp_buffer_length{1024};
+    int dsp_buffer_count{4};
+    bool hrtf_enabled{true};
+    bool air_absorption_enabled{true};
+    bool occlusion_enabled{true};
 
     struct SListener
     {
         Fvector position;
         Fvector orientation[2];
-    };
-    SListener Listener{};
+    } Listener{};
 
-    BOOL EAXQuerySupport(BOOL bDeferred, const GUID* guid, u32 prop, void* val, u32 sz);
-    BOOL EAXTestSupport(BOOL bDeferred);
-
-    //NotificationClient notification_client{};
+    void load_settings();
+    bool enumerate_devices();
+    bool initialize_fmod();
+    bool initialize_steam_audio();
+    void release_backend();
 
 protected:
-    virtual void i_eax_set(const GUID* guid, u32 prop, void* val, u32 sz);
-    virtual void i_eax_get(const GUID* guid, u32 prop, void* val, u32 sz);
     virtual void update_listener(const Fvector& P, const Fvector& D, const Fvector& N, float dt);
-
-    bool init_device_list();
-    void init_device_properties(const bool& is_al_soft);
-
-    bool init_context(const ALDeviceDesc& deviceDesc);
-    void release_context();
-
-    bool reopen_device(const char* deviceName) const;
 
 public:
     CSoundRender_CoreA();
     virtual ~CSoundRender_CoreA();
-
     virtual void _initialize(int stage);
     virtual void _clear();
     virtual void _restart();
-
+    virtual void update(const Fvector& P, const Fvector& D, const Fvector& N);
     virtual void set_master_volume(float f);
 
+    FMOD::System* FmodSystem() const { return fmod_system; }
+    unsigned int SteamAudioSpatializer() const { return steam_audio_spatializer; }
+    bool HrtfEnabled() const { return hrtf_enabled; }
+    bool AirAbsorptionEnabled() const { return air_absorption_enabled; }
+    bool OcclusionEnabled() const { return occlusion_enabled; }
     virtual const Fvector& listener_position() { return Listener.position; }
 };

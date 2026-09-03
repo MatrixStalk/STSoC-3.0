@@ -197,7 +197,9 @@ void CInventory::Take(CGameObject* pObj, bool bNotActivate, bool strict_placemen
         auto pActor = smart_cast<CActor*>(m_pOwner);
         const bool def_to_slot = (pActor && Core.Features.test(xrCore::Feature::ruck_flag_preferred)) ? !pIItem->RuckDefault() : true;
 
-        if ((!force_ruck_default && def_to_slot && CanPutInSlot(pIItem)) || force_move_to_slot)
+        CWeapon* slotted_weapon = smart_cast<CWeapon*>(pIItem);
+        const bool has_required_components = !slotted_weapon || slotted_weapon->HasCriticalAddonComponents();
+        if ((!force_ruck_default && def_to_slot && CanPutInSlot(pIItem)) || (force_move_to_slot && has_required_components))
         {
             if (pActor && Device.dwPrecacheFrame)
                 bNotActivate = true;
@@ -939,6 +941,9 @@ bool CInventory::CanPutInSlot(PIItem pIItem) const
     if (!m_bSlotsUseful)
         return false;
 
+    if (CWeapon* weapon = smart_cast<CWeapon*>(pIItem); weapon && !weapon->HasCriticalAddonComponents())
+        return false;
+
     if (!GetOwner()->CanPutInSlot(pIItem, pIItem->GetSlot()))
         return false;
 
@@ -952,6 +957,9 @@ bool CInventory::CanPutInSlot(PIItem pIItem) const
 bool CInventory::CanPutInSlot(PIItem pIItem, u8 slot) const
 {
     if (!m_bSlotsUseful)
+        return false;
+
+    if (CWeapon* weapon = smart_cast<CWeapon*>(pIItem); weapon && !weapon->HasCriticalAddonComponents())
         return false;
 
     if (!GetOwner()->CanPutInSlot(pIItem, slot))

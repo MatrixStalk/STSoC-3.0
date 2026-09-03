@@ -36,7 +36,10 @@ void SGameMtl::Load(IReader& fs)
     fPHBouncing = fs.r_float();
 
     R_ASSERT(fs.find_chunk(GAMEMTL_CHUNK_FACTORS));
-    fShootFactor = fs.r_float();
+    // Material data stores penetration resistance: 0 means no resistance and
+    // 1 means a solid barrier. Runtime bullet code uses the opposite scale,
+    // where 1 is fully penetrable, so convert it once at the load boundary.
+    fShootFactor = clampr(1.f - fs.r_float(), 0.f, 1.f);
     fBounceDamageFactor = fs.r_float();
     fVisTransparencyFactor = fs.r_float();
     fSndOcclusionFactor = fs.r_float();

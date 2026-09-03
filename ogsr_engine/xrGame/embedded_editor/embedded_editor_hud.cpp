@@ -13,6 +13,7 @@
 #include "../player_hud.h"
 #include "../Weapon.h"
 #include "../Inventory.h"
+#include "../inventory_item.h"
 
 namespace
 {
@@ -98,7 +99,7 @@ void RenderAddonTransforms(CWeapon* weapon, float drag_intensity)
     if (std::find(installed.begin(), installed.end(), static_cast<u8>(selected_visual)) == installed.end())
         selected_visual = installed.front();
 
-    ImGui::Checkbox("HUD transform", &hud_mode);
+    ImGui::Checkbox("HUD render space", &hud_mode);
     shared_str selected_section, selected_slot, selected_parent;
     Fvector position{}, rotation{};
     float scale = 1.f;
@@ -129,6 +130,7 @@ void RenderAddonTransforms(CWeapon* weapon, float drag_intensity)
     // Refresh after a selection made inside the combo.
     weapon->GetAddonEditorTransform(static_cast<u8>(selected_visual), hud_mode, selected_section, selected_slot, selected_parent,
         position, rotation, scale);
+    const bool config_hud_mode = weapon->AddonEditorUsesHudConfig(static_cast<u8>(selected_visual), hud_mode);
     bool changed = ImGui::DragFloat3("Attach position", (float*)&position, drag_intensity, 0.f, 0.f, "%.6f");
     changed |= ImGui::DragFloat3("Attach rotation (deg)", (float*)&rotation, 0.05f, 0.f, 0.f, "%.3f");
     changed |= ImGui::DragFloat("Attach scale", &scale, 0.001f, 0.001f, 100.f, "%.6f");
@@ -141,7 +143,7 @@ void RenderAddonTransforms(CWeapon* weapon, float drag_intensity)
     if (ImGui::Button("Copy config lines"))
     {
         string1024 config{};
-        LPCSTR prefix = hud_mode ? "hud_" : "world_";
+        LPCSTR prefix = config_hud_mode ? "hud_" : "world_";
         xr_sprintf(config,
             "%sattach_position = %.6f, %.6f, %.6f\n%sattach_rotation = %.3f, %.3f, %.3f\n%sattach_scale = %.6f",
             prefix, position.x, position.y, position.z, prefix, rotation.x, rotation.y, rotation.z, prefix, scale);
@@ -149,6 +151,7 @@ void RenderAddonTransforms(CWeapon* weapon, float drag_intensity)
     }
 
     ImGui::TextDisabled("Config section: [%s]", selected_section.c_str());
+    ImGui::TextDisabled("Config transform: %s", config_hud_mode ? "HUD" : "world");
     ImGui::TextDisabled("Parent: %s", selected_parent.c_str() ? selected_parent.c_str() : "weapon");
 }
 
@@ -368,6 +371,129 @@ void RenderHandPoseIKTransitions(CWeapon* weapon)
     ImGui::TextDisabled("Runtime override: %s", state.runtime_override ? "yes" : "no");
     ImGui::TextDisabled("Timeline uses normalized animation time (0..1) and IK weight (0..1)");
 }
+
+void ApplyInventoryIconValues(CInventory& inventory, const CInventoryItem& source)
+{
+    const shared_str section = source.object().cNameSect();
+    for (PIItem item : inventory.m_all)
+    {
+        if (!item || xr_strcmp(item->object().cNameSect(), section))
+            continue;
+
+        item->m_icon_3d_enabled = source.m_icon_3d_enabled;
+        item->m_icon_3d_rotation = source.m_icon_3d_rotation;
+        item->m_icon_3d_offset = source.m_icon_3d_offset;
+        item->m_icon_3d_scale = source.m_icon_3d_scale;
+        item->m_icon_3d_rotation_speed = source.m_icon_3d_rotation_speed;
+    }
+}
+
+void ResetInventoryIconValues(CInventoryItem& item)
+{
+    LPCSTR section = item.object().cNameSect().c_str();
+    item.m_icon_3d_enabled = READ_IF_EXISTS(pSettings, r_bool, "dragdrop", "use_3d_icons", true);
+    item.m_icon_3d_rotation.set(15.f, 110.f, -5.f);
+    item.m_icon_3d_offset.set(0.f, 0.f, 0.f);
+    item.m_icon_3d_scale = READ_IF_EXISTS(pSettings, r_float, "dragdrop", "icon_3d_scale", 1.f);
+    item.m_icon_3d_rotation_speed = READ_IF_EXISTS(pSettings, r_float, "dragdrop", "icon_3d_rotation_speed", 0.f);
+
+    if (pSettings->line_exist("dragdrop", "icon_3d_rotation"))
+        item.m_icon_3d_rotation = pSettings->r_fvector3("dragdrop", "icon_3d_rotation");
+    if (pSettings->line_exist("dragdrop", "icon_3d_offset"))
+        item.m_icon_3d_offset = pSettings->r_fvector3("dragdrop", "icon_3d_offset");
+
+    item.m_icon_3d_enabled = READ_IF_EXISTS(pSettings, r_bool, section, "inv_icon_3d", item.m_icon_3d_enabled);
+    item.m_icon_3d_scale = READ_IF_EXISTS(pSettings, r_float, section, "inv_icon_3d_scale", item.m_icon_3d_scale);
+    item.m_icon_3d_rotation_speed =
+        READ_IF_EXISTS(pSettings, r_float, section, "inv_icon_3d_rotation_speed", item.m_icon_3d_rotation_speed);
+    if (pSettings->line_exist(section, "inv_icon_3d_rotation"))
+        item.m_icon_3d_rotation = pSettings->r_fvector3(section, "inv_icon_3d_rotation");
+    if (pSettings->line_exist(section, "inv_icon_3d_offset"))
+        item.m_icon_3d_offset = pSettings->r_fvector3(section, "inv_icon_3d_offset");
+}
+
+void RenderInventoryIconEditor(CInventory& inventory)
+{
+    static PIItem selected_item{};
+    xr_vector<PIItem> sections;
+    for (PIItem item : inventory.m_all)
+    {
+        if (!item)
+            continue;
+
+        const auto duplicate = std::find_if(sections.begin(), sections.end(), [item](PIItem candidate) {
+            return !xr_strcmp(candidate->object().cNameSect(), item->object().cNameSect());
+        });
+        if (duplicate == sections.end())
+            sections.push_back(item);
+    }
+
+    const auto selected = std::find_if(sections.begin(), sections.end(), [](PIItem item) {
+        return item == selected_item;
+    });
+    if (selected == sections.end())
+    {
+        PIItem active_item = inventory.ActiveItem();
+        const auto active = std::find_if(sections.begin(), sections.end(), [active_item](PIItem item) {
+            return active_item && !xr_strcmp(item->object().cNameSect(), active_item->object().cNameSect());
+        });
+        selected_item = active != sections.end() ? *active : (sections.empty() ? nullptr : sections.front());
+    }
+
+    if (!selected_item)
+    {
+        ImGui::TextDisabled("Inventory is empty");
+        return;
+    }
+
+    LPCSTR selected_section = selected_item->object().cNameSect().c_str();
+    if (ImGui::BeginCombo("Inventory item", selected_section))
+    {
+        for (PIItem item : sections)
+        {
+            LPCSTR section = item->object().cNameSect().c_str();
+            const bool is_selected = item == selected_item;
+            if (ImGui::Selectable(section, is_selected))
+                selected_item = item;
+            if (is_selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    bool changed = ImGui::Checkbox("Use 3D icon", &selected_item->m_icon_3d_enabled);
+    changed |= ImGui::DragFloat3("Position", (float*)&selected_item->m_icon_3d_offset, 0.001f, 0.f, 0.f, "%.5f");
+    changed |= ImGui::DragFloat3("Rotation (deg)", (float*)&selected_item->m_icon_3d_rotation, 0.1f, 0.f, 0.f, "%.2f");
+    changed |= ImGui::DragFloat("Size / scale", &selected_item->m_icon_3d_scale, 0.005f, 0.05f, 20.f, "%.4f");
+    changed |= ImGui::DragFloat(
+        "Rotation speed (deg/s)", &selected_item->m_icon_3d_rotation_speed, 0.1f, -720.f, 720.f, "%.2f");
+    selected_item->m_icon_3d_scale = _max(selected_item->m_icon_3d_scale, 0.05f);
+
+    if (changed)
+        ApplyInventoryIconValues(inventory, *selected_item);
+
+    if (ImGui::Button("Reset from config"))
+    {
+        ResetInventoryIconValues(*selected_item);
+        ApplyInventoryIconValues(inventory, *selected_item);
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Copy config lines"))
+    {
+        string1024 config{};
+        xr_sprintf(config,
+            "inv_icon_3d = %s\ninv_icon_3d_offset = %.5f, %.5f, %.5f\n"
+            "inv_icon_3d_rotation = %.2f, %.2f, %.2f\ninv_icon_3d_scale = %.4f\ninv_icon_3d_rotation_speed = %.2f",
+            selected_item->m_icon_3d_enabled ? "true" : "false", selected_item->m_icon_3d_offset.x,
+            selected_item->m_icon_3d_offset.y, selected_item->m_icon_3d_offset.z, selected_item->m_icon_3d_rotation.x,
+            selected_item->m_icon_3d_rotation.y, selected_item->m_icon_3d_rotation.z, selected_item->m_icon_3d_scale,
+            selected_item->m_icon_3d_rotation_speed);
+        ImGui::SetClipboardText(config);
+    }
+
+    ImGui::TextDisabled("Section: [%s]", selected_item->object().cNameSect().c_str());
+    ImGui::TextDisabled("Open the inventory for a live preview; changes affect every item of this section.");
+}
 } // namespace
 
 
@@ -382,9 +508,19 @@ void CImGuiHudEditorWnd::Render()
         return;
     }
 
+    CActor* actor = Actor();
+    if (!actor)
+    {
+        RenderEnd();
+        return;
+    }
+
     bool showSeparator = true;
     auto item = g_player_hud->attached_item(0);
-    auto Wpn = smart_cast<CWeapon*>(Actor()->inventory().ActiveItem());
+    auto Wpn = smart_cast<CWeapon*>(actor->inventory().ActiveItem());
+
+    if (ImGui::CollapsingHeader("3D inventory icons", ImGuiTreeNodeFlags_DefaultOpen))
+        RenderInventoryIconEditor(actor->inventory());
 
     static float drag_intensity = 0.0001f;
 
@@ -417,7 +553,7 @@ void CImGuiHudEditorWnd::Render()
         if (ImGui::CollapsingHeader("Bone transforms 0"))
             RenderBoneAdjustments(0);
 
-        if (Wpn && ImGui::CollapsingHeader("Addon transforms"))
+        if (Wpn && ImGui::CollapsingHeader("Installed addon transforms", ImGuiTreeNodeFlags_DefaultOpen))
             RenderAddonTransforms(Wpn, drag_intensity);
 
         if (Wpn && ImGui::CollapsingHeader("Addon hand-pose IK transitions"))

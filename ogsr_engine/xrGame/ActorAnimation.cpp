@@ -22,6 +22,7 @@
 #include "artifact.h"
 #include "IKLimbsController.h"
 #include "player_hud.h"
+#include "../xr_3da/camerabase.h"
 
 static const float y_spin0_factor = 0.0f;
 static const float y_spin1_factor = 0.4f;
@@ -82,7 +83,9 @@ void CActor::HeadCallback(CBoneInstance* B)
     CActor* A = static_cast<CActor*>(B->callback_param());
     VERIFY(A);
     Fmatrix spin;
-    float bone_yaw = angle_normalize_signed(A->r_torso.yaw - A->r_model_yaw - A->r_model_yaw_delta) * y_head_factor;
+    float bone_yaw = A->cam_freelook != eflDisabled ?
+        angle_normalize_signed(-A->cam_FirstEye()->yaw - A->r_model_yaw - A->r_model_yaw_delta) * 0.35f :
+        angle_normalize_signed(A->r_torso.yaw - A->r_model_yaw - A->r_model_yaw_delta) * y_head_factor;
     float bone_pitch = angle_normalize_signed(A->r_torso.pitch) * p_head_factor;
     float bone_roll = angle_normalize_signed(A->r_torso.roll) * r_head_factor;
     Fvector c = B->mTransform.c;
@@ -129,6 +132,7 @@ void STorsoWpn::Create(IKinematicsAnimated* K, LPCSTR base0, LPCSTR base1)
     all_attack_0 = K->ID_Cycle_Safe(strconcat(sizeof(buf), buf, base0, "_all", base1, "_attack_0"));
     all_attack_1 = K->ID_Cycle_Safe(strconcat(sizeof(buf), buf, base0, "_all", base1, "_attack_1"));
     all_attack_2 = K->ID_Cycle_Safe(strconcat(sizeof(buf), buf, base0, "_all", base1, "_attack_2"));
+    safemode = K->ID_Cycle_Safe(strconcat(sizeof(buf), buf, base0, "_torso", base1, "_idle_1"));
 }
 void SAnimState::Create(IKinematicsAnimated* K, LPCSTR base0, LPCSTR base1)
 {
@@ -475,7 +479,9 @@ void CActor::g_SetAnimation(u32 mstate_rl)
                             {
                                 switch (W->GetState())
                                 {
-                                case CWeapon::eIdle: M_torso = W->IsZoomed() ? TW->zoom : TW->moving[moving_idx]; break;
+                                case CWeapon::eIdle:
+                                    M_torso = W->IsZoomed() ? TW->zoom : ((m_bSafemode && moving_idx != STorsoWpn::eSprint) ? TW->safemode : TW->moving[moving_idx]);
+                                    break;
                                 case CWeapon::eFire: M_torso = W->IsZoomed() ? TW->attack_zoom : TW->attack; break;
                                 case CWeapon::eFire2: M_torso = W->IsZoomed() ? TW->attack_zoom : TW->attack; break;
                                 case CWeapon::eReload:

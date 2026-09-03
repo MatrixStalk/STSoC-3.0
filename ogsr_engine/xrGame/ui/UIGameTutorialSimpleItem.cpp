@@ -53,7 +53,7 @@ void CUISequenceSimpleItem::Load(CUIXml* xml, int idx)
     LPCSTR m_snd_name = xml->Read("sound", 0, "");
     if (m_snd_name && m_snd_name[0])
     {
-        m_sound.create(m_snd_name, st_Effect, sg_Undefined);
+        m_sound.create(m_snd_name, st_Effect, sg_Interface);
         VERIFY(m_sound._handle());
     }
 

@@ -54,6 +54,7 @@ enum
 enum
 {
     sg_Undefined = 0,
+    sg_Interface = u32(-2),
     sg_SourceType = u32(-1),
     sg_forcedword = u32(-1),
 };
@@ -68,6 +69,21 @@ enum esound_type
     st_Effect = 0,
     st_Music = 1,
     st_forcedword = u32(-1),
+};
+
+struct SSoundEqualizerBand
+{
+    float frequency{};
+    float gain_db{};
+    float q{0.707f};
+};
+
+struct SSoundEqualizer
+{
+    BOOL enabled{FALSE};
+    float preamp_db{};
+    SSoundEqualizerBand bands[4]{{100.f, 0.f, 0.707f}, {400.f, 0.f, 1.f}, {2500.f, 0.f, 1.f}, {8000.f, 0.f, 0.707f}};
+    u32 revision{};
 };
 
 class CSound_UserDataVisitor;
@@ -323,6 +339,9 @@ public:
     virtual CSound_environment* DbgCurrentEnv() = 0;
     virtual void DbgCurrentEnvPaused(bool v) = 0;
     virtual void DbgCurrentEnvSave() = 0;
+    virtual SSoundEqualizer* DbgEqualizer() = 0;
+    virtual void DbgEqualizerReload() = 0;
+    virtual void DbgEqualizerSave() = 0;
 };
 
 class CSound_manager_interface;

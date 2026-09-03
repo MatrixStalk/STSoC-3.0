@@ -31,6 +31,7 @@
 #include "Actor.h"
 #include "actor_anim_defs.h"
 #include "HudItem.h"
+#include "Weapon.h"
 #include "ai_sounds.h"
 #include "ai_space.h"
 #include "trade.h"
@@ -63,6 +64,7 @@
 #include "location_manager.h"
 #include "PHCapture.h"
 #include "CustomDetector.h"
+#include "xr_level_controller.h"
 
 // Tip for action for object we're looking at
 constexpr const char* m_sCarCharacterUseAction = "car_character_use";
@@ -113,6 +115,9 @@ CActor::CActor() : CEntityAlive(), current_ik_cam_shift(0)
     fCurAVelocity = 0.0f;
     // эффекторы
     pCamBobbing = 0;
+    cam_freelook = eflDisabled;
+    freelook_cam_control = 0.f;
+    old_torso_yaw = 0.f;
     m_pSleepEffector = NULL;
     m_pSleepEffectorPP = NULL;
 
@@ -155,6 +160,7 @@ CActor::CActor() : CEntityAlive(), current_ik_cam_shift(0)
     m_pActorEffector = NULL;
 
     m_bZoomAimingMode = false;
+    m_bSafemode = false;
 
     m_sDefaultObjAction = nullptr;
 
@@ -1046,6 +1052,18 @@ void CActor::shedule_Update(u32 DT)
             mstate_wishful &= ~mcRLookout;
             mstate_wishful &= ~mcFwd;
             mstate_wishful &= ~mcBack;
+            if (cam_freelook == eflEnabled)
+            {
+                if (psActorFlags.test(AF_FREELOOK_TOGGLE))
+                {
+                    if (!CanUseFreelook())
+                        cam_UnsetFreelook();
+                }
+                else if (!CanUseFreelook() || !pInput->iGetAsyncKeyState(get_action_dik(kFREELOOK)))
+                {
+                    cam_UnsetFreelook();
+                }
+            }
             extern bool g_bAutoClearCrouch;
             if (g_bAutoClearCrouch)
                 mstate_wishful &= ~mcCrouch;
@@ -1720,6 +1738,20 @@ void CActor::OnDifficultyChanged()
     // hit probability
     strconcat(sizeof(tmp), tmp, "hit_probability_", diff_name);
     hit_probability = pSettings->r_float(*cNameSect(), tmp);
+}
+
+void CActor::set_safemode(bool status)
+{
+    if (is_safemode() == status)
+        return;
+
+    m_bSafemode = status;
+    g_player_hud->OnMovementChanged(mcAnyMove);
+    g_player_hud->updateMovementLayerState();
+
+    CWeapon* weapon = smart_cast<CWeapon*>(inventory().ActiveItem());
+    status ? callback(GameObject::eOnWeaponLowered)(weapon ? weapon->lua_game_object() : nullptr) :
+             callback(GameObject::eOnWeaponRaised)(weapon ? weapon->lua_game_object() : nullptr);
 }
 
 CVisualMemoryManager* CActor::visual_memory() const { return (&memory().visual()); }

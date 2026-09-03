@@ -77,6 +77,8 @@ protected:
 
     virtual void OnShot();
     virtual void PlaySoundShot();
+    virtual void PlaySound(HUD_SOUND& snd, const Fvector& position, bool overlap = false) override;
+    virtual void OnHudMotionStart(LPCSTR motion, float speed) override;
 
     virtual void OnEmptyClick();
 
@@ -89,7 +91,7 @@ protected:
 
 protected:
     virtual void ReloadMagazine();
-    void ApplySilencerKoeffs();
+    void ApplySilencerKoeffs(LPCSTR silencer_section);
 
     virtual void state_Fire(float dt);
 
@@ -253,9 +255,23 @@ protected:
 
     bool ScopeRespawn(PIItem);
 
-    // Alundaio: LAYERED_SND_SHOOT
-    HUD_SOUND_COLLECTION_LAYERED m_layered_sounds;
-    //-Alundaio
+    // Lazy cache for base and attachment-provided snd_* definitions. Keeping
+    // resolution at playback time lets every weapon sound be overridden by
+    // an attachment, including sounds owned by derived weapon classes.
+    xr_map<shared_str, HUD_SOUND*> m_resolved_sounds;
+    u32 m_sound_timeline_revision{};
+    xr_map<shared_str, shared_str> m_shot_alias_lines;
+    bool m_animation_sounds_replace_legacy{};
+    float m_indoor_sound_check_distance{30.f};
+
+    shared_str ResolveSoundProvider(LPCSTR line) const;
+    HUD_SOUND* ResolveSound(HUD_SOUND& fallback);
+    HUD_SOUND* ResolveSoundLine(LPCSTR line, int type);
+    void ClearResolvedSounds();
+    bool IsShotIndoor();
+    void RegisterShotSound(LPCSTR section, LPCSTR line, LPCSTR alias);
+    bool HasShotSound(LPCSTR alias) const;
+    void PlayShotSound(LPCSTR alias);
 
     virtual void OnMotionMark(u32 state, const motion_marks& M) override;
     int CheckAmmoBeforeReload(u32& v_ammoType);

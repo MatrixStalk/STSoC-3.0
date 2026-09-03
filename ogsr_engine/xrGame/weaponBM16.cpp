@@ -17,9 +17,9 @@ void CWeaponBM16::Load(LPCSTR section)
 void CWeaponBM16::PlayReloadSound()
 {
     if (m_magazine.size() == 1 || !HaveCartridgeInInventory(2))
-        PlaySound((IsMisfire() && !sndReloadJammed.sounds.empty()) ? sndReloadJammed : m_sndReload1, get_LastFP());
+        PlaySound((IsMisfire() && !sndReloadJammed.empty()) ? sndReloadJammed : m_sndReload1, get_LastFP());
     else
-        PlaySound((IsMisfire() && !sndReloadJammed.sounds.empty()) ? sndReloadJammed : sndReload, get_LastFP());
+        PlaySound((IsMisfire() && !sndReloadJammed.empty()) ? sndReloadJammed : sndReload, get_LastFP());
 }
 
 void CWeaponBM16::UpdateSounds()
@@ -41,7 +41,7 @@ void CWeaponBM16::OnShot()
 
     if (IsMisfire())
     {
-        if (!m_sndBreechJammed.sounds.empty())
+        if (!m_sndBreechJammed.empty())
             PlaySound(m_sndBreechJammed, get_LastFP());
     }
     else

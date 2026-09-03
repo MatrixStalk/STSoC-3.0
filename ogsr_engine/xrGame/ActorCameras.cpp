@@ -10,6 +10,8 @@
 
 #include "Weapon.h"
 #include "Inventory.h"
+#include "HudItem.h"
+#include "Missile.h"
 
 #include "SleepEffector.h"
 #include "ActorEffector.h"
@@ -35,6 +37,8 @@ void CActor::cam_Set(EActorCameras style)
     cam_Active()->OnActivate(old_cam);
 }
 float CActor::f_Ladder_cam_limit = 1.f;
+float f_Freelook_cam_limit = PI_DIV_2;
+float f_Freelook_cam_limit_p = 0.75f;
 void CActor::cam_SetLadder()
 {
     CCameraBase* C = cameras[eacFirstEye];
@@ -95,6 +99,127 @@ void CActor::cam_UnsetLadder()
     C->lim_yaw[0] = 0;
     C->lim_yaw[1] = 0;
     C->bClampYaw = false;
+}
+
+void CActor::cam_SetFreelook()
+{
+    cam_freelook = eflEnabling;
+}
+
+void CActor::camUpdateFreelook(float dt)
+{
+    CCameraBase* camera = cameras[eacFirstEye];
+
+    if (cam_freelook == eflEnabled || cam_freelook == eflDisabled)
+        return;
+
+    if (cam_freelook == eflEnabling)
+    {
+        if (!camera->bClampYaw)
+        {
+            old_torso_yaw = -r_torso.yaw;
+            camera->lim_yaw.set(camera->yaw - f_Freelook_cam_limit, camera->yaw + f_Freelook_cam_limit);
+            camera->bClampYaw = true;
+        }
+
+        if (camera->lim_pitch.similar({-1.5f, 1.5f}))
+        {
+            float& pitch = camera->pitch;
+            if (abs(pitch) > 1.5f)
+            {
+                while (pitch < camera->lim_pitch[0])
+                    pitch += PI_MUL_2;
+                while (pitch > camera->lim_pitch[1])
+                    pitch -= PI_MUL_2;
+            }
+
+            if (pitch < -f_Freelook_cam_limit_p)
+            {
+                const float diff = angle_difference(pitch, -f_Freelook_cam_limit_p + 0.05f);
+                pitch = diff < 0.025f ? -f_Freelook_cam_limit_p + 0.005f : pitch + diff * _min(dt * 10.f, 0.5f);
+                clamp(pitch, camera->lim_pitch.x, -f_Freelook_cam_limit_p);
+            }
+            else if (pitch > f_Freelook_cam_limit_p)
+            {
+                const float diff = angle_difference(pitch, f_Freelook_cam_limit_p - 0.05f);
+                pitch = diff < 0.025f ? f_Freelook_cam_limit_p - 0.005f : pitch - diff * _min(dt * 10.f, 0.5f);
+                clamp(pitch, f_Freelook_cam_limit_p, camera->lim_pitch.y);
+            }
+            else
+            {
+                camera->lim_pitch.set(-f_Freelook_cam_limit_p, f_Freelook_cam_limit_p);
+                cam_freelook = eflEnabled;
+            }
+        }
+        return;
+    }
+
+    if (camera->bClampYaw)
+    {
+        const float delta = angle_difference_signed(old_torso_yaw, camera->yaw);
+        if (abs(delta) < 0.05f)
+        {
+            camera->lim_yaw.set(0, 0);
+            camera->bClampYaw = false;
+        }
+        else
+            camera->yaw += delta * _min(dt * 10.f, 1.f);
+    }
+
+    if (!camera->lim_pitch.similar({-1.5f, 1.5f}))
+    {
+        const float delta = angle_difference_signed(0.f, camera->pitch);
+        if (abs(delta) < 0.05f)
+            camera->lim_pitch.set(-1.5f, 1.5f);
+        else
+            camera->pitch += delta * _min(dt * 10.f, 1.f);
+    }
+
+    if (!camera->bClampYaw && camera->lim_pitch.similar({-1.5f, 1.5f}))
+        cam_freelook = eflDisabled;
+}
+
+void CActor::cam_UnsetFreelook()
+{
+    cam_freelook = eflDisabling;
+}
+
+bool CActor::CanUseFreelook()
+{
+    if (cam_active != eacFirstEye || g_player_hud->script_anim_part == 2)
+        return false;
+
+    CElevatorState* elevator = character_physics_support()->movement()->ElevatorState();
+    if (elevator)
+    {
+        const CElevatorState::Estate state = elevator->State();
+        if ((state != CElevatorState::clbNoLadder && state != CElevatorState::clbNone && state != CElevatorState::clbNoState) || m_holder)
+            return false;
+    }
+    else if (m_holder)
+        return false;
+
+    if (PIItem item = inventory().ActiveItem())
+    {
+        CWeapon* weapon = item->cast_weapon();
+        CMissile* missile = item->cast_missile();
+        if (missile)
+        {
+            const u32 state = missile->GetState();
+            if (state != CHudItem::eIdle && state != CHudItem::eHidden)
+                return false;
+        }
+        else if (weapon)
+        {
+            if (weapon->IsZoomed())
+                return false;
+            const u32 state = weapon->GetState();
+            if (state == CWeapon::eFire || state == CWeapon::eFire2 || state == CWeapon::eReload || state == CWeapon::eSwitch || state == CWeapon::eFiremode)
+                return false;
+        }
+    }
+
+    return true;
 }
 
 float cammera_into_collision_shift = 0.05f;
@@ -298,9 +423,14 @@ void CActor::cam_Update(float dt, float fFOV)
     }
     //--#SM+#--
 
+    if (cam_freelook != eflDisabled && cam_active != eacFreeLook)
+        camUpdateFreelook(dt);
+
 	bool on_ladder = false;
     if (mstate_real & mcClimb && cam_active != eacFreeLook)
     {
+        if (cam_freelook != eflDisabled)
+            cam_UnsetFreelook();
         on_ladder = true;
         camUpdateLadder(dt);
     }

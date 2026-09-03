@@ -18,6 +18,12 @@ class CStepManager
 
     u32 m_time_anim_started;
 
+    bool m_eft_human{};
+    bool m_eft_was_on_ground{true};
+    bool m_eft_was_moving{};
+    u8 m_eft_previous_mode{};
+    u32 m_eft_last_shuffle_time{};
+
 public:
     CStepManager();
     virtual ~CStepManager();
@@ -31,6 +37,10 @@ public:
     // call on updateCL
     void update();
 
+    // Explicit actor events. NPC transitions are detected from their physics state.
+    void on_eft_jump();
+    void on_eft_land(float contact_speed);
+
     // process event
     virtual void event_on_step() {}
 
@@ -39,6 +49,9 @@ protected:
     virtual bool is_on_ground() { return true; }
 
 private:
+    bool play_eft_step(float power);
+    void play_eft_action(u8 action, float power);
+    void update_eft_transitions();
     void reload_foot_bones();
     void load_foot_bones(CInifile::Sect& data);
 

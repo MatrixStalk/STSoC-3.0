@@ -405,6 +405,14 @@ void CTorch::UpdateCL()
                     target_dist = 0.f;
 
                 dir = actor->Cameras().Direction();
+                if (actor->cam_freelook != eflDisabled)
+                {
+                    Fvector freelook_dir;
+                    const float pitch = dir.getP();
+                    freelook_dir.setHP(-angle_normalize_signed(actor->old_torso_yaw), pitch > 0.f ? pitch * 0.6f : pitch * 0.8f);
+                    freelook_dir.lerp(dir, freelook_dir, actor->freelook_cam_control);
+                    dir = freelook_dir;
+                }
                 Fvector::generate_orthonormal_basis_normalized(dir, up, right);
                 pos = actor->Cameras().Position();
                 Fvector offset = pos;

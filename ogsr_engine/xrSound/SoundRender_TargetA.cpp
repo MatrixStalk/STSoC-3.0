@@ -4,254 +4,286 @@
 #include "soundrender_emitter.h"
 #include "soundrender_source.h"
 
-#include <efx.h>
+#include <fmod_errors.h>
 
-xr_vector<u8> g_target_temp_data;
+CSoundRender_TargetA::CSoundRender_TargetA() = default;
+CSoundRender_TargetA::~CSoundRender_TargetA() = default;
 
-CSoundRender_TargetA::CSoundRender_TargetA() : CSoundRender_Target()
+void CSoundRender_TargetA::reset_equalizer()
 {
-    cache_gain = 0.f;
-    cache_pitch = 1.f;
-    pSource = 0;
+    for (auto& filter : eq_filters)
+    {
+        filter.z1[0] = filter.z1[1] = 0.f;
+        filter.z2[0] = filter.z2[1] = 0.f;
+    }
+    eq_revision = u32(-1);
+    eq_sample_rate = 0;
 }
 
-CSoundRender_TargetA::~CSoundRender_TargetA() {}
-
-BOOL CSoundRender_TargetA::_initialize()
+void CSoundRender_TargetA::update_equalizer(const SSoundEqualizer& settings, u32 sample_rate)
 {
-    inherited::_initialize();
-    // initialize buffer
-    A_CHK(alGenBuffers(sdef_target_count, pBuffers));
-    alGenSources(1, &pSource);
-    ALenum error = alGetError();
-    if (AL_NO_ERROR == error)
+    constexpr float pi = 3.14159265358979323846f;
+    for (u32 i = 0; i < 4; ++i)
     {
-        A_CHK(alSourcei(pSource, AL_LOOPING, AL_FALSE));
-        A_CHK(alSourcef(pSource, AL_MIN_GAIN, 0.f));
-        A_CHK(alSourcef(pSource, AL_MAX_GAIN, 1.f));
-        A_CHK(alSourcef(pSource, AL_GAIN, cache_gain));
-        A_CHK(alSourcef(pSource, AL_PITCH, cache_pitch));
-        return TRUE;
+        Biquad& f = eq_filters[i];
+        const auto& band = settings.bands[i];
+        const float frequency = clampr(band.frequency, 20.f, sample_rate * 0.475f);
+        const float q = _max(0.1f, band.q);
+        const float A = powf(10.f, clampr(band.gain_db, -24.f, 24.f) / 40.f);
+        const float w0 = 2.f * pi * frequency / sample_rate;
+        const float c = cosf(w0);
+        const float s = sinf(w0);
+        const float alpha = s / (2.f * q);
+        float a0 = 1.f;
+        if (i == 0)
+        {
+            const float root = 2.f * sqrtf(A) * alpha;
+            f.b0 = A * ((A + 1.f) - (A - 1.f) * c + root);
+            f.b1 = 2.f * A * ((A - 1.f) - (A + 1.f) * c);
+            f.b2 = A * ((A + 1.f) - (A - 1.f) * c - root);
+            a0 = (A + 1.f) + (A - 1.f) * c + root;
+            f.a1 = -2.f * ((A - 1.f) + (A + 1.f) * c);
+            f.a2 = (A + 1.f) + (A - 1.f) * c - root;
+        }
+        else if (i == 3)
+        {
+            const float root = 2.f * sqrtf(A) * alpha;
+            f.b0 = A * ((A + 1.f) + (A - 1.f) * c + root);
+            f.b1 = -2.f * A * ((A - 1.f) + (A + 1.f) * c);
+            f.b2 = A * ((A + 1.f) + (A - 1.f) * c - root);
+            a0 = (A + 1.f) - (A - 1.f) * c + root;
+            f.a1 = 2.f * ((A - 1.f) - (A + 1.f) * c);
+            f.a2 = (A + 1.f) - (A - 1.f) * c - root;
+        }
+        else
+        {
+            f.b0 = 1.f + alpha * A;
+            f.b1 = -2.f * c;
+            f.b2 = 1.f - alpha * A;
+            a0 = 1.f + alpha / A;
+            f.a1 = -2.f * c;
+            f.a2 = 1.f - alpha / A;
+        }
+        f.b0 /= a0;
+        f.b1 /= a0;
+        f.b2 /= a0;
+        f.a1 /= a0;
+        f.a2 /= a0;
+    }
+    eq_revision = settings.revision;
+    eq_sample_rate = sample_rate;
+}
+
+void CSoundRender_TargetA::apply_equalizer(void* data, u32 bytes, const WAVEFORMATEX& format)
+{
+    const SSoundEqualizer& settings = SoundRender->Equalizer();
+    if (!settings.enabled || !m_pEmitter)
+        return;
+    if (settings.revision != eq_revision || format.nSamplesPerSec != eq_sample_rate)
+        update_equalizer(settings, format.nSamplesPerSec);
+
+    const u32 channels = format.nChannels == 1 ? 1u : 2u;
+    const float preamp = powf(10.f, clampr(settings.preamp_db, -24.f, 12.f) / 20.f);
+    auto process = [&](float sample, u32 channel) {
+        float value = sample * preamp;
+        for (auto& filter : eq_filters)
+        {
+            const float out = filter.b0 * value + filter.z1[channel];
+            filter.z1[channel] = filter.b1 * value - filter.a1 * out + filter.z2[channel];
+            filter.z2[channel] = filter.b2 * value - filter.a2 * out;
+            value = out;
+        }
+        return clampr(value, -1.f, 1.f);
+    };
+
+    if (format.wFormatTag == WAVE_FORMAT_IEEE_FLOAT)
+    {
+        float* samples = static_cast<float*>(data);
+        const u32 count = bytes / sizeof(float);
+        for (u32 i = 0; i < count; ++i)
+            samples[i] = process(samples[i], i % channels);
     }
     else
     {
-        Msg("! sound: OpenAL: Can't create source. Error: %s.", (LPCSTR)alGetString(error));
-        return FALSE;
+        s16* samples = static_cast<s16*>(data);
+        const u32 count = bytes / sizeof(s16);
+        for (u32 i = 0; i < count; ++i)
+            samples[i] = static_cast<s16>(process(samples[i] / 32768.f, i % channels) * 32767.f);
     }
 }
 
-void CSoundRender_TargetA::alAuxInit(ALuint slot) { A_CHK(alSource3i(pSource, AL_AUXILIARY_SEND_FILTER, slot, 0, AL_FILTER_NULL)); }
-
-void CSoundRender_TargetA::_destroy()
+FMOD_RESULT F_CALLBACK CSoundRender_TargetA::pcm_read(FMOD_SOUND* sound, void* data, unsigned int bytes)
 {
-    // clean up target
-    if (alIsSource(pSource))
-        alDeleteSources(1, &pSource);
-    A_CHK(alDeleteBuffers(sdef_target_count, pBuffers));
+    void* user = nullptr;
+    reinterpret_cast<FMOD::Sound*>(sound)->getUserData(&user);
+    auto* target = static_cast<CSoundRender_TargetA*>(user);
+    if (!target || !target->m_pEmitter)
+    {
+        ZeroMemory(data, bytes);
+        return FMOD_OK;
+    }
+    target->m_pEmitter->fill_block(data, bytes);
+    target->apply_equalizer(data, bytes, target->m_pEmitter->source()->m_wformat);
+    return FMOD_OK;
 }
 
-void CSoundRender_TargetA::_restart()
+FMOD_RESULT F_CALLBACK CSoundRender_TargetA::pcm_seek(FMOD_SOUND*, int, unsigned int, FMOD_TIMEUNIT) { return FMOD_OK; }
+
+bool CSoundRender_TargetA::create_stream()
 {
-    _destroy();
-    _initialize();
+    if (!m_pEmitter)
+        return false;
+    auto* core = static_cast<CSoundRender_CoreA*>(SoundRender);
+    const WAVEFORMATEX& format = m_pEmitter->source()->m_wformat;
+    FMOD_CREATESOUNDEXINFO info{};
+    info.cbsize = sizeof(info);
+    info.length = _max(1u, m_pEmitter->get_bytes_total());
+    info.numchannels = format.nChannels;
+    info.defaultfrequency = format.nSamplesPerSec;
+    info.format = format.wFormatTag == WAVE_FORMAT_IEEE_FLOAT ? FMOD_SOUND_FORMAT_PCMFLOAT : FMOD_SOUND_FORMAT_PCM16;
+    info.decodebuffersize = _max(256u, u32(format.nSamplesPerSec / 20));
+    info.pcmreadcallback = &CSoundRender_TargetA::pcm_read;
+    info.pcmsetposcallback = &CSoundRender_TargetA::pcm_seek;
+    info.userdata = this;
+    const FMOD_MODE mode = FMOD_OPENUSER | FMOD_CREATESTREAM | FMOD_LOOP_NORMAL | FMOD_2D;
+    const FMOD_RESULT result = core->FmodSystem()->createStream(nullptr, mode, &info, &fmod_sound);
+    if (result != FMOD_OK)
+    {
+        Msg("! FMOD: create stream failed for %s: %s", m_pEmitter->source()->file_name(), FMOD_ErrorString(result));
+        return false;
+    }
+    return true;
 }
 
-void CSoundRender_TargetA::start(CSoundRender_Emitter* E)
+void CSoundRender_TargetA::attach_steam_audio()
 {
-    inherited::start(E);
+    if (!fmod_channel || !m_pEmitter || m_pEmitter->b2D)
+        return;
+    auto* core = static_cast<CSoundRender_CoreA*>(SoundRender);
+    if (!core->SteamAudioSpatializer())
+        return;
+    if (core->FmodSystem()->createDSPByPlugin(core->SteamAudioSpatializer(), &steam_audio_dsp) != FMOD_OK)
+        return;
+    fmod_channel->addDSP(FMOD_CHANNELCONTROL_DSP_HEAD, steam_audio_dsp);
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_DISTANCEATTENUATION, 1);
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_AIRABSORPTION, core->AirAbsorptionEnabled() ? 1 : 0);
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_OCCLUSION, core->OcclusionEnabled() ? 2 : 0);
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_HRTF_INTERPOLATION, 1);
+    steam_audio_dsp->setParameterBool(IPL_SPATIALIZE_DIRECT_BINAURAL, core->HrtfEnabled());
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_DISTANCEATTENUATION_ROLLOFFTYPE, 2);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_DISTANCEATTENUATION_MINDISTANCE, m_pEmitter->p_source.min_distance);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_DISTANCEATTENUATION_MAXDISTANCE, m_pEmitter->p_source.max_distance);
+}
 
-    // Calc storage
-    buf_block = sdef_target_block * E->source()->m_wformat.nAvgBytesPerSec / 1000;
-    g_target_temp_data.resize(buf_block);
+void CSoundRender_TargetA::release_stream()
+{
+    if (fmod_channel)
+    {
+        fmod_channel->stop();
+        fmod_channel = nullptr;
+    }
+    if (steam_audio_dsp)
+    {
+        steam_audio_dsp->release();
+        steam_audio_dsp = nullptr;
+    }
+    if (fmod_sound)
+    {
+        fmod_sound->release();
+        fmod_sound = nullptr;
+    }
+}
+
+BOOL CSoundRender_TargetA::_initialize() { return inherited::_initialize(); }
+void CSoundRender_TargetA::_destroy() { release_stream(); }
+void CSoundRender_TargetA::_restart() { release_stream(); }
+
+void CSoundRender_TargetA::start(CSoundRender_Emitter* emitter)
+{
+    inherited::start(emitter);
+    reset_equalizer();
+    cache_gain = 0.f;
+    cache_pitch = 1.f;
+    create_stream();
 }
 
 void CSoundRender_TargetA::render()
 {
-    for (u32 buf_idx = 0; buf_idx < sdef_target_count; buf_idx++)
-        fill_block(pBuffers[buf_idx]);
-
-    A_CHK(alSourceQueueBuffers(pSource, sdef_target_count, pBuffers));
-    A_CHK(alSourcePlay(pSource));
-
+    if (!fmod_sound)
+        return;
+    auto* core = static_cast<CSoundRender_CoreA*>(SoundRender);
+    if (core->FmodSystem()->playSound(fmod_sound, nullptr, true, &fmod_channel) != FMOD_OK)
+        return;
+    attach_steam_audio();
+    fill_parameters(core);
+    fmod_channel->setPaused(false);
     inherited::render();
 }
 
 void CSoundRender_TargetA::stop()
 {
-    if (rendering)
-    {
-        A_CHK(alSourceStop(pSource));
-        A_CHK(alSourcei(pSource, AL_BUFFER, NULL));
-        A_CHK(alSourcei(pSource, AL_SOURCE_RELATIVE, TRUE));
-    }
+    release_stream();
     inherited::stop();
 }
 
 void CSoundRender_TargetA::rewind()
 {
     inherited::rewind();
-
-    A_CHK(alSourceStop(pSource));
-    A_CHK(alSourcei(pSource, AL_BUFFER, NULL));
-    for (u32 buf_idx = 0; buf_idx < sdef_target_count; buf_idx++)
-        fill_block(pBuffers[buf_idx]);
-    A_CHK(alSourceQueueBuffers(pSource, sdef_target_count, pBuffers));
-    A_CHK(alSourcePlay(pSource));
+    reset_equalizer();
+    if (fmod_channel)
+        fmod_channel->setPosition(0, FMOD_TIMEUNIT_PCMBYTES);
 }
 
 void CSoundRender_TargetA::update()
 {
     inherited::update();
-
-    // Msg("--[%s] bEFX is [%d]", __FUNCTION__, this->bEFX);
-
-    if (bAlSoft)
+    if (!fmod_channel)
+        return;
+    bool playing = false;
+    if (fmod_channel->isPlaying(&playing) != FMOD_OK || !playing)
     {
-        ALint processed, state;
-
-        /* Get relevant source info */
-        alGetSourcei(pSource, AL_SOURCE_STATE, &state);
-        alGetSourcei(pSource, AL_BUFFERS_PROCESSED, &processed);
-        ALenum error = alGetError();
-        if (error != AL_NO_ERROR)
-        {
-            Msg("!![%s]Error checking source state! OpenAL Error: [%s]", __FUNCTION__, alGetString(error));
-            return;
-        }
-
-        while (processed > 0)
-        {
-            ALuint BufferID;
-            A_CHK(alSourceUnqueueBuffers(pSource, 1, &BufferID));
-            fill_block(BufferID);
-            A_CHK(alSourceQueueBuffers(pSource, 1, &BufferID));
-            processed--;
-            ALenum error = alGetError();
-            if (error != AL_NO_ERROR)
-            {
-                Msg("!![%s]Error buffering data! OpenAL Error: [%s]", __FUNCTION__, alGetString(error));
-                return;
-            }
-        }
-
-        /* Make sure the source hasn't underrun */
-        if (state != AL_PLAYING && state != AL_PAUSED)
-        {
-            ALint queued;
-
-            /* If no buffers are queued, playback is finished */
-            alGetSourcei(pSource, AL_BUFFERS_QUEUED, &queued);
-            if (queued == 0)
-                return;
-
-            alSourcePlay(pSource);
-            ALenum error = alGetError();
-            if (error != AL_NO_ERROR)
-            {
-                Msg("!![%s]Error restarting playback! OpenAL Error: [%s]", __FUNCTION__, alGetString(error));
-                return;
-            }
-        }
-    }
-    else
-    {
-        ALint processed;
-        // Get status
-        A_CHK(alGetSourcei(pSource, AL_BUFFERS_PROCESSED, &processed));
-
-        if (processed > 0)
-        {
-            while (processed)
-            {
-                ALuint BufferID;
-                A_CHK(alSourceUnqueueBuffers(pSource, 1, &BufferID));
-                fill_block(BufferID);
-                A_CHK(alSourceQueueBuffers(pSource, 1, &BufferID));
-                --processed;
-            }
-        }
-        else
-        {
-            // processed == 0
-            // check play status -- if stopped then queue is not being filled fast enough
-            ALint state;
-            A_CHK(alGetSourcei(pSource, AL_SOURCE_STATE, &state));
-            if (state != AL_PLAYING)
-            {
-                //			Log		("Queuing underrun detected.");
-                A_CHK(alSourcePlay(pSource));
-            }
-        }
+        fmod_channel = nullptr;
+        rendering = FALSE;
     }
 }
 
-void CSoundRender_TargetA::fill_parameters(CSoundRender_Core* core)
+void CSoundRender_TargetA::fill_parameters(CSoundRender_Core* base_core)
 {
-#ifdef DEBUG
-    CSoundRender_Emitter* SE = m_pEmitter;
-    VERIFY(SE);
-#endif
+    inherited::fill_parameters(base_core);
+    if (!m_pEmitter || !fmod_channel)
+        return;
 
-    inherited::fill_parameters(core);
-
-    // 3D params
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    A_CHK(alSourcef(pSource, AL_REFERENCE_DISTANCE, m_pEmitter->p_source.min_distance));
-
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    A_CHK(alSourcef(pSource, AL_MAX_DISTANCE, m_pEmitter->p_source.max_distance));
-
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    A_CHK(alSource3f(pSource, AL_POSITION, m_pEmitter->p_source.position.x, m_pEmitter->p_source.position.y, -m_pEmitter->p_source.position.z));
-
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    A_CHK(alSourcei(pSource, AL_SOURCE_RELATIVE, m_pEmitter->b2D));
-
-    A_CHK(alSourcef(pSource, AL_ROLLOFF_FACTOR, psSoundRolloff));
-
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    float _gain = m_pEmitter->smooth_volume;
-    clamp(_gain, EPS_S, 1.f);
-    if (!fsimilar(_gain, cache_gain, 0.01f))
+    float gain = clampr(m_pEmitter->smooth_volume, 0.f, 1.f);
+    if (!fsimilar(gain, cache_gain, 0.005f))
     {
-        cache_gain = _gain;
-        A_CHK(alSourcef(pSource, AL_GAIN, _gain));
+        cache_gain = gain;
+        fmod_channel->setVolume(gain);
     }
-
-    VERIFY2(m_pEmitter, SE->source()->file_name());
-    float _pitch = m_pEmitter->p_source.freq * psSoundTimeFactor; //--#SM+#-- Correct sound "speed" by time factor
-    clamp(_pitch, EPS_L, 100.f); //--#SM+#-- Increase sound frequancy (speed) limit
-    if (!fsimilar(_pitch, cache_pitch))
+    float pitch = clampr(m_pEmitter->p_source.freq * psSoundTimeFactor, EPS_L, 100.f);
+    if (!fsimilar(pitch, cache_pitch))
     {
-        cache_pitch = _pitch;
-        A_CHK(alSourcef(pSource, AL_PITCH, _pitch));
+        cache_pitch = pitch;
+        fmod_channel->setPitch(pitch);
     }
-    VERIFY2(m_pEmitter, SE->source()->file_name());
+    if (!steam_audio_dsp)
+        return;
+
+    FMOD_3D_ATTRIBUTES attributes{};
+    attributes.position = {m_pEmitter->p_source.position.x, m_pEmitter->p_source.position.y, -m_pEmitter->p_source.position.z};
+    attributes.forward = {0.f, 0.f, 1.f};
+    attributes.up = {0.f, 1.f, 0.f};
+    steam_audio_dsp->setParameterData(IPL_SPATIALIZE_SOURCE_POSITION, &attributes, sizeof(attributes));
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_OCCLUSION, clampr(m_pEmitter->occluder_volume, 0.f, 1.f));
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_DISTANCEATTENUATION_MINDISTANCE, m_pEmitter->p_source.min_distance);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_DISTANCEATTENUATION_MAXDISTANCE, m_pEmitter->p_source.max_distance);
 }
 
-void CSoundRender_TargetA::fill_block(ALuint BufferID)
-{
-    R_ASSERT(m_pEmitter);
-
-    m_pEmitter->fill_block(g_target_temp_data.data(), g_target_temp_data.size());
-
-    const auto& wvf = m_pEmitter->source()->m_wformat;
-    const bool mono = wvf.nChannels == 1;
-
-    ALuint format;
-#ifdef AL_EXT_float32
-    if (wvf.wFormatTag == WAVE_FORMAT_IEEE_FLOAT)
-        format = mono ? AL_FORMAT_MONO_FLOAT32 : AL_FORMAT_STEREO_FLOAT32;
-    else
-#endif
-    {
-        format = mono ? AL_FORMAT_MONO16 : AL_FORMAT_STEREO16;
-    }
-
-    A_CHK(alBufferData(BufferID, format, g_target_temp_data.data(), g_target_temp_data.size(), m_pEmitter->source()->m_wformat.nSamplesPerSec));
-}
 void CSoundRender_TargetA::source_changed()
 {
+    release_stream();
     dettach();
     attach();
+    create_stream();
+    if (rendering)
+        render();
 }

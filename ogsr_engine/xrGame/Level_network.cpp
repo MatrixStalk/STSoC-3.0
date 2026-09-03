@@ -15,6 +15,7 @@
 #include "seniority_hierarchy_holder.h"
 #include "script_vars_storage.h"
 #include "LevelDebugScript.h"
+#include "player_hud.h"
 
 constexpr int max_objects_size = 2 * 1024;
 constexpr int max_objects_size_in_save = 6 * 1024;
@@ -68,6 +69,21 @@ void CLevel::remove_objects()
 
     stalker_animation_data_storage().clear();
 
+    // Give deferred object destruction a final chance while the player HUD and
+    // its models are still alive. Some item destructors touch g_player_hud.
+    for (int i = 0; i < 6; i++)
+    {
+        ++Device.dwFrame;
+        Objects.Update(true);
+    }
+
+    // player_hud owns pooled skeleton instances and bone callbacks into HUD
+    // item models. Release it while the model pool and all source visuals are
+    // still valid; deleting it after models_Clear can block in model_Delete.
+    Msg("~ ObjectResources - releasing player HUD...");
+    xr_delete(g_player_hud);
+    Msg("~ ObjectResources - player HUD released");
+
     VERIFY(Render);
 
     if (!g_prefetch)
@@ -83,12 +99,6 @@ void CLevel::remove_objects()
 #endif // DEBUG
     VERIFY(client_spawn_manager().registry().empty());
     client_spawn_manager().clear();
-
-    for (int i = 0; i < 6; i++)
-    {
-        ++(Device.dwFrame);
-        Objects.Update(true);
-    }
 
     g_pGamePersistent->destroy_particles(false);
     ::Sound->stop_emitters();
@@ -135,15 +145,19 @@ void CLevel::net_Stop()
 
     remove_objects();
 
+    Msg("~ Level shutdown: stopping base level...");
     IGame_Level::net_Stop();
+    Msg("~ Level shutdown: disconnecting client...");
     IPureClient::Disconnect();
 
     if (Server)
     {
+        Msg("~ Level shutdown: disconnecting server...");
         Server->Disconnect();
         xr_delete(Server);
     }
 
+    Msg("~ Level shutdown: final cleanup...");
     ai().script_engine().collect_all_garbage();
 
     Remove_all_statics();
@@ -153,6 +167,8 @@ void CLevel::net_Stop()
 #ifdef DEBUG
     show_animation_stats();
 #endif // DEBUG
+
+    Msg("~ Level shutdown: network level stopped");
 }
 
 void CLevel::ClientSend()

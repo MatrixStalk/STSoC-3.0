@@ -9,6 +9,9 @@
 #include "stdafx.h"
 #include "level.h"
 #include "actor.h"
+#include "Inventory.h"
+#include "Weapon.h"
+#include "xr_level_controller.h"
 #include "script_game_object.h"
 #include "patrol_path_storage.h"
 #include "xrServer.h"
@@ -533,6 +536,17 @@ bool actor_ladder_allowed() { return g_actor_allow_ladder; }
 void set_actor_allow_pda(bool b) { g_actor_allow_pda = b; }
 
 bool actor_pda_allowed() { return g_actor_allow_pda; }
+
+bool actor_safemode() { return Actor()->is_safemode(); }
+
+void actor_set_safemode(bool status)
+{
+    if (Actor()->is_safemode() == status)
+        return;
+
+    if (CWeapon* weapon = smart_cast<CWeapon*>(Actor()->inventory().ActiveItem()); weapon && weapon->CanBeLowered())
+        weapon->Action(kSAFEMODE, CMD_START);
+}
 
 void spawn_phantom(const Fvector& position) { Level().spawn_item("m_phantom", position, u32(-1), u16(-1), false); }
 
@@ -1093,6 +1107,7 @@ void CLevel::script_register(lua_State* L)
 
             def("set_actor_allow_ladder", set_actor_allow_ladder), def("actor_ladder_allowed", actor_ladder_allowed),
             def("set_actor_allow_pda", set_actor_allow_pda), def("actor_pda_allowed", actor_pda_allowed),
+            def("actor_weapon_lowered", actor_safemode), def("actor_lower_weapon", actor_set_safemode),
 
             def("spawn_phantom", spawn_phantom),
 

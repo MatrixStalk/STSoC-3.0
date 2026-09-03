@@ -29,6 +29,7 @@ using namespace InventoryUtilities;
 #include "UIDragDropListEx.h"
 #include "UIOutfitSlot.h"
 #include "UI3tButton.h"
+#include "UIWeaponModWnd.h"
 #include <format>
 
 #define INVENTORY_ITEM_XML "inventory_item.xml"
@@ -219,6 +220,10 @@ void CUIInventoryWnd::Init()
     AttachChild(UIExitButton);
     xml_init.Init3tButton(uiXml, "exit_button", 0, UIExitButton);
 
+    m_weapon_mod_wnd = xr_new<CUIWeaponModWnd>(this);
+    m_weapon_mod_wnd->SetAutoDelete(true);
+    AttachChild(m_weapon_mod_wnd);
+
     // Load sounds
     if (uiXml.NavigateToNode("action_sounds", 0))
     {
@@ -272,6 +277,12 @@ CUIInventoryWnd::~CUIInventoryWnd()
 
 bool CUIInventoryWnd::OnMouse(float x, float y, EUIMessages mouse_action)
 {
+    if (m_weapon_mod_wnd && m_weapon_mod_wnd->IsShown())
+    {
+        m_weapon_mod_wnd->OnMouse(x, y, mouse_action);
+        return true;
+    }
+
     if (m_b_need_reinit)
         return true;
 
@@ -290,6 +301,17 @@ bool CUIInventoryWnd::OnMouse(float x, float y, EUIMessages mouse_action)
 }
 
 void CUIInventoryWnd::Draw() { CUIWindow::Draw(); }
+
+void CUIInventoryWnd::Reset()
+{
+    if (m_weapon_mod_wnd)
+        m_weapon_mod_wnd->Close();
+    UIPropertiesBox.Hide();
+    SetCurrentItem(nullptr);
+    ClearAllLists();
+    m_iCurrentActiveSlot = NO_ACTIVE_SLOT;
+    inherited::Reset();
+}
 
 void CUIInventoryWnd::Update()
 {
@@ -352,6 +374,8 @@ void CUIInventoryWnd::Show()
 
 void CUIInventoryWnd::Hide()
 {
+    if (m_weapon_mod_wnd)
+        m_weapon_mod_wnd->Close();
     PlaySnd(eInvSndClose);
     inherited::Hide();
 
@@ -405,7 +429,16 @@ void CUIInventoryWnd::DetachAddon(const char* addon_name)
 {
     PlaySnd(eInvDetachAddon);
 
-    CurrentIItem()->Detach(addon_name, true);
+    CUICellItem* weapon_cell = CurrentItem();
+    PIItem weapon_item = CurrentIItem();
+    if (!weapon_cell || !weapon_item || !weapon_item->Detach(addon_name, true))
+        return;
+
+    // A weapon which lost a required component cannot remain equipped. Use
+    // the normal UI move so local state and GEG_PLAYER_ITEM2RUCK stay in sync.
+    CWeapon* weapon = smart_cast<CWeapon*>(weapon_item);
+    if (weapon && !weapon->HasCriticalAddonComponents() && GetInventory()->InSlot(weapon_item))
+        ToBag(weapon_cell, false);
 }
 
 void CUIInventoryWnd::SendEvent_ActivateSlot(PIItem pItem)
@@ -477,6 +510,9 @@ void CUIInventoryWnd::BindDragDropListEnents(CUIDragDropListEx* lst)
 
 bool CUIInventoryWnd::OnKeyboard(int dik, EUIMessages keyboard_action)
 {
+    if (m_weapon_mod_wnd && m_weapon_mod_wnd->IsShown())
+        return m_weapon_mod_wnd->OnKeyboard(dik, keyboard_action);
+
     if (m_b_need_reinit)
         return true;
 

@@ -19,13 +19,23 @@ class IRenderVisual;
 class IKinematics;
 class CGameFont;
 
+struct SUIModelRenderPoint
+{
+    Fvector world_position{};
+    Fvector2 screen_position{};
+    bool visible{};
+};
+
 struct SUIModelRenderParams
 {
     Frect viewport{}; // physical screen pixels
     Fvector rotation{}; // radians
     Fvector offset{}; // model-space offset after centering
+    Fvector pivot{}; // world-space point used as the rotation center
+    bool use_pivot{};
     float scale{1.f};
     Fvector4 tint{1.f, 1.f, 1.f, 1.f};
+    xr_vector<SUIModelRenderPoint>* points{};
 };
 
 extern const float fLightSmoothFactor;

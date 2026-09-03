@@ -27,6 +27,7 @@ enum
     AF_ACTOR_SHADOW = 1 << 22,
     AF_THROW_DEBUG = 1 << 23,
     AF_DETACHABLE_MAGAZINES = 1 << 24,
+    AF_FREELOOK_TOGGLE = 1 << 25,
 };
 
 //enum

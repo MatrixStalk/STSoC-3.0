@@ -14,6 +14,7 @@
 int psLUA_GCSTEP{128}; // 10;
 int psLUA_GCTIMEOUT{2000}, psLUA_GCTIMEOUT_MIN{2000}; // in micro seconds
 u32 ps_lua_gc_method{gc_timeout};
+float g_freelook_z_offset = 0.f;
 constexpr xr_token lua_gc_method_token[]{{"gc_default", gc_default}, {"gc_step", gc_step}, {"gc_timeout", gc_timeout}, {}};
 
 void IConsole_Command::add_to_LRU(shared_str const& arg)
@@ -567,6 +568,7 @@ void CCC_Register()
     CMD4(CCC_Float, "cam_inert", &psCamInert, 0.0f, 0.99f);
     CMD4(CCC_Float, "cam_inert_sprint", &psSprintCamInert, 0.0f, 0.99f);
     CMD2(CCC_Float, "cam_slide_inert", &psCamSlideInert); // for 3rd person cam
+    CMD4(CCC_Float, "g_freelook_z_offset_factor", &g_freelook_z_offset, -3.f, 3.f);
 
     CMD1(CCC_soundDevice, "snd_device");
     CMD3(CCC_Mask, "snd_device_default", &psSoundFlags, ss_UseDefaultDevice);

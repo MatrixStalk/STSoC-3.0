@@ -79,7 +79,7 @@ public:
 
     // shoot&bounce&visibility&flotation
     float fFlotationFactor; // 0.f - 1.f   	(1.f-полностью проходимый)
-    float fShootFactor; // 0.f - 1.f	(1.f-полностью простреливаемый)
+    float fShootFactor; // runtime 0.f - 1.f (1.f = fully penetrable); stored value is inverted on load
     float fBounceDamageFactor; // 0.f - 100.f
     float fInjuriousSpeed; // 0.f - ...	(0.f-не отбирает здоровье (скорость уменьшения здоровья))
     float fVisTransparencyFactor; // 0.f - 1.f	(1.f-полностью прозрачный)

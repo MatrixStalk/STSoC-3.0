@@ -75,6 +75,7 @@ void CActor::g_cl_ValidateMState(float dt, u32 mstate_wf)
     // закончить падение
     if (character_physics_support()->movement()->gcontact_Was)
     {
+        const bool eft_landed = (mstate_real & (mcFall | mcJump)) != 0;
         if (mstate_real & mcFall)
         {
             if (character_physics_support()->movement()->GetContactSpeed() > 4.f)
@@ -92,9 +93,10 @@ void CActor::g_cl_ValidateMState(float dt, u32 mstate_wf)
             }
 
             // CActor_on_land
-
             this->callback(GameObject::eOnActorLand)(this->lua_game_object(), character_physics_support()->movement()->GetContactSpeed());
         }
+        if (eft_landed)
+            CStepManager::on_eft_land(character_physics_support()->movement()->GetContactSpeed());
         m_bJumpKeyPressed = TRUE;
         m_fJumpTime = s_fJumpTime;
         mstate_real &= ~(mcFall | mcJump);
@@ -250,6 +252,7 @@ void CActor::g_cl_CheckControls(u32 mstate_wf, Fvector& vControlAccel, float& Ju
                 m_fJumpTime = s_fJumpTime;
 
                 // CActor_on_jump
+                CStepManager::on_eft_jump();
                 this->callback(GameObject::eOnActorJump)(this->lua_game_object());
 
                 //уменьшить силу игрока из-за выполненого прыжка
@@ -565,8 +568,18 @@ void CActor::g_cl_Orientate(u32 mstate_rl, float dt)
     // capture camera into torso (only for FirstEye & LookAt cameras)
     if (eacFreeLook != cam_active)
     {
-        r_torso.yaw = cam_Active()->GetWorldYaw();
-        r_torso.pitch = cam_Active()->GetWorldPitch();
+        if (cam_freelook == eflDisabled)
+        {
+            r_torso.yaw = cam_Active()->GetWorldYaw();
+            r_torso.pitch = cam_Active()->GetWorldPitch();
+        }
+        else
+        {
+            r_torso.yaw = angle_lerp(cam_Active()->GetWorldYaw(), -old_torso_yaw, freelook_cam_control);
+            const float old_pitch = cam_Active()->GetWorldPitch();
+            const float new_pitch = old_pitch > 0.f ? old_pitch * 0.6f : old_pitch * 0.8f;
+            r_torso.pitch = angle_lerp(old_pitch, new_pitch, freelook_cam_control);
+        }
     }
     else
     {

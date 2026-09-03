@@ -87,6 +87,7 @@ struct hud_item_measures
         m_hands_offset_type_aim_gl_normal, // Смотрим в механический прицел если гранатомет присоединен
         m_hands_offset_type_gl_normal_scope, // Смотрим в присоединяемый нетекстурный прицел (будь то 3д прицел или колиматор) если включен "use_scope_zoom" и гранатомет
                                              // присоединен
+        m_hands_offset_type_lowered, // Опущенное оружие
         m_hands_offset_type_size
     };
     Fvector m_hands_offset[m_hands_offset_size][m_hands_offset_type_size]{};
@@ -103,6 +104,8 @@ struct hud_item_measures
     Fvector m_shoot_point_offset{};
 
     Fvector m_hands_attach[2]{}; // pos,rot
+
+    float m_fFreelookZOffset{};
 
     void load(const shared_str& sect_name, IKinematics* K);
 

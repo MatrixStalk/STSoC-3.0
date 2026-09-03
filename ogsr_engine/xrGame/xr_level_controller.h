@@ -24,6 +24,7 @@ enum EGameActions
     kCAM_1,
     kCAM_2,
     kCAM_3,
+    kFREELOOK,
 
     kTORCH,
     kNIGHT_VISION,
@@ -74,6 +75,7 @@ enum EGameActions
 	kANIM_BORE,
     kANIM_MAGCHECK,
     kANIM_MUZZLE_CHECK,
+    kSAFEMODE,
 
     kLASTACTION = u32(-3),
     kNOTBINDED = u32(-2),

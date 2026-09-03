@@ -99,8 +99,8 @@ void CUISequenceVideoItem::Load(CUIXml* xml, int idx)
             VERIFY(m_sounds[0]._handle());
             VERIFY(m_sounds[1]._handle());
 
-            m_sounds[0].create(_l, st_Effect, sg_SourceType);
-            m_sounds[1].create(_r, st_Effect, sg_SourceType);
+            m_sounds[0].create(_l, st_Effect, sg_Interface);
+            m_sounds[1].create(_r, st_Effect, sg_Interface);
             stereo = false;
         }
     }

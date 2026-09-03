@@ -11,7 +11,11 @@
 extern u32 g_dwFPSlimit;
 
 #define VIEWPORT_NEAR 0.2f
-#define HUD_VIEWPORT_NEAR 0.0005f
+// Keep the HUD near plane large enough to preserve D24 depth precision on
+// distant hand/item geometry.  A value of 0.0005f causes coplanar and closely
+// spaced HUD surfaces to quantize to the same depth, producing striped
+// z-fighting and band-shaped clipping as the model is moved away.
+#define HUD_VIEWPORT_NEAR 0.005f
 
 #define DEVICE_RESET_PRECACHE_FRAME_COUNT 10
 

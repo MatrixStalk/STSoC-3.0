@@ -96,7 +96,14 @@ void CWeapon::StopShooting()
 void CWeapon::FireEnd()
 {
     CShootingObject::FireEnd();
-    ClearShotEffector();
+
+    // Modern recoil owns a recovery spring and must stay alive after the
+    // trigger is released. The old path cleared it immediately, while an
+    // empty magazine happened to use StopShooting() and recovered correctly.
+    if (modernRecoil.enabled)
+        RemoveShotEffector();
+    else
+        ClearShotEffector();
 }
 
 void CWeapon::StartFlameParticles2() { CShootingObject::StartParticles(m_pFlameParticles2, *m_sFlameParticles2, get_LastFP2()); }

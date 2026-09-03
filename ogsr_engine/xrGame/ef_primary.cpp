@@ -20,6 +20,7 @@
 #include "ef_primary.h"
 #include "alife_human_brain.h"
 #include "alife_human_object_handler.h"
+#include "actor.h"
 
 //#define NO_HUMAN_BRAIN
 
@@ -152,6 +153,9 @@ float CPersonalWeaponTypeFunction::ffGetTheBestWeapon()
 
     if (ef_storage().non_alife().member())
     {
+        if (const CActor* actor = smart_cast<const CActor*>(ef_storage().non_alife().member()); actor && actor->weapon_hidden_for_npc())
+            return 0.f;
+
         const CInventoryOwner* tpInventoryOwner = smart_cast<const CInventoryOwner*>(ef_storage().non_alife().member());
         if (tpInventoryOwner)
         {

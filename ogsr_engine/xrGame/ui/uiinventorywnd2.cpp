@@ -257,14 +257,24 @@ bool CUIInventoryWnd::ToSlot(CUICellItem* itm, bool force_place)
     }
     else
     { // in case slot is busy
-        if (!force_place || _slot == NO_ACTIVE_SLOT || GetInventory()->m_slots[_slot].m_bPersistent)
+        if (!force_place || _slot == NO_ACTIVE_SLOT || _slot >= GetInventory()->m_slots.size() ||
+            GetInventory()->m_slots[_slot].m_bPersistent)
+            return false;
+
+        // CanPutInSlot can reject an item for reasons other than an occupied
+        // slot (for example, a weapon missing critical addon components).
+        // Do not try to replace a UI cell when the inventory slot is empty.
+        PIItem occupied_item = GetInventory()->m_slots[_slot].m_pIItem;
+        if (!occupied_item)
             return false;
 
         CUIDragDropListEx* slot_list = GetSlotList(_slot);
-        VERIFY(slot_list->ItemsCount() == 1);
+        if (!slot_list || slot_list->ItemsCount() == 0)
+            return false;
 
         CUICellItem* slot_cell = slot_list->GetItemIdx(0);
-        VERIFY(slot_cell && ((PIItem)slot_cell->m_pData) == GetInventory()->m_slots[_slot].m_pIItem);
+        if (!slot_cell || ((PIItem)slot_cell->m_pData) != occupied_item)
+            return false;
 
         dont_update_belt_flag = _slot == OUTFIT_SLOT;
 

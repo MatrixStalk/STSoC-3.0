@@ -226,6 +226,35 @@ bool recoil_vector_settled(const Fvector& value, const Fvector& velocity, const 
     return value.square_magnitude() < EPS_S * EPS_S && velocity.square_magnitude() < EPS_S * EPS_S &&
         acceleration.square_magnitude() < EPS_S * EPS_S;
 }
+
+float recoil_impulse_blend(const float dt, const float duration)
+{
+    // Exponential interpolation keeps the transition frame-rate independent
+    // and lets consecutive shots merge instead of restarting a linear kick.
+    return 1.f - expf(-dt / _max(duration, EPS_S));
+}
+
+void apply_recoil_impulse(Fvector2& value, Fvector2& impulse, const float blend)
+{
+    value.x += impulse.x * blend;
+    value.y += impulse.y * blend;
+    impulse.x *= 1.f - blend;
+    impulse.y *= 1.f - blend;
+
+    if (impulse.magnitude() < EPS_S)
+        impulse.set(0.f, 0.f);
+}
+
+void apply_recoil_impulse(Fvector& value, Fvector& impulse, const float blend)
+{
+    Fvector step = impulse;
+    step.mul(blend);
+    value.add(step);
+    impulse.mul(1.f - blend);
+
+    if (impulse.square_magnitude() < EPS_S * EPS_S)
+        impulse.set(0.f, 0.f, 0.f);
+}
 } // namespace
 
 CCameraShotEffector::CCameraShotEffector(float max_angle, float relax_speed, float max_angle_horz, float step_angle_horz, float angle_frac,
@@ -321,9 +350,11 @@ void CCameraShotEffector::Shot(float angle, float state_multiplier)
     // ARC9 spreads each camera kick across a fixed 30 ms interval. Its
     // multiplier of 25 therefore produces 0.75 degrees per recoil unit.
     // X-Ray pitch grows in the opposite direction to Source/GMod pitch.
-    m_camera_impulse.x = -deg2rad(m_recoil_up * 0.75f * m_modern_params.camera_recoil_scale);
-    m_camera_impulse.y = deg2rad(m_recoil_side * 0.75f * m_modern_params.camera_recoil_scale);
-    m_camera_impulse_time = m_modern_params.camera_impulse_duration;
+    // Do not replace an unfinished kick. Accumulating it prevents a new shot
+    // from cutting the previous transition short during automatic fire.
+    m_camera_impulse.x += -deg2rad(m_recoil_up * 0.75f * m_modern_params.camera_recoil_scale);
+    m_camera_impulse.y += deg2rad(m_recoil_side * 0.75f * m_modern_params.camera_recoil_scale);
+    m_camera_impulse_time = _max(m_camera_impulse_time, m_modern_params.camera_impulse_duration);
 
     const float transition = clampr((float(m_burst_shots) - float(m_modern_params.shots_to_full_auto)) * 0.5f, 0.f, 1.f);
     const float visual_up_value = m_modern_params.visual_recoil_up_semi * (1.f - transition) +
@@ -343,18 +374,18 @@ void CCameraShotEffector::Shot(float angle, float state_multiplier)
 
     // Source pitch has the opposite sign. Positions remain in Source axes
     // here (X right, Y forward, Z up) and are mapped once in GetHudRecoil.
-    m_hud_rotation.add(Fvector().set(-visual_up, visual_side * 15.f, visual_roll));
-    m_hud_position.x += visual_side;
-    m_hud_position.y -= visual_punch * position_bump;
-    m_hud_position.z -= visual_up * bump_up * position_bump;
+    m_hud_rotation_impulse.add(Fvector().set(-visual_up, visual_side * 15.f, visual_roll));
+    m_hud_position_impulse.x += visual_side;
+    m_hud_position_impulse.y -= visual_punch * position_bump;
+    m_hud_position_impulse.z -= visual_up * bump_up * position_bump;
 
     if (m_modern_params.subtle_visual_recoil > 0.f)
     {
         const float subtle = m_modern_params.subtle_visual_recoil * 0.75f * (zoomed ? 1.f : 2.f);
         const float direction_scale = 1.3f - _min(m_recoil_amount, 4.5f) / 4.5f;
-        m_subtle_position.add(Fvector().set(::Random.randF(-0.05f, 0.03f), -1.f,
+        m_subtle_position_impulse.add(Fvector().set(::Random.randF(-0.05f, 0.03f), -1.f,
             ::Random.randF(-0.06f, 0.03f)).mul(subtle));
-        m_subtle_rotation.add(Fvector().set(::Random.randF(0.1f, 0.2f), 0.f,
+        m_subtle_rotation_impulse.add(Fvector().set(::Random.randF(0.1f, 0.2f), 0.f,
             m_modern_params.subtle_visual_recoil_direction * direction_scale + ::Random.randF(-1.35f, 1.35f)).mul(subtle));
     }
 
@@ -378,14 +409,14 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
     clamp(dt, 0.f, 0.05f);
     const Fvector2 previous_camera_offset = m_camera_offset;
 
-    if (m_camera_impulse_time > 0.f)
+    if (m_camera_impulse.magnitude() > EPS_S)
     {
-        const float step = _min(dt, m_camera_impulse_time);
-        const float fraction = step / m_modern_params.camera_impulse_duration;
-        m_camera_offset.x += m_camera_impulse.x * fraction;
-        m_camera_offset.y += m_camera_impulse.y * fraction;
-        m_camera_impulse_time -= step;
+        const float blend = recoil_impulse_blend(dt, m_modern_params.camera_impulse_duration);
+        apply_recoil_impulse(m_camera_offset, m_camera_impulse, blend);
+        m_camera_impulse_time = _max(0.f, m_camera_impulse_time - dt);
     }
+    else
+        m_camera_impulse_time = 0.f;
 
     // ARC9's RecoilRise auto-control continuously pulls only the recoil-added
     // view angle back toward zero, leaving the player's own mouse input alone.
@@ -406,6 +437,12 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
         m_pattern_direction = 0.f;
     }
 
+    const float visual_blend = recoil_impulse_blend(dt, m_modern_params.camera_impulse_duration);
+    apply_recoil_impulse(m_hud_position, m_hud_position_impulse, visual_blend);
+    apply_recoil_impulse(m_hud_rotation, m_hud_rotation_impulse, visual_blend);
+    apply_recoil_impulse(m_subtle_position, m_subtle_position_impulse, visual_blend);
+    apply_recoil_impulse(m_subtle_rotation, m_subtle_rotation_impulse, visual_blend);
+
     update_arc9_spring(m_hud_position, m_hud_position_velocity, m_hud_position_acceleration,
         m_modern_params.visual_recoil_spring_constant, m_modern_params.visual_recoil_spring_magnitude,
         m_modern_params.visual_recoil_spring_damping, dt);
@@ -425,8 +462,12 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
     fLastDeltaVert = m_camera_offset.x - previous_camera_offset.x;
     fLastDeltaHorz = m_camera_offset.y - previous_camera_offset.y;
 
-    const bool camera_settled = m_camera_offset.magnitude() < EPS_S && m_camera_impulse_time <= 0.f;
-    const bool hud_settled = recoil_vector_settled(m_hud_position, m_hud_position_velocity, m_hud_position_acceleration) &&
+    const bool camera_settled = m_camera_offset.magnitude() < EPS_S && m_camera_impulse.magnitude() < EPS_S;
+    const bool hud_settled = m_hud_position_impulse.square_magnitude() < EPS_S * EPS_S &&
+        m_hud_rotation_impulse.square_magnitude() < EPS_S * EPS_S &&
+        m_subtle_position_impulse.square_magnitude() < EPS_S * EPS_S &&
+        m_subtle_rotation_impulse.square_magnitude() < EPS_S * EPS_S &&
+        recoil_vector_settled(m_hud_position, m_hud_position_velocity, m_hud_position_acceleration) &&
         recoil_vector_settled(m_hud_rotation, m_hud_rotation_velocity, m_hud_rotation_acceleration) &&
         recoil_vector_settled(m_subtle_position, m_subtle_position_velocity, m_subtle_position_acceleration) &&
         recoil_vector_settled(m_subtle_rotation, m_subtle_rotation_velocity, m_subtle_rotation_acceleration);
@@ -471,15 +512,19 @@ void CCameraShotEffector::Clear()
     m_recoil_side = 0.f;
     m_pattern_direction = 0.f;
     m_hud_position.set(0.f, 0.f, 0.f);
+    m_hud_position_impulse.set(0.f, 0.f, 0.f);
     m_hud_position_velocity.set(0.f, 0.f, 0.f);
     m_hud_position_acceleration.set(0.f, 0.f, 0.f);
     m_hud_rotation.set(0.f, 0.f, 0.f);
+    m_hud_rotation_impulse.set(0.f, 0.f, 0.f);
     m_hud_rotation_velocity.set(0.f, 0.f, 0.f);
     m_hud_rotation_acceleration.set(0.f, 0.f, 0.f);
     m_subtle_position.set(0.f, 0.f, 0.f);
+    m_subtle_position_impulse.set(0.f, 0.f, 0.f);
     m_subtle_position_velocity.set(0.f, 0.f, 0.f);
     m_subtle_position_acceleration.set(0.f, 0.f, 0.f);
     m_subtle_rotation.set(0.f, 0.f, 0.f);
+    m_subtle_rotation_impulse.set(0.f, 0.f, 0.f);
     m_subtle_rotation_velocity.set(0.f, 0.f, 0.f);
     m_subtle_rotation_acceleration.set(0.f, 0.f, 0.f);
     m_burst_shots = 0;

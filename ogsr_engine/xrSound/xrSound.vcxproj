@@ -67,12 +67,12 @@
       </BrowseInformation>
       <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>..\..\3rd_party\Src\OpenAL_Soft\include\AL;..\..\3rd_party\Src\eax\Include;..\..\3rd_party\Src\Xiph\libogg\include;..\..\3rd_party\Src\Xiph\libvorbis\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\3rd_party\Src\FMOD\FMOD Studio API Windows\api\core\inc;..\..\3rd_party\Src\SteamAudio\SDK\steamaudio\include;..\..\3rd_party\Src\Xiph\libogg\include;..\..\3rd_party\Src\Xiph\libvorbis\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <DisableSpecificWarnings>4456;4457;4458;4995;4577;4267;</DisableSpecificWarnings>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>OpenAL32.lib;libvorbis_static.lib;libvorbisfile_static.lib;libogg_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>fmod_vc.lib;phonon.lib;phonon_fmod.lib;libvorbis_static.lib;libvorbisfile_static.lib;libogg_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>false</GenerateMapFile>
@@ -110,14 +110,14 @@
       </BrowseInformation>
       <WarningLevel>Level4</WarningLevel>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
-      <AdditionalIncludeDirectories>..\..\3rd_party\Src\OpenAL_Soft\include\AL;..\..\3rd_party\Src\eax\Include;..\..\3rd_party\Src\Xiph\libogg\include;..\..\3rd_party\Src\Xiph\libvorbis\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>..\..\3rd_party\Src\FMOD\FMOD Studio API Windows\api\core\inc;..\..\3rd_party\Src\SteamAudio\SDK\steamaudio\include;..\..\3rd_party\Src\Xiph\libogg\include;..\..\3rd_party\Src\Xiph\libvorbis\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <DisableSpecificWarnings>4456;4457;4458;4995;4577;4267;</DisableSpecificWarnings>
       <BasicRuntimeChecks Condition="$(Configuration.Contains('Debug')) And '$(EnableASAN)'=='true'"></BasicRuntimeChecks>
       <BasicRuntimeChecks Condition="$(Configuration.Contains('Debug')) And '$(EnableASAN)'!='true'">EnableFastChecks</BasicRuntimeChecks>
     </ClCompile>
     <Link>
-      <AdditionalDependencies>OpenAL32.lib;libvorbis_static.lib;libvorbisfile_static.lib;libogg_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>fmodL_vc.lib;phonon.lib;phonon_fmod.lib;libvorbis_static.lib;libvorbisfile_static.lib;libogg_static.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <ProgramDatabaseFile>$(OutDir)$(ProjectName).pdb</ProgramDatabaseFile>
       <GenerateMapFile>false</GenerateMapFile>
@@ -138,7 +138,7 @@
     <ClInclude Include="SoundRender.h" />
     <ClInclude Include="stdafx.h" />
     <ClInclude Include="SoundRender_Core.h" />
-    <ClInclude Include="OpenALDeviceList.h" />
+    <ClInclude Include="SteamAudioFMOD.h" />
     <ClInclude Include="SoundRender_CoreA.h" />
     <ClInclude Include="SoundRender_Emitter.h" />
     <ClInclude Include="SoundRender_Source.h" />
@@ -164,7 +164,6 @@
     <ClCompile Include="SoundRender_Core_Processor.cpp" />
     <ClCompile Include="SoundRender_Core_SourceManager.cpp" />
     <ClCompile Include="SoundRender_Core_StartStop.cpp" />
-    <ClCompile Include="OpenALDeviceList.cpp" />
     <ClCompile Include="SoundRender_CoreA.cpp" />
     <ClCompile Include="SoundRender_Emitter.cpp" />
     <ClCompile Include="SoundRender_Emitter_FSM.cpp" />

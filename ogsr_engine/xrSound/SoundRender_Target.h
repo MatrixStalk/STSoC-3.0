@@ -1,6 +1,5 @@
 #pragma once
 
-#include <al.h>
 #include "soundrender.h"
 
 class CSoundRender_Target
@@ -11,9 +10,6 @@ protected:
 
 public:
     float priority{};
-    bool bAlSoft = false;
-    bool bEFX = false;
-
 protected:
     OggVorbis_File ovf{};
     IReader* wave;
@@ -21,12 +17,7 @@ protected:
     void dettach();
 
 public:
-    OggVorbis_File* get_data()
-    {
-        if (!wave)
-            attach();
-        return &ovf;
-    }
+    OggVorbis_File* get_data();
 
 public:
     CSoundRender_Target();
@@ -44,8 +35,6 @@ public:
     virtual void rewind() = 0;
     virtual void stop() = 0;
     virtual void update() = 0;
-
-    virtual void alAuxInit(ALuint slot) = 0;
 
     virtual void fill_parameters(CSoundRender_Core* core) = 0;
 };

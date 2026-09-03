@@ -435,6 +435,7 @@ u32 CHudItem::PlayHUDMotion(const char* M, const bool bMixIn, const u32 state, c
         m_dwMotionCurrTm = m_dwMotionStartTm;
         m_dwMotionEndTm = m_dwMotionStartTm + anim_time;
         m_startedMotionState = state;
+        OnHudMotionStart(M, speed);
     }
     else
         m_bStopAtEndAnimIsRunning = false;
@@ -939,17 +940,112 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
     else
         UpdateInertion(trans);
 
-    Fvector summary_offset{}, summary_rotate{};
+    Fvector summary_offset{}, summary_rotate{}, sprint_local_rotate{};
 
     attachable_hud_item* hi = HudItemData();
     u8 idx = GetCurrentHudOffsetIdx();
-    const bool b_aiming = idx != hud_item_measures::m_hands_offset_type_normal;
+    const bool b_aiming = idx != hud_item_measures::m_hands_offset_type_normal && idx != hud_item_measures::m_hands_offset_type_lowered;
     Fvector zr_offs = hi->m_measures.m_hands_offset[hud_item_measures::m_hands_offset_pos][idx];
     Fvector zr_rot = hi->m_measures.m_hands_offset[hud_item_measures::m_hands_offset_rot][idx];
 
+    CWeapon* weapon = smart_cast<CWeapon*>(this);
+    if (weapon)
+    {
+        if (CActor* parent_actor = smart_cast<CActor*>(object().H_Parent()); parent_actor && parent_actor->is_safemode() && weapon->IsZoomed())
+            weapon->OnZoomOut();
+    }
+
+    const bool addon_aim_requested = weapon && weapon->IsZoomed() && !weapon->IsGrenadeMode();
+    if (!addon_aim_requested)
+        m_cached_addon_aim_valid = false;
+
+    if (addon_aim_requested)
+    {
+        if (!m_cached_addon_aim_valid && g_player_hud)
+        {
+            Fmatrix addon_aim_from_item;
+            bool use_bone_rotation = false;
+            // Alternative aiming is disabled in this engine branch; use the
+            // primary attachment aim bone until its mode switch is restored.
+            if (weapon->GetAddonHudAimTransform(false, addon_aim_from_item, use_bone_rotation))
+            {
+                Fmatrix inverse_hands, item_from_hands, aim_from_hands;
+                inverse_hands.invert(g_player_hud->XFORM());
+                item_from_hands.mul_43(inverse_hands, hi->m_item_transform);
+                aim_from_hands.mul_43(item_from_hands, addon_aim_from_item);
+
+                // player_hud applies hud_scale to the hands basis after HUD
+                // offsets have been evaluated. Removing that basis above puts
+                // Source skeleton translations back into authoring units
+                // (40x too large for hud_scale = 0.025). Convert the aim point
+                // to the pre-scale HUD coordinate system used by zr_offs.
+                aim_from_hands.c.mul(hi->m_measures.m_hud_scale);
+
+                // aim_hud_offset is applied to the camera transform before the
+                // configured hands position/orientation. item_from_hands above
+                // deliberately removes that attachment matrix, so restore it
+                // before solving the camera-space centring offset. This is
+                // essential for Source HUDs using hands_orientation = 180,0,0;
+                // without it the horizontal/forward compensation is inverted.
+                Fvector hands_rotation = hi->m_measures.m_hands_attach[1];
+                hands_rotation.mul(PI / 180.f);
+                Fmatrix hands_attach, aim_from_hud;
+                hands_attach.setHPB(hands_rotation.x, hands_rotation.y, hands_rotation.z);
+                hands_attach.translate_over(hi->m_measures.m_hands_attach[0]);
+                aim_from_hud.mul_43(hands_attach, aim_from_hands);
+
+                if (use_bone_rotation)
+                {
+                    aim_from_hud.i.normalize_safe();
+                    aim_from_hud.j.normalize_safe();
+                    aim_from_hud.k.normalize_safe();
+
+                    Fmatrix auto_aim_offset;
+                    auto_aim_offset.invert(aim_from_hud);
+                    if (_valid(auto_aim_offset))
+                    {
+                        m_cached_addon_aim[0] = auto_aim_offset.c;
+                        auto_aim_offset.getXYZi(m_cached_addon_aim[1]);
+                        m_cached_addon_aim_valid = true;
+                    }
+                }
+                else
+                {
+                    // Keep the configured HUD orientation and move the aim
+                    // bone's origin onto the camera axis. For O * A, centring
+                    // requires translation -(R_O * A.c), not inverse(A).c;
+                    // the latter incorrectly includes the reticle bone basis.
+                    Fmatrix aim_rotation, rotation_part;
+                    aim_rotation.rotateX(zr_rot.x);
+                    rotation_part.rotateY(zr_rot.y);
+                    aim_rotation.mulA_43(rotation_part);
+                    rotation_part.rotateZ(zr_rot.z);
+                    aim_rotation.mulA_43(rotation_part);
+                    aim_rotation.transform_dir(m_cached_addon_aim[0], aim_from_hud.c);
+                    m_cached_addon_aim[0].invert();
+                    m_cached_addon_aim[1] = zr_rot;
+                    m_cached_addon_aim_valid = _valid(m_cached_addon_aim[0]);
+                }
+            }
+        }
+
+        if (m_cached_addon_aim_valid)
+        {
+            zr_offs = m_cached_addon_aim[0];
+            zr_rot = m_cached_addon_aim[1];
+        }
+    }
+
     //============= Поворот ствола во время аима =============//
     {
-        const float factor = Device.fTimeDelta / m_fZoomRotateTime;
+        const bool is_lowered = idx == hud_item_measures::m_hands_offset_type_lowered;
+        const bool lowered_transition = is_lowered || m_last_hud_offset_idx == hud_item_measures::m_hands_offset_type_lowered;
+        float rotate_time = m_fZoomRotateTime;
+        if (weapon && lowered_transition && weapon->GetSafeModeRotateTime() > EPS)
+            rotate_time = weapon->GetSafeModeRotateTime();
+        rotate_time = _max(rotate_time, 0.001f);
+        const float factor = Device.fTimeDelta / rotate_time;
+        const float blend_step = clampr(factor * 2.f, 0.f, 1.f);
 
         // I AM DEAD - Dirty hack from delayed exit from aim
         if (IsZoomed())
@@ -960,12 +1056,17 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
         clamp(m_fZoomRotationFactor, 0.f, 1.f);
 
         if (!zr_offs.similar(current_difference[0], EPS))
-            current_difference[0].lerp(current_difference[0], zr_offs, factor * 2.f);
+            current_difference[0].lerp(current_difference[0], zr_offs, blend_step);
 
         if (!zr_rot.similar(current_difference[1], EPS))
-            current_difference[1].lerp(current_difference[1], zr_rot, factor * 2.f);
+            current_difference[1].lerp(current_difference[1], zr_rot, blend_step);
 
         summary_offset.add(current_difference[0]);
+
+        if (lowered_transition && IsPending() && current_difference[0].similar(zr_offs, 0.02f) && current_difference[1].similar(zr_rot, 0.02f))
+            SetPending(FALSE);
+
+        m_last_hud_offset_idx = idx;
     }
     //====================================================//
 
@@ -1036,7 +1137,7 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
             current_sprint[0].lerp(current_sprint[0], target_offset, step);
             current_sprint[1].lerp(current_sprint[1], target_rotation, step);
             summary_offset.add(current_sprint[0]);
-            summary_rotate.add(current_sprint[1]);
+            sprint_local_rotate.set(current_sprint[1]);
         }
     }
 
@@ -1331,6 +1432,13 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
         // Msg("##[%s] summary_rotate: [%f,%f,%f]", __FUNCTION__, summary_rotate.x, summary_rotate.y, summary_rotate.z);
         trans.setHPB(_angle.x, _angle.y, _angle.z);
         trans.c = _pos;
+
+        // Sprint poses often use large rotations. Composing them through the
+        // camera Euler angles couples the pose to camera pitch and can flip
+        // the weapon across the screen when looking up or down.
+        Fmatrix sprint_rotation;
+        sprint_rotation.setHPB(-sprint_local_rotate.x, -sprint_local_rotate.y, -sprint_local_rotate.z);
+        trans.mulB_43(sprint_rotation);
 
         Fmatrix hud_rotation;
         hud_rotation.identity();

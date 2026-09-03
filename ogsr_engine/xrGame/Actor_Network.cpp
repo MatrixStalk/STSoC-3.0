@@ -211,6 +211,10 @@ BOOL CActor::net_Spawn(CSE_Abstract* DC)
 
     spatial.type |= STYPE_REACTTOSOUND;
 
+    // Normally restored by CLevel::net_Start. Keep actor spawning safe for
+    // alternate loading paths which do not pass through the regular start.
+    if (!g_player_hud)
+        g_player_hud = xr_new<player_hud>();
     g_player_hud->load_default();
 
     Level().debug_renderer().ClearDebugContainer();

@@ -15,6 +15,8 @@
 #include "../xr_level_controller.h"
 #include "UICellItem.h"
 #include "UIListBoxItem.h"
+#include "UIWeaponModWnd.h"
+#include "UIXmlInit.h"
 #include "../CustomOutfit.h"
 #include "../string_table.h"
 #include <regex>
@@ -102,6 +104,18 @@ void CUIInventoryWnd::ActivatePropertiesBox()
     //отсоединение аддонов от вещи
     if (pWeapon)
     {
+        xr_vector<CWeapon::SAddonUISlot> modification_slots;
+        pWeapon->CollectAddonUISlots(modification_slots);
+        if (!modification_slots.empty())
+        {
+            CUIXml modification_xml;
+            LPCSTR label = "Weapon modification";
+            if (modification_xml.Init(CONFIG_PATH, UI_PATH, "weapon_modification.xml"))
+                label = modification_xml.Read("context_text", 0, label);
+            UIPropertiesBox.AddItem(label, nullptr, INVENTORY_MODIFY_WEAPON);
+            b_show = true;
+        }
+
         if (pWeapon->GrenadeLauncherAttachable() && pWeapon->IsGrenadeLauncherAttached())
         {
             UIPropertiesBox.AddItem("st_detach_gl", NULL, INVENTORY_DETACH_GRENADE_LAUNCHER_ADDON);
@@ -267,6 +281,7 @@ void CUIInventoryWnd::ProcessPropertiesBoxClicked()
         case INVENTORY_DETACH_SILENCER_ADDON: DetachAddon(*(smart_cast<CWeapon*>(CurrentIItem()))->GetSilencerName()); break;
         case INVENTORY_DETACH_GRENADE_LAUNCHER_ADDON: DetachAddon(*(smart_cast<CWeapon*>(CurrentIItem()))->GetGrenadeLauncherName()); break;
         case INVENTORY_DETACH_CUSTOM_ADDON: DetachAddon(static_cast<LPCSTR>(UIPropertiesBox.GetClickedItem()->GetData())); break;
+        case INVENTORY_MODIFY_WEAPON: OpenWeaponModification(smart_cast<CWeapon*>(CurrentIItem())); break;
         case INVENTORY_RELOAD_MAGAZINE: (smart_cast<CWeapon*>(CurrentIItem()))->Action(kWPN_RELOAD, CMD_START); break;
         case INVENTORY_UNLOAD_MAGAZINE: {
             auto ProcessUnload = [](void* pWpn) {
@@ -299,6 +314,15 @@ void CUIInventoryWnd::ProcessPropertiesBoxClicked()
         break;
         }
     }
+}
+
+void CUIInventoryWnd::OpenWeaponModification(CWeapon* weapon)
+{
+    if (!weapon || !m_weapon_mod_wnd)
+        return;
+
+    UIPropertiesBox.Hide();
+    m_weapon_mod_wnd->Open(weapon, m_pInv);
 }
 
 bool CUIInventoryWnd::TryUseItem(PIItem itm)

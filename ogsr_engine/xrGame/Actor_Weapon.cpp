@@ -82,7 +82,16 @@ void CActor::g_fireParams(CHudItem* pHudItem, Fvector& fire_pos, Fvector& fire_d
     else if (auto weapon = smart_cast<CWeapon*>(pHudItem);
              weapon && !smart_cast<CWeaponKnife*>(pHudItem) && !smart_cast<CMissile*>(pHudItem) && !smart_cast<CWeaponBinoculars*>(pHudItem))
     {
-        if (psHUD_Flags.test(HUD_CROSSHAIR_HARD) && !(weapon->IsZoomed() && !weapon->IsRotatingToZoom()))
+        const Fmatrix& fire_mat = weapon->get_ParticlesXFORM();
+        if (cam_freelook != eflDisabled)
+        {
+            Fvector dir;
+            const float pitch = fire_mat.k.getP();
+            dir.setHP(-angle_normalize_signed(old_torso_yaw),
+                      pitch > 0.f ? ((weapon->GetState() == CWeapon::eFire || cam_freelook == eflDisabling) ? pitch : pitch * 0.6f) : pitch * 0.8f);
+            fire_dir = dir;
+        }
+        else if (psHUD_Flags.test(HUD_CROSSHAIR_HARD) && !(weapon->IsZoomed() && !weapon->IsRotatingToZoom()))
         {
             fire_dir = weapon->get_LastFD();
             fire_pos = weapon->get_LastShootPoint();

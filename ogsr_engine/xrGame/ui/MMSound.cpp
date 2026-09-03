@@ -23,11 +23,11 @@ void CMMSound::Init(CUIXml& xml_doc, LPCSTR path)
 
     strconcat(sizeof(_path), _path, path, ":whell_sound");
     if (FS.exist(buff, fsgame::game_sounds, xml_doc.Read(_path, 0, ""), ".ogg"))
-        m_whell.create(xml_doc.Read(_path, 0, ""), st_Effect, sg_SourceType);
+        m_whell.create(xml_doc.Read(_path, 0, ""), st_Effect, sg_Interface);
 
     strconcat(sizeof(_path), _path, path, ":whell_click");
     if (FS.exist(buff, fsgame::game_sounds, xml_doc.Read(_path, 0, ""), ".ogg"))
-        m_whell_click.create(xml_doc.Read(_path, 0, ""), st_Effect, sg_SourceType);
+        m_whell_click.create(xml_doc.Read(_path, 0, ""), st_Effect, sg_Interface);
 }
 
 void CMMSound::whell_Play()

@@ -8,6 +8,14 @@ struct OggVorbis_File;
 class CSoundRender_Source : public CSound_source
 {
 public:
+    enum class ECodec : u8
+    {
+        Ogg,
+        Wav,
+        Mp3,
+        Flac
+    };
+
     shared_str pname;
     shared_str fname;
     cache_cat CAT;
@@ -23,6 +31,9 @@ public:
     float m_fMaxAIDist;
     u32 m_uGameType;
 
+    ECodec m_codec{ECodec::Ogg};
+    xr_vector<u8> m_decoded_data;
+
 private:
     void i_decompress(OggVorbis_File* ovf, char* dest, u32 size) const;
     void i_decompress(OggVorbis_File* ovf, float* dest, u32 size) const; // this overload clamps denormalized sounds
@@ -36,6 +47,7 @@ public:
     void load(LPCSTR name);
     void unload();
     void decompress(u32 line, OggVorbis_File* ovf);
+    IC bool streamed() const { return m_codec == ECodec::Ogg; }
 
     virtual float length_sec() const { return fTimeTotal; }
     virtual u32 game_type() const { return m_uGameType; }

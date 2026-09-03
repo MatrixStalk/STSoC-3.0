@@ -18,6 +18,8 @@ class CArtefact;
 class CUI3tButton;
 class CUIDragDropListEx;
 class CUICellItem;
+class CUIWeaponModWnd;
+class CWeapon;
 
 class CUIInventoryWnd : public CUIDialogWnd
 {
@@ -44,6 +46,7 @@ public:
 
     virtual void Update();
     virtual void Draw();
+    virtual void Reset() override;
 
     virtual void Show();
     virtual void Hide();
@@ -52,6 +55,7 @@ public:
     void ShowSlotsHighlight(PIItem InvItem);
 
     void AddItemToBag(PIItem pItem);
+    void OpenWeaponModification(CWeapon* weapon);
 
 protected:
     enum eInventorySndAction
@@ -129,6 +133,7 @@ protected:
     CUIProgressBar UIProgressBarRank;
 
     CUIPropertiesBox UIPropertiesBox;
+    CUIWeaponModWnd* m_weapon_mod_wnd{};
 
     //информация о персонаже
     CUIOutfitInfo UIOutfitInfo;

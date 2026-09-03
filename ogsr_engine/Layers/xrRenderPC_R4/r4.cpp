@@ -23,25 +23,35 @@ namespace
 {
 void merge_ui_model_visual_bounds(dxRender_Visual* visual, const Fmatrix& transform, Fbox& bounds)
 {
-    if (!visual || !visual->getRZFlag())
+    if (!visual)
         return;
 
     switch (visual->Type)
     {
     case MT_HIERRARHY:
         for (dxRender_Visual* child : smart_cast<FHierrarhyVisual*>(visual)->children)
-            merge_ui_model_visual_bounds(child, transform, bounds);
+            if (child && child->getRZFlag())
+                merge_ui_model_visual_bounds(child, transform, bounds);
         return;
     case MT_SKELETON_ANIM:
     case MT_SKELETON_RIGID: {
         auto* kinematics = smart_cast<CKinematics*>(visual);
-        kinematics->CalculateBones(TRUE);
+        // UI previews reuse the pose prepared by the game update. Forcing a
+        // bone update here can deadlock with model teardown or render workers.
         for (dxRender_Visual* child : kinematics->children)
-            merge_ui_model_visual_bounds(child, transform, bounds);
+            if (child && child->getRZFlag())
+                merge_ui_model_visual_bounds(child, transform, bounds);
         return;
     }
     default: break;
     }
+
+    // Match add_leafs_dynamic: a hierarchy/skeleton container is only a
+    // traversal node, while replacement-bone visibility belongs to its leaf
+    // meshes.  Source modular weapons can clear the container flag after a
+    // skeletal handguard is installed without hiding every remaining child.
+    if (!visual->getRZFlag())
+        return;
 
     // A skeletal container's bounds include all animated helper bones. Source
     // hand-pose attachments may therefore be tens of times larger than their
@@ -58,7 +68,7 @@ void merge_ui_model_visual_bounds(dxRender_Visual* visual, const Fmatrix& transf
 
 u32 render_ui_model_visual(CBackend& cmd_list, dxRender_Visual* visual, const Fmatrix& world, const Fvector4& tint, const Irect& scissor)
 {
-    if (!visual || !visual->getRZFlag())
+    if (!visual)
         return 0;
 
     switch (visual->Type)
@@ -66,21 +76,26 @@ u32 render_ui_model_visual(CBackend& cmd_list, dxRender_Visual* visual, const Fm
     case MT_HIERRARHY: {
         u32 rendered = 0;
         for (dxRender_Visual* child : smart_cast<FHierrarhyVisual*>(visual)->children)
-            rendered += render_ui_model_visual(cmd_list, child, world, tint, scissor);
+            if (child && child->getRZFlag())
+                rendered += render_ui_model_visual(cmd_list, child, world, tint, scissor);
         return rendered;
     }
     case MT_SKELETON_ANIM:
     case MT_SKELETON_RIGID: {
         auto* kinematics = smart_cast<CKinematics*>(visual);
-        kinematics->CalculateBones(TRUE);
 
+        // Do not enter the skeleton update mutex from the immediate UI pass.
         u32 rendered = 0;
         for (dxRender_Visual* child : kinematics->children)
-            rendered += render_ui_model_visual(cmd_list, child, world, tint, scissor);
+            if (child && child->getRZFlag())
+                rendered += render_ui_model_visual(cmd_list, child, world, tint, scissor);
         return rendered;
     }
     default: break;
     }
+
+    if (!visual->getRZFlag())
+        return 0;
 
     ShaderElement* element = visual->shader ? visual->shader->E[5]._get() : nullptr;
     if (!element || element->passes.empty())
@@ -421,7 +436,18 @@ void CRender::add_Visual(u32 context_id, IRenderable* root, IRenderVisual* V, Fm
 
 bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& params)
 {
-    if (!object || ui_model_collecting || !Target || !Target->rt_UIModelDepth || !Target->rt_UIModelDepth->valid())
+    if (ui_model_collecting)
+        return false;
+
+    // Never retain visual pointers between UI calls. Level teardown may delete
+    // their owning models before another inventory frame is rendered.
+    ui_model_submissions.clear();
+
+    if (params.points)
+        for (SUIModelRenderPoint& point : *params.points)
+            point.visible = false;
+
+    if (!object || !Target || !Target->rt_UIModelDepth || !Target->rt_UIModelDepth->valid())
         return false;
 
     Frect viewport_rect = params.viewport;
@@ -432,13 +458,15 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
     if (viewport_rect.width() < 2.f || viewport_rect.height() < 2.f)
         return false;
 
-    ui_model_submissions.clear();
     ui_model_collecting = true;
     object->renderable_RenderUI(CHW::IMM_CTX_ID, object);
     ui_model_collecting = false;
 
     if (ui_model_submissions.empty() || !ui_model_submissions.front().visual)
+    {
+        ui_model_submissions.clear();
         return false;
+    }
 
     Fmatrix base_inverse;
     base_inverse.invert(ui_model_submissions.front().transform);
@@ -456,10 +484,16 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
         merge_ui_model_visual_bounds(submission.visual, local, bounds);
     }
     if (!bounds.is_valid())
+    {
+        ui_model_submissions.clear();
         return false;
+    }
 
     Fvector center;
-    bounds.getcenter(center);
+    if (params.use_pivot)
+        base_inverse.transform_tiny(center, params.pivot);
+    else
+        bounds.getcenter(center);
 
     Fmatrix center_transform;
     center_transform.translate(Fvector().invert(center));
@@ -484,6 +518,27 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
     view.build_camera_dir(Fvector().set(0.f, 0.f, -depth), Fvector().set(0.f, 0.f, 1.f), Fvector().set(0.f, 1.f, 0.f));
     Fmatrix projection;
     projection.build_projection_ortho(ortho_height * aspect, ortho_height, 0.01f, depth * 2.f + fitted_size.z + 1.f);
+
+    if (params.points)
+    {
+        Fmatrix view_projection;
+        view_projection.mul(projection, view);
+        for (SUIModelRenderPoint& point : *params.points)
+        {
+            Fvector local_point;
+            base_inverse.transform_tiny(local_point, point.world_position);
+            Fvector preview_point;
+            preview_transform.transform_tiny(preview_point, local_point);
+            Fvector projected;
+            view_projection.transform(projected, preview_point);
+
+            point.visible = projected.z >= 0.f && projected.z <= 1.f && projected.x >= -1.f && projected.x <= 1.f &&
+                projected.y >= -1.f && projected.y <= 1.f;
+            point.screen_position.set(
+                viewport_rect.x1 + (projected.x + 1.f) * 0.5f * viewport_rect.width(),
+                viewport_rect.y1 + (1.f - projected.y) * 0.5f * viewport_rect.height());
+        }
+    }
 
     auto& cmd_list = get_imm_context().cmd_list;
     ID3DRenderTargetView* previous_rt[4] = {cmd_list.get_RT(0), cmd_list.get_RT(1), cmd_list.get_RT(2), cmd_list.get_RT(3)};

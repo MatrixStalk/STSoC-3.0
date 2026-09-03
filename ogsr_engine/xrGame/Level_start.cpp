@@ -9,10 +9,21 @@
 #include "..\xr_3da\IGame_Persistent.h"
 #include "..\xr_3da\XR_IOConsole.h"
 #include "MainMenu.h"
+#include "player_hud.h"
 
 BOOL CLevel::net_Start(LPCSTR op_server, LPCSTR op_client)
 {
     net_start_result_total = TRUE;
+
+    // remove_objects releases HUD-owned render models before models_Clear.
+    // A location change reuses CLevel, so restore the HUD before any objects
+    // from the next level can spawn.
+    if (!g_player_hud)
+    {
+        Msg("~ Level startup: creating player HUD");
+        g_player_hud = xr_new<player_hud>();
+        g_player_hud->load_default();
+    }
 
     pApp->LoadBegin();
 

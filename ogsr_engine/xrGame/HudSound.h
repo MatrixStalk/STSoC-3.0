@@ -19,9 +19,12 @@ struct HUD_SOUND
 
     static void DestroySound(HUD_SOUND& hud_snd);
 
-    static void PlaySound(HUD_SOUND& snd, const Fvector& position, const CObject* parent, bool hud_mode, bool looped = false, bool overlap = false);
+    static void PlaySound(HUD_SOUND& snd, const Fvector& position, const CObject* parent, bool hud_mode, bool looped = false, bool overlap = false,
+        float timeline_scale = 1.f, u8 index = u8(-1));
 
     static void StopSound(HUD_SOUND& snd);
+    static void ReloadTimelineConfig();
+    static u32 TimelineConfigRevision();
 
     ICF BOOL playing()
     {
@@ -49,11 +52,19 @@ struct HUD_SOUND
         float volume; //громкость
         float freq; //коэффициент частоты
     };
+    // ARC9-style timeline. Each entry is a layer; one random variant is
+    // selected inside every layer and all layers are started together. The
+    // SSnd::delay value is the layer position on the animation timeline.
+    xr_vector<xr_vector<SSnd>> timeline_layers;
+    shared_str m_config_section;
+    shared_str m_config_line;
+    int m_config_type{sg_SourceType};
     shared_str m_alias;
     SSnd* m_activeSnd;
     bool m_b_exclusive;
     xr_vector<SSnd> sounds;
     bool operator==(LPCSTR alias) const { return 0 == _stricmp(m_alias.c_str(), alias); };
+    bool empty() const { return sounds.empty() && timeline_layers.empty(); }
 };
 void LoadSound(LPCSTR section, LPCSTR line, LPCSTR alias, bool exclusive = false, int type = sg_SourceType);
 
@@ -95,9 +106,11 @@ public:
 
     void StopSound(pcstr alias);
     void StopAllSounds();
+    void Clear();
+    void ClearSound(pcstr alias);
 
     void LoadSound(pcstr section, pcstr line, pcstr alias, bool exclusive = false, int type = sg_SourceType);
-    void LoadSound(CInifile const* ini, pcstr section, pcstr line, pcstr alias, bool exclusive = false, int type = sg_SourceType);
+    void LoadSound(CInifile* ini, pcstr section, pcstr line, pcstr alias, bool exclusive = false, int type = sg_SourceType);
 
     void SetPosition(pcstr alias, const Fvector& pos);
 };

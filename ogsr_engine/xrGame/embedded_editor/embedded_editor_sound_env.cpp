@@ -1,9 +1,161 @@
 #include "stdafx.h"
 #include "imgui.h"
 #include "embedded_editor_sound_env.h"
+#include "../HudSound.h"
 
 #include <mmeapi.h>
 #include <../eax/Include/eax.h>
+
+namespace
+{
+struct TimelineLayerEditor
+{
+    string64 name{"layer"};
+    string_path sound{};
+    float volume{1.f};
+    float time{};
+    float pitch{1.f};
+};
+
+xr_vector<xr_string> timeline_sound_files;
+xr_vector<TimelineLayerEditor> timeline_layers;
+string128 timeline_section{"weapon_animation_timeline"};
+string_path timeline_output{"sound_timelines.ltx"};
+
+void refresh_sound_files()
+{
+    timeline_sound_files.clear();
+    FS_FileSet files;
+    FS.file_list(files, fsgame::game_sounds, FS_ListFiles, "*.ogg");
+    for (const auto& file : files)
+    {
+        string_path name;
+        xr_strcpy(name, file.name.c_str());
+        if (LPSTR extension = strext(name))
+            *extension = 0;
+        timeline_sound_files.emplace_back(name);
+    }
+}
+
+void render_equalizer_editor()
+{
+    if (!ImGui::CollapsingHeader("Level equalizer", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+    SSoundEqualizer* eq = ::Sound->DbgEqualizer();
+    bool changed = false;
+    bool enabled = !!eq->enabled;
+    if (ImGui::Checkbox("Enabled (level sounds only)", &enabled))
+    {
+        eq->enabled = enabled;
+        changed = true;
+    }
+    changed |= ImGui::SliderFloat("Preamp", &eq->preamp_db, -18.f, 12.f, "%.1f dB");
+    constexpr LPCSTR names[4]{"Low shelf", "Low mid", "High mid", "High shelf"};
+    for (u32 i = 0; i < 4; ++i)
+    {
+        ImGui::PushID(i);
+        ImGui::TextUnformatted(names[i]);
+        changed |= ImGui::SliderFloat("Frequency", &eq->bands[i].frequency, 20.f, 20000.f, "%.0f Hz", ImGuiSliderFlags_Logarithmic);
+        changed |= ImGui::SliderFloat("Gain", &eq->bands[i].gain_db, -18.f, 18.f, "%.1f dB");
+        changed |= ImGui::SliderFloat("Q", &eq->bands[i].q, 0.1f, 10.f, "%.2f", ImGuiSliderFlags_Logarithmic);
+        ImGui::Separator();
+        ImGui::PopID();
+    }
+    if (changed)
+        ++eq->revision;
+    if (ImGui::Button("Save equalizer"))
+        ::Sound->DbgEqualizerSave();
+    ImGui::SameLine();
+    if (ImGui::Button("Reload equalizer"))
+        ::Sound->DbgEqualizerReload();
+}
+
+void render_timeline_editor()
+{
+    if (!ImGui::CollapsingHeader("Animation sound timeline", ImGuiTreeNodeFlags_DefaultOpen))
+        return;
+    ImGui::InputText("Section", timeline_section, std::size(timeline_section));
+    ImGui::InputText("Output LTX", timeline_output, std::size(timeline_output));
+    if (timeline_sound_files.empty() && ImGui::Button("Scan game sounds"))
+        refresh_sound_files();
+    else if (!timeline_sound_files.empty() && ImGui::Button("Rescan game sounds"))
+        refresh_sound_files();
+    ImGui::SameLine();
+    if (ImGui::Button("Add layer"))
+    {
+        TimelineLayerEditor& layer = timeline_layers.emplace_back();
+        xr_sprintf(layer.name, "layer_%u", timeline_layers.size());
+    }
+
+    for (u32 i = 0; i < timeline_layers.size();)
+    {
+        TimelineLayerEditor& layer = timeline_layers[i];
+        ImGui::PushID(i);
+        ImGui::InputText("Layer name", layer.name, std::size(layer.name));
+        const char* preview = layer.sound[0] ? layer.sound : "<select .ogg>";
+        if (ImGui::BeginCombo("Sound", preview))
+        {
+            static ImGuiTextFilter filter;
+            filter.Draw("Filter");
+            for (const xr_string& sound : timeline_sound_files)
+            {
+                if (!filter.PassFilter(sound.c_str()))
+                    continue;
+                if (ImGui::Selectable(sound.c_str(), !_stricmp(layer.sound, sound.c_str())))
+                    xr_strcpy(layer.sound, sound.c_str());
+            }
+            ImGui::EndCombo();
+        }
+        ImGui::DragFloat("Timeline (seconds)", &layer.time, 0.01f, 0.f, 60.f, "%.3f s");
+        ImGui::SliderFloat("Volume", &layer.volume, 0.f, 2.f, "%.2f");
+        ImGui::SliderFloat("Pitch", &layer.pitch, 0.25f, 4.f, "%.2f");
+        if (ImGui::Button("Preview") && layer.sound[0])
+        {
+            ref_sound preview_sound;
+            preview_sound.create(layer.sound, st_Effect, sg_Interface);
+            Fvector position{};
+            float volume = layer.volume;
+            float pitch = layer.pitch;
+            preview_sound.play_no_feedback(nullptr, sm_2D, 0.f, &position, &volume, &pitch);
+            preview_sound.destroy();
+        }
+        ImGui::SameLine();
+        bool remove = ImGui::Button("Remove layer");
+        ImGui::Separator();
+        ImGui::PopID();
+        if (remove)
+            timeline_layers.erase(timeline_layers.begin() + i);
+        else
+            ++i;
+    }
+
+    if (ImGui::Button("Save timeline LTX") && timeline_section[0] && timeline_output[0])
+    {
+        string_path path;
+        FS.update_path(path, fsgame::game_configs, timeline_output);
+        CInifile ini(path, FALSE, FS.exist(path) != nullptr, TRUE);
+        xr_string names;
+        for (const TimelineLayerEditor& layer : timeline_layers)
+        {
+            if (!layer.name[0] || !layer.sound[0])
+                continue;
+            if (!names.empty())
+                names += ", ";
+            names += layer.name;
+            string128 key;
+            string512 value;
+            xr_sprintf(key, "layer_%s", layer.name);
+            xr_sprintf(value, "%s, %.4f, %.4f, %.4f", layer.sound, layer.volume, layer.time, layer.pitch);
+            ini.w_string(timeline_section, key, value);
+        }
+        ini.w_string(timeline_section, "layers", names.c_str());
+        ini.save_as();
+        HUD_SOUND::ReloadTimelineConfig();
+        Msg("--Sound timeline [%s] saved to [%s]", timeline_section, path);
+    }
+    ImGui::TextWrapped("Use from a weapon/addon as: snd_anm_<animation> = %s", timeline_section);
+}
+}
 
 /*
 constexpr const char* env_names[]{"GENERIC",    "PADDEDCELL",      "ROOM",       "BATHROOM",      "LIVINGROOM", "STONEROOM", "AUDITORIUM", "CONCERTHALL", "CAVE",   "ARENA",
@@ -30,6 +182,11 @@ void CImGuiSoundEnvWnd::Render()
 
     ImGui::InputText("Current Zone Name", env_name, std::size(env_name), ImGuiInputTextFlags_ReadOnly);
 
+    ImGui::Separator();
+
+    render_equalizer_editor();
+    ImGui::Separator();
+    render_timeline_editor();
     ImGui::Separator();
 
     ImGui::SliderFloat("Room", &env->Room, EAXLISTENER_MINROOM, EAXLISTENER_MAXROOM);

@@ -31,7 +31,9 @@ IGame_Level::~IGame_Level()
     xr_delete(pLevel);
 
     // Render-level unload
+    Msg("~ Level shutdown: unloading renderer level...");
     Render->level_Unload();
+    Msg("~ Level shutdown: renderer level unloaded");
     xr_delete(m_pCameras);
 
     // Unregister
@@ -46,16 +48,20 @@ IGame_Level::~IGame_Level()
 
 void IGame_Level::net_Stop()
 {
+    Msg("~ Level shutdown: flushing object updates...");
     for (int i = 0; i < 6; i++)
         Objects.Update(true); //Simp: true тут важно, не форсированный апдейт обджектлиста должен быть только на апдейте. в Level_network.cpp тоже должно быть true везде!
 
     // Destroy all objects
+    Msg("~ Level shutdown: unloading remaining objects...");
     Objects.Unload();
     R_ASSERT(Objects.o_count() == 0, "Objects not empty on level unload!");
 
+    Msg("~ Level shutdown: releasing input...");
     IR_Release();
 
     bReady = false;
+    Msg("~ Level shutdown: base level stopped");
 }
 
 //-------------------------------------------------------------------------------------------
