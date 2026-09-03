@@ -148,12 +148,6 @@
     <ClInclude Include="SoundRender_Cache.h" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="guids.cpp">
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
-      </PrecompiledHeader>
-      <PrecompiledHeader Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-      </PrecompiledHeader>
-    </ClCompile>
     <ClCompile Include="NotificationClient.cpp" />
     <ClCompile Include="sound.cpp" />
     <ClCompile Include="stdafx.cpp">

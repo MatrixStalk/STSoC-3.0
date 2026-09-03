@@ -115,7 +115,6 @@ void CSoundRender_Core::equalizer_save() const
     }
 }
 
-extern xr_vector<u8> g_target_temp_data;
 void CSoundRender_Core::_clear()
 {
     cache.destroy();
@@ -131,7 +130,6 @@ void CSoundRender_Core::_clear()
         xr_delete(s_emitters[eit]);
     s_emitters.clear();
 
-    g_target_temp_data.clear();
 }
 
 void CSoundRender_Core::stop_emitters()

@@ -2,10 +2,22 @@
 
 #include "soundrender.h"
 #include "soundrender_environment.h"
-#pragma warning(push)
-#pragma warning(disable : 4995)
-#include <eax.h>
-#pragma warning(pop)
+namespace
+{
+constexpr u32 kGenericEnvironment = 0;
+constexpr float kMinRoom = -10000.f, kMaxRoom = 0.f, kDefaultRoom = -1000.f;
+constexpr float kMinRoomHF = -10000.f, kMaxRoomHF = 0.f, kDefaultRoomHF = -100.f;
+constexpr float kMinRolloff = 0.f, kMaxRolloff = 10.f, kDefaultRolloff = 0.f;
+constexpr float kMinDecay = .1f, kMaxDecay = 20.f, kDefaultDecay = 1.49f;
+constexpr float kMinDecayHF = .1f, kMaxDecayHF = 2.f, kDefaultDecayHF = .83f;
+constexpr float kMinReflections = -10000.f, kMaxReflections = 1000.f, kDefaultReflections = -2602.f;
+constexpr float kMinReflectionsDelay = 0.f, kMaxReflectionsDelay = .3f, kDefaultReflectionsDelay = .007f;
+constexpr float kMinReverb = -10000.f, kMaxReverb = 2000.f, kDefaultReverb = 200.f;
+constexpr float kMinReverbDelay = 0.f, kMaxReverbDelay = .1f, kDefaultReverbDelay = .011f;
+constexpr float kMinSize = 1.f, kMaxSize = 100.f, kDefaultSize = 7.5f;
+constexpr float kMinDiffusion = 0.f, kMaxDiffusion = 1.f, kDefaultDiffusion = 1.f;
+constexpr float kMinAirAbsorption = -100.f, kMaxAirAbsorption = 0.f, kDefaultAirAbsorption = -5.f;
+}
 
 CSoundRender_Environment::CSoundRender_Environment(void)
 {
@@ -18,25 +30,25 @@ CSoundRender_Environment::~CSoundRender_Environment(void) {}
 
 void CSoundRender_Environment::set_default()
 {
-    Environment = EAX_ENVIRONMENT_GENERIC;
-    Room = EAXLISTENER_DEFAULTROOM;
-    RoomHF = EAXLISTENER_DEFAULTROOMHF;
-    RoomRolloffFactor = EAXLISTENER_DEFAULTROOMROLLOFFFACTOR;
-    DecayTime = EAXLISTENER_DEFAULTDECAYTIME;
-    DecayHFRatio = EAXLISTENER_DEFAULTDECAYHFRATIO;
-    Reflections = EAXLISTENER_DEFAULTREFLECTIONS;
-    ReflectionsDelay = EAXLISTENER_DEFAULTREFLECTIONSDELAY;
-    Reverb = EAXLISTENER_DEFAULTREVERB;
-    ReverbDelay = EAXLISTENER_DEFAULTREVERBDELAY;
-    EnvironmentSize = EAXLISTENER_DEFAULTENVIRONMENTSIZE;
-    EnvironmentDiffusion = EAXLISTENER_DEFAULTENVIRONMENTDIFFUSION;
-    AirAbsorptionHF = EAXLISTENER_DEFAULTAIRABSORPTIONHF;
+    Environment = kGenericEnvironment;
+    Room = kDefaultRoom;
+    RoomHF = kDefaultRoomHF;
+    RoomRolloffFactor = kDefaultRolloff;
+    DecayTime = kDefaultDecay;
+    DecayHFRatio = kDefaultDecayHF;
+    Reflections = kDefaultReflections;
+    ReflectionsDelay = kDefaultReflectionsDelay;
+    Reverb = kDefaultReverb;
+    ReverbDelay = kDefaultReverbDelay;
+    EnvironmentSize = kDefaultSize;
+    EnvironmentDiffusion = kDefaultDiffusion;
+    AirAbsorptionHF = kDefaultAirAbsorption;
 }
 
 void CSoundRender_Environment::set_identity()
 {
     set_default();
-    Room = EAXLISTENER_MINROOM;
+    Room = kMinRoom;
     clamp();
 }
 
@@ -82,18 +94,18 @@ void CSoundRender_Environment::set_from(CSoundRender_Environment& A)
 
 void CSoundRender_Environment::clamp()
 {
-    ::clamp(Room, (float)EAXLISTENER_MINROOM, (float)EAXLISTENER_MAXROOM);
-    ::clamp(RoomHF, (float)EAXLISTENER_MINROOMHF, (float)EAXLISTENER_MAXROOMHF);
-    ::clamp(RoomRolloffFactor, EAXLISTENER_MINROOMROLLOFFFACTOR, EAXLISTENER_MAXROOMROLLOFFFACTOR);
-    ::clamp(DecayTime, EAXLISTENER_MINDECAYTIME, EAXLISTENER_MAXDECAYTIME);
-    ::clamp(DecayHFRatio, EAXLISTENER_MINDECAYHFRATIO, EAXLISTENER_MAXDECAYHFRATIO);
-    ::clamp(Reflections, (float)EAXLISTENER_MINREFLECTIONS, (float)EAXLISTENER_MAXREFLECTIONS);
-    ::clamp(ReflectionsDelay, EAXLISTENER_MINREFLECTIONSDELAY, EAXLISTENER_MAXREFLECTIONSDELAY);
-    ::clamp(Reverb, (float)EAXLISTENER_MINREVERB, (float)EAXLISTENER_MAXREVERB);
-    ::clamp(ReverbDelay, EAXLISTENER_MINREVERBDELAY, EAXLISTENER_MAXREVERBDELAY);
-    ::clamp(EnvironmentSize, EAXLISTENER_MINENVIRONMENTSIZE, EAXLISTENER_MAXENVIRONMENTSIZE);
-    ::clamp(EnvironmentDiffusion, EAXLISTENER_MINENVIRONMENTDIFFUSION, EAXLISTENER_MAXENVIRONMENTDIFFUSION);
-    ::clamp(AirAbsorptionHF, EAXLISTENER_MINAIRABSORPTIONHF, EAXLISTENER_MAXAIRABSORPTIONHF);
+    ::clamp(Room, kMinRoom, kMaxRoom);
+    ::clamp(RoomHF, kMinRoomHF, kMaxRoomHF);
+    ::clamp(RoomRolloffFactor, kMinRolloff, kMaxRolloff);
+    ::clamp(DecayTime, kMinDecay, kMaxDecay);
+    ::clamp(DecayHFRatio, kMinDecayHF, kMaxDecayHF);
+    ::clamp(Reflections, kMinReflections, kMaxReflections);
+    ::clamp(ReflectionsDelay, kMinReflectionsDelay, kMaxReflectionsDelay);
+    ::clamp(Reverb, kMinReverb, kMaxReverb);
+    ::clamp(ReverbDelay, kMinReverbDelay, kMaxReverbDelay);
+    ::clamp(EnvironmentSize, kMinSize, kMaxSize);
+    ::clamp(EnvironmentDiffusion, kMinDiffusion, kMaxDiffusion);
+    ::clamp(AirAbsorptionHF, kMinAirAbsorption, kMaxAirAbsorption);
 }
 
 bool CSoundRender_Environment::load(IReader* fs)

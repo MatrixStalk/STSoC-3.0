@@ -280,10 +280,9 @@ void CSoundRender_TargetA::fill_parameters(CSoundRender_Core* base_core)
 
 void CSoundRender_TargetA::source_changed()
 {
-    release_stream();
+    // Called from the mixer callback while an attached tail is being selected.
+    // Source loading normalizes tails to the active PCM format, so only the
+    // compressed stream reader must be rebound here.
     dettach();
     attach();
-    create_stream();
-    if (rendering)
-        render();
 }

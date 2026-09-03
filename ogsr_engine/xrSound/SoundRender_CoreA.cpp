@@ -29,6 +29,16 @@ FMOD_VECTOR fmod_vector(const Fvector& value)
 {
     return {value.x, value.y, -value.z};
 }
+
+void backend_dll_path(char (&path)[MAX_PATH], LPCSTR dll)
+{
+    GetModuleFileNameA(nullptr, path, MAX_PATH);
+    char* separator = strrchr(path, '\\');
+    if (separator)
+        xr_strcpy(separator + 1, MAX_PATH - (separator + 1 - path), dll);
+    else
+        xr_strcpy(path, dll);
+}
 } // namespace
 
 CSoundRender_CoreA::CSoundRender_CoreA() = default;
@@ -136,7 +146,9 @@ bool CSoundRender_CoreA::initialize_fmod()
     fmod_system->setDSPBufferSize(dsp_buffer_length, dsp_buffer_count);
     fmod_system->set3DSettings(1.f, 1.f, psSoundRolloff);
 
-    if (!fmod_ok(fmod_system->loadPlugin("phonon_fmod.dll", &steam_audio_plugin), "loadPlugin(phonon_fmod.dll)"))
+    char plugin_path[MAX_PATH]{};
+    backend_dll_path(plugin_path, "phonon_fmod.dll");
+    if (!fmod_ok(fmod_system->loadPlugin(plugin_path, &steam_audio_plugin), "loadPlugin(phonon_fmod.dll)"))
         return false;
 
     int nested_count = 0;
@@ -211,7 +223,7 @@ void CSoundRender_CoreA::set_master_volume(float volume)
 
 void CSoundRender_CoreA::release_backend()
 {
-    if (steam_audio_context)
+    if (steam_audio_hrtf)
         iplFMODTerminate();
     if (steam_audio_hrtf)
         iplHRTFRelease(&steam_audio_hrtf);
@@ -230,13 +242,13 @@ void CSoundRender_CoreA::release_backend()
 void CSoundRender_CoreA::_clear()
 {
     bReady = FALSE;
-    inherited::_clear();
     for (CSoundRender_Target*& target : s_targets)
     {
         target->_destroy();
         xr_delete(target);
     }
     s_targets.clear();
+    inherited::_clear();
     release_backend();
     clear_device_tokens();
     bPresent = FALSE;
