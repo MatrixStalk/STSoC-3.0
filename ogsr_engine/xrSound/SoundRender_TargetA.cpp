@@ -117,17 +117,71 @@ FMOD_RESULT F_CALL CSoundRender_TargetA::pcm_read(FMOD_SOUND* sound, void* data,
     void* user = nullptr;
     reinterpret_cast<FMOD::Sound*>(sound)->getUserData(&user);
     auto* target = static_cast<CSoundRender_TargetA*>(user);
-    if (!target || !target->m_pEmitter)
+    if (!target)
     {
         ZeroMemory(data, bytes);
         return FMOD_OK;
     }
-    target->m_pEmitter->fill_block(data, bytes);
-    target->apply_equalizer(data, bytes, target->m_pEmitter->source()->m_wformat);
+    target->read_pcm_ring(data, bytes);
     return FMOD_OK;
 }
 
 FMOD_RESULT F_CALL CSoundRender_TargetA::pcm_seek(FMOD_SOUND*, int, unsigned int, FMOD_TIMEUNIT) { return FMOD_OK; }
+
+void CSoundRender_TargetA::reset_pcm_ring()
+{
+    std::scoped_lock lock(pcm_mutex);
+    pcm_read_offset = 0;
+    pcm_write_offset = 0;
+    pcm_available = 0;
+}
+
+void CSoundRender_TargetA::read_pcm_ring(void* data, u32 bytes)
+{
+    u8* destination = static_cast<u8*>(data);
+    std::scoped_lock lock(pcm_mutex);
+    const u32 amount = _min(bytes, pcm_available);
+    if (amount && !pcm_ring.empty())
+    {
+        const u32 first = _min(amount, u32(pcm_ring.size()) - pcm_read_offset);
+        CopyMemory(destination, pcm_ring.data() + pcm_read_offset, first);
+        if (amount > first)
+            CopyMemory(destination + first, pcm_ring.data(), amount - first);
+        pcm_read_offset = (pcm_read_offset + amount) % u32(pcm_ring.size());
+        pcm_available -= amount;
+    }
+    if (amount < bytes)
+        ZeroMemory(destination + amount, bytes - amount);
+}
+
+void CSoundRender_TargetA::refill_pcm_ring()
+{
+    if (!m_pEmitter || pcm_ring.empty())
+        return;
+
+    u32 free_bytes = 0;
+    {
+        std::scoped_lock lock(pcm_mutex);
+        free_bytes = u32(pcm_ring.size()) - pcm_available;
+    }
+    const u32 block_align = _max(1u, u32(m_pEmitter->source()->m_wformat.nBlockAlign));
+    free_bytes -= free_bytes % block_align;
+    if (!free_bytes)
+        return;
+
+    pcm_staging.resize(free_bytes);
+    m_pEmitter->fill_block(pcm_staging.data(), free_bytes);
+    apply_equalizer(pcm_staging.data(), free_bytes, m_pEmitter->source()->m_wformat);
+
+    std::scoped_lock lock(pcm_mutex);
+    const u32 writable = _min(free_bytes, u32(pcm_ring.size()) - pcm_available);
+    const u32 first = _min(writable, u32(pcm_ring.size()) - pcm_write_offset);
+    CopyMemory(pcm_ring.data() + pcm_write_offset, pcm_staging.data(), first);
+    if (writable > first)
+        CopyMemory(pcm_ring.data(), pcm_staging.data() + first, writable - first);
+    pcm_write_offset = (pcm_write_offset + writable) % u32(pcm_ring.size());
+    pcm_available += writable;
+}
 
 bool CSoundRender_TargetA::create_stream()
 {
@@ -192,6 +246,12 @@ void CSoundRender_TargetA::release_stream()
         fmod_sound->release();
         fmod_sound = nullptr;
     }
+    {
+        std::scoped_lock lock(pcm_mutex);
+        pcm_read_offset = pcm_write_offset = pcm_available = 0;
+        pcm_ring.clear();
+    }
+    pcm_staging.clear();
 }
 
 BOOL CSoundRender_TargetA::_initialize() { return inherited::_initialize(); }
@@ -204,6 +264,12 @@ void CSoundRender_TargetA::start(CSoundRender_Emitter* emitter)
     reset_equalizer();
     cache_gain = 0.f;
     cache_pitch = 1.f;
+    const WAVEFORMATEX& format = emitter->source()->m_wformat;
+    u32 ring_size = _max(u32(format.nAvgBytesPerSec / 2), u32(format.nBlockAlign * 2048));
+    ring_size -= ring_size % _max(1u, u32(format.nBlockAlign));
+    pcm_ring.resize(ring_size);
+    reset_pcm_ring();
+    refill_pcm_ring();
     create_stream();
 }
 
@@ -230,6 +296,8 @@ void CSoundRender_TargetA::rewind()
 {
     inherited::rewind();
     reset_equalizer();
+    reset_pcm_ring();
+    refill_pcm_ring();
     if (fmod_channel)
         fmod_channel->setPosition(0, FMOD_TIMEUNIT_PCMBYTES);
 }
@@ -237,6 +305,7 @@ void CSoundRender_TargetA::rewind()
 void CSoundRender_TargetA::update()
 {
     inherited::update();
+    refill_pcm_ring();
     if (!fmod_channel)
         return;
     bool playing = false;
@@ -268,10 +337,11 @@ void CSoundRender_TargetA::fill_parameters(CSoundRender_Core* base_core)
     if (!steam_audio_dsp)
         return;
 
-    FMOD_3D_ATTRIBUTES attributes{};
-    attributes.position = {m_pEmitter->p_source.position.x, m_pEmitter->p_source.position.y, -m_pEmitter->p_source.position.z};
-    attributes.forward = {0.f, 0.f, 1.f};
-    attributes.up = {0.f, 1.f, 0.f};
+    FMOD_DSP_PARAMETER_3DATTRIBUTES attributes{};
+    attributes.absolute.position = {m_pEmitter->p_source.position.x, m_pEmitter->p_source.position.y, -m_pEmitter->p_source.position.z};
+    attributes.absolute.forward = {0.f, 0.f, 1.f};
+    attributes.absolute.up = {0.f, 1.f, 0.f};
+    attributes.relative = attributes.absolute;
     steam_audio_dsp->setParameterData(IPL_SPATIALIZE_SOURCE_POSITION, &attributes, sizeof(attributes));
     steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_OCCLUSION, clampr(m_pEmitter->occluder_volume, 0.f, 1.f));
     steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_DISTANCEATTENUATION_MINDISTANCE, m_pEmitter->p_source.min_distance);

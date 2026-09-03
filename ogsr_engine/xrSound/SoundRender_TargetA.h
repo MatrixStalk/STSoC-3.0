@@ -13,6 +13,15 @@ class CSoundRender_TargetA : public CSoundRender_Target
     float cache_gain{};
     float cache_pitch{1.f};
 
+    // FMOD consumes this ring on its stream thread. xrSound decoding and its
+    // shared LRU cache stay on the engine sound-update thread.
+    xr_vector<u8> pcm_ring;
+    xr_vector<u8> pcm_staging;
+    u32 pcm_read_offset{};
+    u32 pcm_write_offset{};
+    u32 pcm_available{};
+    std::mutex pcm_mutex;
+
     struct Biquad
     {
         float b0{1.f}, b1{}, b2{}, a1{}, a2{};
@@ -28,6 +37,9 @@ class CSoundRender_TargetA : public CSoundRender_Target
     bool create_stream();
     void release_stream();
     void attach_steam_audio();
+    void reset_pcm_ring();
+    void refill_pcm_ring();
+    void read_pcm_ring(void* data, u32 bytes);
     static FMOD_RESULT F_CALL pcm_read(FMOD_SOUND* sound, void* data, unsigned int bytes);
     static FMOD_RESULT F_CALL pcm_seek(FMOD_SOUND* sound, int subsound, unsigned int position, FMOD_TIMEUNIT unit);
 
