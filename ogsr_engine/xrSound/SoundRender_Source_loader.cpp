@@ -102,8 +102,8 @@ static void load_non_ogg(CSoundRender_Source& source, IReader& file, LPCSTR name
     u32 sample_rate = 0;
     u64 frames = 0;
     void* decoded = nullptr;
-    // Keep fully decoded non-Vorbis effects compact. OpenAL always accepts PCM16,
-    // while float output would double memory use for large WAV/MP3/FLAC banks.
+    // Keep fully decoded non-Vorbis effects compact. The FMOD user stream accepts
+    // PCM16 directly, while float output would double large WAV/MP3/FLAC banks.
     const bool use_float = false;
 
     if (source.m_codec == CSoundRender_Source::ECodec::Wav)

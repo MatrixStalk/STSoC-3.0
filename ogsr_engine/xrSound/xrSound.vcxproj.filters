@@ -7,7 +7,7 @@
     <Filter Include="Core">
       <UniqueIdentifier>{9816a4bf-baa8-4298-9949-45fd0da7dee8}</UniqueIdentifier>
     </Filter>
-    <Filter Include="Core\OpenAL">
+    <Filter Include="Core\FMOD">
       <UniqueIdentifier>{c28f533d-c9f8-4b04-8ed3-7cb2b6f1e817}</UniqueIdentifier>
     </Filter>
     <Filter Include="Emitter">
@@ -39,11 +39,11 @@
     <ClInclude Include="SoundRender_Core.h">
       <Filter>Core</Filter>
     </ClInclude>
-    <ClInclude Include="OpenALDeviceList.h">
-      <Filter>Core\OpenAL</Filter>
-    </ClInclude>
     <ClInclude Include="SoundRender_CoreA.h">
-      <Filter>Core\OpenAL</Filter>
+      <Filter>Core\FMOD</Filter>
+    </ClInclude>
+    <ClInclude Include="SteamAudioFMOD.h">
+      <Filter>Core\FMOD</Filter>
     </ClInclude>
     <ClInclude Include="SoundRender_Emitter.h">
       <Filter>Emitter</Filter>
@@ -68,9 +68,6 @@
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="guids.cpp">
-      <Filter>Kernel</Filter>
-    </ClCompile>
     <ClCompile Include="sound.cpp">
       <Filter>Kernel</Filter>
     </ClCompile>
@@ -89,11 +86,8 @@
     <ClCompile Include="SoundRender_Core_StartStop.cpp">
       <Filter>Core</Filter>
     </ClCompile>
-    <ClCompile Include="OpenALDeviceList.cpp">
-      <Filter>Core\OpenAL</Filter>
-    </ClCompile>
     <ClCompile Include="SoundRender_CoreA.cpp">
-      <Filter>Core\OpenAL</Filter>
+      <Filter>Core\FMOD</Filter>
     </ClCompile>
     <ClCompile Include="SoundRender_Emitter.cpp">
       <Filter>Emitter</Filter>

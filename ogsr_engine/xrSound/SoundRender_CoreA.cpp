@@ -20,7 +20,7 @@ void clear_device_tokens()
     if (!snd_devices_token)
         return;
     for (xr_token* token = snd_devices_token; token->name; ++token)
-        xr_free(const_cast<char*>(token->name));
+        xr_free(token->name);
     xr_free(snd_devices_token);
     snd_devices_token = nullptr;
 }
