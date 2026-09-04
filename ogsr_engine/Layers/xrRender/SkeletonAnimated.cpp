@@ -210,22 +210,28 @@ void CKinematicsAnimated::LL_CloseCycle(u16 part, u8 mask_channel /*= (1<<0)*/)
         return;
 
     // destroy cycle(s)
-    BlendSVecIt I = blend_cycles[part].begin(), E = blend_cycles[part].end();
-    for (; I != E; I++)
+    BlendSVecIt I = blend_cycles[part].begin();
+    while (I != blend_cycles[part].end())
     {
         CBlend& B = *(*I);
         if (!(mask_channel & (1 << B.channel)))
+        {
+            ++I;
             continue;
+        }
         // B.blend = CBlend::eFREE_SLOT;
         B.set_free_state();
 
-        CPartDef& P = (*m_Partition)[B.bone_or_part];
-        for (const unsigned int bone : P.bones)
-            Bone_Motion_Stop_IM((*bones)[bone], *I);
+        if (B.cycle_bone != BI_NONE)
+            Bone_Motion_Stop_IM((*bones)[B.cycle_bone], *I);
+        else
+        {
+            CPartDef& P = (*m_Partition)[B.bone_or_part];
+            for (const unsigned int bone : P.bones)
+                Bone_Motion_Stop_IM((*bones)[bone], *I);
+        }
 
-        blend_cycles[part].erase(I); // ?
-        E = blend_cycles[part].end();
-        I--;
+        I = blend_cycles[part].erase(I);
     }
     // blend_cycles[part].clear	(); // ?
 }
@@ -275,6 +281,7 @@ void CKinematicsAnimated::IBlendSetup(CBlend& B, u16 part, u8 channel, MotionID 
     B.timeTotal = bone_motions->at(motion_ID.idx).GetLength();
 
     B.bone_or_part = part;
+    B.cycle_bone = BI_NONE;
     B.stop_at_end = noloop;
     B.playing = TRUE;
     B.stop_at_end_callback = TRUE;
@@ -283,6 +290,22 @@ void CKinematicsAnimated::IBlendSetup(CBlend& B, u16 part, u8 channel, MotionID 
 
     B.channel = channel;
     B.fall_at_end = B.stop_at_end && (channel > 1);
+}
+
+CBlend* CKinematicsAnimated::LL_PlayCycleOnBone(u16 part, u16 bone, MotionID motion_ID, BOOL bMixing, float blendAccrue,
+    float blendFalloff, float Speed, BOOL noloop, PlayCallback Callback, LPVOID CallbackParam, u8 channel)
+{
+    if (!motion_ID.valid() || part == BI_NONE || part >= MAX_PARTS || bone == BI_NONE || bone >= bones->size())
+        return nullptr;
+    if (m_Partition->part(part).Name == nullptr)
+        return nullptr;
+
+    CBlend* blend = IBlend_Create();
+    IBlendSetup(*blend, part, channel, motion_ID, bMixing, blendAccrue, blendFalloff, Speed, noloop, Callback, CallbackParam);
+    blend->cycle_bone = bone;
+    Bone_Motion_Start_IM((*bones)[bone], blend);
+    blend_cycles[part].push_back(blend);
+    return blend;
 }
 
 void CKinematicsAnimated::IFXBlendSetup(CBlend& B, MotionID motion_ID, float blendAccrue, float blendFalloff, float Power, float Speed, u16 bone)
@@ -298,6 +321,7 @@ void CKinematicsAnimated::IFXBlendSetup(CBlend& B, MotionID motion_ID, float ble
     B.timeCurrent = 0;
     B.timeTotal = m_Motions[B.motionID.slot].bone_motions[bone]->at(motion_ID.idx).GetLength();
     B.bone_or_part = bone;
+    B.cycle_bone = BI_NONE;
 
     B.playing = TRUE;
     B.stop_at_end_callback = TRUE;
@@ -448,9 +472,14 @@ void CKinematicsAnimated::DestroyCycle(CBlend& B)
         GetBlendDestroyCallback()->BlendDestroy(B);
     // B.blend 		= CBlend::eFREE_SLOT;
     B.set_free_state();
-    const CPartDef& P = m_Partition->part(B.bone_or_part);
-    for (const unsigned int bone : P.bones)
-        Bone_Motion_Stop_IM((*bones)[bone], &B);
+    if (B.cycle_bone != BI_NONE)
+        Bone_Motion_Stop_IM((*bones)[B.cycle_bone], &B);
+    else
+    {
+        const CPartDef& P = m_Partition->part(B.bone_or_part);
+        for (const unsigned int bone : P.bones)
+            Bone_Motion_Stop_IM((*bones)[bone], &B);
+    }
 }
 
 // returns true if play time out

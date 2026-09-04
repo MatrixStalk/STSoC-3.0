@@ -51,6 +51,10 @@ CWeaponMagazined::CWeaponMagazined(LPCSTR name, ESoundTypes eSoundType) : CWeapo
     m_iQueueSize = WEAPON_ININITE_QUEUE;
     m_bLockType = false;
 
+    m_bHasDifferentFireModes = false;
+    m_iCurFireMode = 0;
+    m_iPrefferedFireMode = -1;
+
     m_binoc_vision = nullptr;
     m_bVision = false;
 }
@@ -289,6 +293,11 @@ void CWeaponMagazined::StopHUDSounds()
 
 void CWeaponMagazined::net_Destroy()
 {
+    m_world_firemode_pose_model = nullptr;
+    m_hud_firemode_pose_model = nullptr;
+    m_applied_world_firemode_pose = -1;
+    m_applied_hud_firemode_pose = -1;
+    m_world_firemode_transition_end = 0;
     inherited::net_Destroy();
     if (m_binoc_vision)
         xr_delete(m_binoc_vision);
@@ -311,6 +320,9 @@ BOOL CWeaponMagazined::net_Spawn(CSE_Abstract* DC)
         }
     }
     SetQueueSize(GetCurrentFireMode());
+    m_previous_firemode_animation_index = CurrentFireModeAnimationIndex();
+    m_applied_world_firemode_pose = -1;
+    m_applied_hud_firemode_pose = -1;
     return bRes;
 }
 
@@ -435,11 +447,33 @@ void CWeaponMagazined::Load(LPCSTR section)
             int FireMode = atoi(sItem);
             m_aFireModes.push_back(FireMode);
         }
+
+        m_firemode_animation_indices.clear();
+        if (pSettings->line_exist(section, "firemode_animation_indices"))
+        {
+            LPCSTR indices = pSettings->r_string(section, "firemode_animation_indices");
+            const int index_count = _GetItemCount(indices);
+            if (index_count == ModesCount)
+            {
+                for (int i = 0; i < index_count; ++i)
+                {
+                    string16 item;
+                    _GetItem(indices, i, item);
+                    m_firemode_animation_indices.push_back(atoi(item));
+                }
+            }
+            else
+                Msg("! [%s]: firemode_animation_indices must contain %d values, got %d", section, ModesCount, index_count);
+        }
         m_iCurFireMode = ModesCount - 1;
         m_iPrefferedFireMode = READ_IF_EXISTS(pSettings, r_s16, section, "preffered_fire_mode", -1);
+        m_previous_firemode_animation_index = CurrentFireModeAnimationIndex();
     }
     else
+    {
         m_bHasDifferentFireModes = false;
+        m_firemode_animation_indices.clear();
+    }
 
     m_bVision = !!READ_IF_EXISTS(pSettings, r_bool, section, "vision_present", false);
     m_fire_zoomout_time = READ_IF_EXISTS(pSettings, r_u32, section, "fire_zoomout_time", u32(-1));
@@ -1019,6 +1053,8 @@ void CWeaponMagazined::UpdateCL()
             SwitchState(eBore);
     }
 
+    UpdateFireModePoses();
+
     UpdateSounds();
 }
 
@@ -1240,7 +1276,11 @@ void CWeaponMagazined::OnAnimationEnd(u32 state)
         SwitchState(eIdle);
         break;
     case eMuzzleCheck: SwitchState(eIdle); break;
-	case eFiremode: SwitchState(eIdle); break;
+	case eFiremode:
+        m_previous_firemode_animation_index = CurrentFireModeAnimationIndex();
+        SwitchState(eIdle);
+        UpdateFireModePoses(true);
+        break;
     default: inherited::OnAnimationEnd(state);
     }
 }
@@ -1439,7 +1479,8 @@ bool CWeaponMagazined::Action(s32 cmd, u32 flags)
         if ((flags & CMD_START) && GetState() == eIdle)
         {
             OnPrevFireMode(flags & CMD_OPT);
-			SwitchState(eFiremode);
+            if (m_firemode_changed)
+			    SwitchState(eFiremode);
             return true;
         }
     }
@@ -1448,7 +1489,8 @@ bool CWeaponMagazined::Action(s32 cmd, u32 flags)
         if ((flags & CMD_START) && GetState() == eIdle)
         {
             OnNextFireMode(flags & CMD_OPT);
-			SwitchState(eFiremode);
+            if (m_firemode_changed)
+			    SwitchState(eFiremode);
             return true;
         }
     }
@@ -2256,23 +2298,33 @@ bool CWeaponMagazined::SwitchMode()
 
 void CWeaponMagazined::OnNextFireMode(bool opt)
 {
+    m_firemode_changed = false;
     if (m_aFireModes.size() < 2)
         return;
     if (opt && m_iCurFireMode + 1 == m_aFireModes.size())
         return;
+    m_previous_firemode_animation_index = CurrentFireModeAnimationIndex();
     m_iCurFireMode = (m_iCurFireMode + 1 + m_aFireModes.size()) % m_aFireModes.size();
     SetQueueSize(GetCurrentFireMode());
+    m_firemode_changed = true;
+    m_applied_world_firemode_pose = -1;
+    m_applied_hud_firemode_pose = -1;
     PlaySound(sndFireModes, get_LastFP());
 }
 
 void CWeaponMagazined::OnPrevFireMode(bool opt)
 {
+    m_firemode_changed = false;
     if (m_aFireModes.size() < 2)
         return;
     if (opt && m_iCurFireMode == 0)
         return;
+    m_previous_firemode_animation_index = CurrentFireModeAnimationIndex();
     m_iCurFireMode = (m_iCurFireMode - 1 + m_aFireModes.size()) % m_aFireModes.size();
     SetQueueSize(GetCurrentFireMode());
+    m_firemode_changed = true;
+    m_applied_world_firemode_pose = -1;
+    m_applied_hud_firemode_pose = -1;
     PlaySound(sndFireModes, get_LastFP());
 }
 
@@ -2330,6 +2382,15 @@ void CWeaponMagazined::load(IReader& input_packet)
     SetQueueSize(m_iQueueSize);
     load_data(m_iShotNum, input_packet);
     load_data(m_iCurFireMode, input_packet);
+    if (m_bHasDifferentFireModes && !m_aFireModes.empty())
+    {
+        if (m_iCurFireMode < 0 || m_iCurFireMode >= static_cast<int>(m_aFireModes.size()))
+            m_iCurFireMode = static_cast<int>(m_aFireModes.size()) - 1;
+        SetQueueSize(GetCurrentFireMode());
+        m_previous_firemode_animation_index = CurrentFireModeAnimationIndex();
+        m_applied_world_firemode_pose = -1;
+        m_applied_hud_firemode_pose = -1;
+    }
 }
 
 void CWeaponMagazined::net_Export(CSE_Abstract* E)
@@ -2534,17 +2595,278 @@ void CWeaponMagazined::ShowMagazineAmmoCount() const
     message->wnd()->SetText(text);
 }
 
+int CWeaponMagazined::FireModeAnimationIndex(int mode_index) const
+{
+    if (mode_index < 0 || mode_index >= static_cast<int>(m_aFireModes.size()))
+        return 0;
+
+    if (m_firemode_animation_indices.size() == m_aFireModes.size())
+        return m_firemode_animation_indices[mode_index];
+
+    const int queue_size = m_aFireModes[mode_index];
+    if (queue_size == WEAPON_ININITE_QUEUE)
+        return 0; // raised selector: automatic fire
+    if (queue_size == 1)
+        return 1; // lowered selector: single fire
+    return mode_index;
+}
+
+int CWeaponMagazined::CurrentFireModeAnimationIndex() const
+{
+    return FireModeAnimationIndex(m_iCurFireMode);
+}
+
+bool CWeaponMagazined::FindFireModeHudAnimation(char* result, size_t result_size) const
+{
+    const int target = CurrentFireModeAnimationIndex();
+    const int previous = m_previous_firemode_animation_index;
+    const LPCSTR condition = IsMisfire() ? "_jammed" : (iAmmoElapsed == 0 ? "_empty" : "");
+    const LPCSTR launcher = IsGrenadeLauncherFunctional() ? "_w_gl" : "";
+
+    auto find_variant = [&](LPCSTR base) {
+        string128 candidate;
+        xr_sprintf(candidate, "%s%s%s", base, condition, launcher);
+        if (AnimationExist(candidate))
+        {
+            strcpy_s(result, result_size, candidate);
+            return true;
+        }
+
+        if (condition[0])
+        {
+            xr_sprintf(candidate, "%s%s", base, condition);
+            if (AnimationExist(candidate))
+            {
+                strcpy_s(result, result_size, candidate);
+                return true;
+            }
+        }
+
+        if (launcher[0])
+        {
+            xr_sprintf(candidate, "%s%s", base, launcher);
+            if (AnimationExist(candidate))
+            {
+                strcpy_s(result, result_size, candidate);
+                return true;
+            }
+        }
+
+        if (AnimationExist(base))
+        {
+            strcpy_s(result, result_size, base);
+            return true;
+        }
+        return false;
+    };
+
+    string64 base;
+    if (previous >= 0 && previous != target)
+    {
+        xr_sprintf(base, "anm_firemode_%d_to_%d", previous, target);
+        if (find_variant(base))
+            return true;
+    }
+
+    xr_sprintf(base, "anm_firemode_%d", target);
+    if (find_variant(base))
+        return true;
+
+    // Compatibility with existing weapon configs.
+    return find_variant("anm_firemode");
+}
+
+void CWeaponMagazined::ClearFireModePose(IKinematics* model)
+{
+    if (!model)
+        return;
+
+    if (auto animated = smart_cast<IKinematicsAnimated*>(model))
+        for (u16 part = 0; part < MAX_PARTS; ++part)
+            animated->LL_CloseCycle(part, 1 << 1);
+
+    if (model == m_world_firemode_pose_model)
+        m_applied_world_firemode_pose = -1;
+    if (model == m_hud_firemode_pose_model)
+        m_applied_hud_firemode_pose = -1;
+}
+
+void CWeaponMagazined::PlayWorldFireModeTransition()
+{
+    auto model = smart_cast<IKinematics*>(Visual());
+    auto animated = smart_cast<IKinematicsAnimated*>(Visual());
+    if (!model || !animated)
+        return;
+
+    const int target = CurrentFireModeAnimationIndex();
+    const int previous = m_previous_firemode_animation_index;
+    LPCSTR section = cNameSect().c_str();
+    LPCSTR motion = nullptr;
+    string64 line;
+    string64 default_motion;
+
+    if (previous >= 0 && previous != target)
+    {
+        xr_sprintf(line, "world_firemode_%d_to_%d", previous, target);
+        if (pSettings->line_exist(section, line))
+            motion = pSettings->r_string(section, line);
+    }
+    if (!motion)
+    {
+        xr_sprintf(line, "world_firemode_%d", target);
+        if (pSettings->line_exist(section, line))
+            motion = pSettings->r_string(section, line);
+    }
+    if (!motion)
+    {
+        xr_sprintf(default_motion, "firemode_%d", target);
+        motion = default_motion;
+    }
+
+    const MotionID motion_id = animated->ID_Cycle_Safe(motion);
+    if (!motion_id.valid())
+    {
+        m_world_firemode_transition_end = 0;
+        return;
+    }
+
+    animated->PlayCycle(motion_id, TRUE);
+    const float duration = _max(0.f, animated->get_animation_length(motion_id));
+    m_world_firemode_transition_end = Device.dwTimeGlobal + static_cast<u32>(duration * 1000.f);
+}
+
+void CWeaponMagazined::ApplyFireModePose(IKinematics* model, LPCSTR config_section, bool hud, bool force)
+{
+    if (!model || GetState() == eFiremode)
+        return;
+    if (!hud && m_world_firemode_transition_end && Device.dwTimeGlobal < m_world_firemode_transition_end)
+        return;
+
+    const int target = CurrentFireModeAnimationIndex();
+    int& applied = hud ? m_applied_hud_firemode_pose : m_applied_world_firemode_pose;
+    IKinematics*& cached_model = hud ? m_hud_firemode_pose_model : m_world_firemode_pose_model;
+    if (!force && cached_model == model && applied == target)
+        return;
+
+    cached_model = model;
+    applied = target;
+
+    auto animated = smart_cast<IKinematicsAnimated*>(model);
+    if (!animated)
+        return;
+
+    LPCSTR weapon_section = cNameSect().c_str();
+    LPCSTR pose_motion = nullptr;
+    string64 line;
+    string64 default_motion;
+    xr_sprintf(line, "firemode_pose_%d", target);
+    if (config_section && pSettings->line_exist(config_section, line))
+        pose_motion = pSettings->r_string(config_section, line);
+    if (!pose_motion && hud)
+    {
+        xr_sprintf(line, "hud_firemode_pose_%d", target);
+        if (pSettings->line_exist(weapon_section, line))
+            pose_motion = pSettings->r_string(weapon_section, line);
+    }
+    if (!pose_motion)
+    {
+        xr_sprintf(line, "firemode_pose_%d", target);
+        if (pSettings->line_exist(weapon_section, line))
+            pose_motion = pSettings->r_string(weapon_section, line);
+    }
+    if (!pose_motion)
+    {
+        xr_sprintf(default_motion, "pose_firemode%d", target);
+        pose_motion = default_motion;
+    }
+    if (!pose_motion[0] || !xr_strcmp(pose_motion, "none"))
+        return;
+
+    const MotionID motion_id = animated->ID_Cycle_Safe(pose_motion);
+    if (!motion_id.valid())
+        return;
+
+    LPCSTR selector_bone = nullptr;
+    if (config_section && pSettings->line_exist(config_section, "firemode_selector_bone"))
+        selector_bone = pSettings->r_string(config_section, "firemode_selector_bone");
+    if (!selector_bone && hud && pSettings->line_exist(weapon_section, "hud_firemode_selector_bone"))
+        selector_bone = pSettings->r_string(weapon_section, "hud_firemode_selector_bone");
+    if (!selector_bone && pSettings->line_exist(weapon_section, "firemode_selector_bone"))
+        selector_bone = pSettings->r_string(weapon_section, "firemode_selector_bone");
+
+    const CMotionDef* motion_def = animated->LL_GetMotionDef(motion_id);
+    u16 partition = motion_def->bone_or_part;
+    u16 selector_bone_id = BI_NONE;
+    if (selector_bone && selector_bone[0])
+    {
+        selector_bone_id = model->LL_BoneID(selector_bone);
+        if (selector_bone_id == BI_NONE)
+        {
+            Msg("! [%s]: firemode selector bone [%s] not found in %s model", cName().c_str(), selector_bone, hud ? "HUD" : "world");
+            return;
+        }
+
+        partition = BI_NONE;
+        for (u16 part = 0; part < MAX_PARTS; ++part)
+        {
+            const auto& bones = animated->partitions().part(part).bones;
+            if (std::find(bones.begin(), bones.end(), selector_bone_id) != bones.end())
+            {
+                partition = part;
+                break;
+            }
+        }
+        if (partition == BI_NONE)
+        {
+            Msg("! [%s]: firemode selector bone [%s] is not assigned to an animation partition", cName().c_str(), selector_bone);
+            return;
+        }
+    }
+
+    for (u16 part = 0; part < MAX_PARTS; ++part)
+        animated->LL_CloseCycle(part, 1 << 1);
+
+    // Keep the pose looping even if the source motion has StopAtEnd set. With
+    // a configured selector bone it drives exactly that bone, so unrelated
+    // weapon tracks in the same animation partition remain untouched.
+    if (selector_bone_id != BI_NONE)
+        animated->LL_PlayCycleOnBone(partition, selector_bone_id, motion_id, FALSE, motion_def->Accrue(), motion_def->Falloff(),
+            motion_def->Speed(), FALSE, nullptr, nullptr, 1);
+    else
+        animated->LL_PlayCycle(partition, motion_id, FALSE, motion_def->Accrue(), motion_def->Falloff(), motion_def->Speed(), FALSE,
+            nullptr, nullptr, 1);
+}
+
+void CWeaponMagazined::UpdateFireModePoses(bool force)
+{
+    if (!m_bHasDifferentFireModes || m_aFireModes.empty())
+        return;
+
+    if (!m_world_firemode_transition_end || Device.dwTimeGlobal >= m_world_firemode_transition_end)
+    {
+        m_world_firemode_transition_end = 0;
+        ApplyFireModePose(smart_cast<IKinematics*>(Visual()), cNameSect().c_str(), false, force);
+    }
+
+    if (auto hud_item = HudItemData())
+        ApplyFireModePose(hud_item->m_model, hud_item->m_sect_name.c_str(), true, force);
+}
+
 void CWeaponMagazined::PlayAnimFiremode()
 {
-    string128 guns_anm_firemode;
-    xr_strconcat(guns_anm_firemode, "anm_firemode", IsMisfire() ? "_jammed" : (iAmmoElapsed == 0 ? "_empty" : ""), IsGrenadeLauncherFunctional() ? "_w_gl" : "");
+    ClearFireModePose(HudItemData() ? HudItemData()->m_model : nullptr);
+    ClearFireModePose(smart_cast<IKinematics*>(Visual()));
+    PlayWorldFireModeTransition();
 
-    if (AnimationExist(guns_anm_firemode))
+    string128 animation;
+    if (FindFireModeHudAnimation(animation, sizeof(animation)))
     {
-        PlayHUDMotion(guns_anm_firemode, true, GetState());
-        PlaySound(sndFireModes, get_LastFP());
+        PlayHUDMotion(animation, true, GetState());
         SetPending(TRUE);
     }
     else
+    {
+        m_previous_firemode_animation_index = CurrentFireModeAnimationIndex();
         SwitchState(eIdle);
+    }
 }

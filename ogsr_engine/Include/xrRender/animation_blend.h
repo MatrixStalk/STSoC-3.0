@@ -33,6 +33,9 @@ public:
     float timeTotal;
     MotionID motionID;
     u16 bone_or_part; // startup parameters
+    // BI_NONE for a regular partition cycle, otherwise the only bone driven
+    // by this cycle. Used by small persistent mechanical poses.
+    u16 cycle_bone;
     u8 channel;
 
 private:
@@ -67,7 +70,7 @@ public:
     CBlend()
         :
 
-          blendAmount(0), timeCurrent(0), timeTotal(0), motionID(), bone_or_part(0), channel(0), blend(eFREE_SLOT), blendAccrue(0), blendFalloff(0), blendPower(0), speed(0),
+          blendAmount(0), timeCurrent(0), timeTotal(0), motionID(), bone_or_part(0), cycle_bone(u16(-1)), channel(0), blend(eFREE_SLOT), blendAccrue(0), blendFalloff(0), blendPower(0), speed(0),
           playing(0), stop_at_end_callback(0), stop_at_end(0), fall_at_end(0), Callback(0), CallbackParam(0), dwFrame(0)
     {}
 
@@ -81,6 +84,7 @@ public:
         timeTotal = r.timeTotal;
         motionID = r.motionID;
         bone_or_part = r.bone_or_part;
+        cycle_bone = r.cycle_bone;
         channel = r.channel;
         blend = r.blend;
         blendAccrue = r.blendAccrue;

@@ -163,10 +163,20 @@ protected:
     //режимы стрельбы
     bool m_bHasDifferentFireModes;
     xr_vector<int> m_aFireModes;
+    // Visual selector states can be mapped independently from queue sizes.
+    // By convention automatic fire is state 0 and single fire is state 1.
+    xr_vector<int> m_firemode_animation_indices;
     int m_iCurFireMode;
     string16 m_sCurFireMode;
     int m_iPrefferedFireMode;
     u32 m_fire_zoomout_time = u32(-1);
+    int m_previous_firemode_animation_index{-1};
+    int m_applied_world_firemode_pose{-1};
+    int m_applied_hud_firemode_pose{-1};
+    IKinematics* m_world_firemode_pose_model{};
+    IKinematics* m_hud_firemode_pose_model{};
+    u32 m_world_firemode_transition_end{};
+    bool m_firemode_changed{};
 
     //переменная блокирует использование
     //только разных типов патронов
@@ -211,6 +221,14 @@ protected:
     virtual void PlayAnimReload();
     virtual void PlayAnimIdle();
 	virtual void PlayAnimFiremode();
+
+    int FireModeAnimationIndex(int mode_index) const;
+    int CurrentFireModeAnimationIndex() const;
+    bool FindFireModeHudAnimation(char* result, size_t result_size) const;
+    void PlayWorldFireModeTransition();
+    void UpdateFireModePoses(bool force = false);
+    void ApplyFireModePose(IKinematics* model, LPCSTR config_section, bool hud, bool force);
+    void ClearFireModePose(IKinematics* model);
 
     bool LaserSwitch{}, TorchSwitch{}, HeadLampSwitch{}, NightVisionSwitch{};
     bool CartridgeInTheChamberEnabled{};
