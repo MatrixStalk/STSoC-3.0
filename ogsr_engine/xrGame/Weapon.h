@@ -249,7 +249,11 @@ public:
     };
     LPCSTR GetCurrentHudMotion() const { return m_current_motion.c_str() ? m_current_motion.c_str() : ""; }
     float GetCurrentHudMotionProgress() const;
+    float GetCurrentHudMotionDuration() const;
     bool PreviewHandPoseIKEditorMotion(LPCSTR motion);
+    bool PreviewSoundEditorMotion(LPCSTR motion);
+    void CollectSoundEditorMotions(xr_vector<shared_str>& motions) const;
+    bool SoundEditorSuppressesMotionSound() const { return m_sound_editor_suppresses_motion_sound; }
     void CollectHandPoseIKEditorMotions(u8 visual_index, xr_vector<shared_str>& motions) const;
     bool GetHandPoseIKEditorState(u8 visual_index, LPCSTR motion, SHandPoseIKEditorState& state) const;
     bool SetHandPoseIKEditorState(u8 visual_index, const SHandPoseIKEditorState& state);
@@ -343,6 +347,7 @@ private:
     SAddonVisual m_addon_visuals[AddonVisualCount];
     xr_vector<SHandPoseIKEditorOverride> m_hand_pose_ik_editor_overrides;
     shared_str m_hand_pose_ik_editor_preview_motion;
+    bool m_sound_editor_suppresses_motion_sound{};
     void DestroyAddonVisuals();
     void UpdateAddonReplacementVisibility(bool hud_mode);
     shared_str GetAddonVisualSection(u8 visual_index) const;

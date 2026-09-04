@@ -2,6 +2,9 @@
 #include "imgui.h"
 #include "embedded_editor_sound_env.h"
 #include "../HudSound.h"
+#include "../Actor.h"
+#include "../Inventory.h"
+#include "../Weapon.h"
 
 #include <mmeapi.h>
 #include <../eax/Include/eax.h>
@@ -21,20 +24,99 @@ xr_vector<xr_string> timeline_sound_files;
 xr_vector<TimelineLayerEditor> timeline_layers;
 string128 timeline_section{"weapon_animation_timeline"};
 string_path timeline_output{"sound_timelines.ltx"};
+u32 timeline_preview_started{};
+float timeline_preview_duration{};
+float timeline_preview_animation_duration{};
+bool timeline_preview_with_animation{};
+CWeapon* timeline_animation_weapon{};
+shared_str timeline_animation;
+
+void finish_timeline_preview()
+{
+    timeline_preview_started = 0;
+    timeline_preview_duration = 0.f;
+    timeline_preview_animation_duration = 0.f;
+    timeline_preview_with_animation = false;
+}
+
+CWeapon* active_hud_weapon()
+{
+    CActor* actor = Actor();
+    return actor ? smart_cast<CWeapon*>(actor->inventory().ActiveItem()) : nullptr;
+}
+
+bool start_timeline_preview(bool with_animation)
+{
+    finish_timeline_preview();
+
+    CWeapon* preview_weapon = nullptr;
+    if (with_animation)
+    {
+        preview_weapon = active_hud_weapon();
+        if (!preview_weapon || !timeline_animation.c_str())
+            return false;
+    }
+
+    HUD_SOUND preview_sound;
+    for (const TimelineLayerEditor& source : timeline_layers)
+    {
+        if (!source.sound[0])
+            continue;
+        auto& layer = preview_sound.timeline_layers.emplace_back();
+        auto& sound = layer.emplace_back();
+        sound.snd.create(source.sound, st_Effect, sg_Interface);
+        sound.volume = source.volume;
+        sound.delay = source.time;
+        sound.freq = source.pitch;
+        const float sound_duration = sound.snd.get_length_sec() / _max(source.pitch, EPS_S);
+        timeline_preview_duration = _max(timeline_preview_duration, source.time + sound_duration);
+    }
+
+    if (preview_sound.timeline_layers.empty())
+        return false;
+
+    // Load/decode the draft first so asset preparation cannot shift the mix
+    // away from frame zero of the animation preview.
+    if (with_animation)
+    {
+        if (!preview_weapon->PreviewSoundEditorMotion(timeline_animation.c_str()))
+        {
+            HUD_SOUND::DestroySound(preview_sound);
+            return false;
+        }
+        timeline_preview_animation_duration = preview_weapon->GetCurrentHudMotionDuration();
+    }
+
+    Fvector position{};
+    // overlap=true uses no-feedback emitters. All layers retain their delay,
+    // volume and pitch while the temporary source references can be released
+    // immediately and cannot outlive the sound subsystem during shutdown.
+    HUD_SOUND::PlaySound(preview_sound, position, nullptr, true, false, true);
+    HUD_SOUND::DestroySound(preview_sound);
+    timeline_preview_started = Device.dwTimeGlobal;
+    timeline_preview_with_animation = with_animation;
+    return true;
+}
 
 void refresh_sound_files()
 {
     timeline_sound_files.clear();
-    FS_FileSet files;
-    FS.file_list(files, fsgame::game_sounds, FS_ListFiles, "*.ogg");
-    for (const auto& file : files)
+    constexpr LPCSTR masks[]{"*.ogg", "*.wav", "*.mp3", "*.flac"};
+    for (LPCSTR mask : masks)
     {
-        string_path name;
-        xr_strcpy(name, file.name.c_str());
-        if (LPSTR extension = strext(name))
-            *extension = 0;
-        timeline_sound_files.emplace_back(name);
+        FS_FileSet files;
+        FS.file_list(files, fsgame::game_sounds, FS_ListFiles, mask);
+        for (const auto& file : files)
+        {
+            string_path name;
+            xr_strcpy(name, file.name.c_str());
+            if (LPSTR extension = strext(name))
+                *extension = 0;
+            if (std::find(timeline_sound_files.begin(), timeline_sound_files.end(), name) == timeline_sound_files.end())
+                timeline_sound_files.emplace_back(name);
+        }
     }
+    std::sort(timeline_sound_files.begin(), timeline_sound_files.end());
 }
 
 void render_equalizer_editor()
@@ -76,6 +158,62 @@ void render_timeline_editor()
         return;
     ImGui::InputText("Section", timeline_section, std::size(timeline_section));
     ImGui::InputText("Output LTX", timeline_output, std::size(timeline_output));
+
+    CWeapon* weapon = active_hud_weapon();
+    if (timeline_animation_weapon != weapon)
+    {
+        timeline_animation_weapon = weapon;
+        timeline_animation = nullptr;
+    }
+    xr_vector<shared_str> animations;
+    if (weapon)
+        weapon->CollectSoundEditorMotions(animations);
+    const auto selected_animation = std::find_if(animations.begin(), animations.end(), [](const shared_str& candidate) {
+        return timeline_animation.c_str() && !_stricmp(candidate.c_str(), timeline_animation.c_str());
+    });
+    if (selected_animation == animations.end() && !animations.empty())
+        timeline_animation = animations.front();
+
+    if (ImGui::BeginCombo("Test animation", timeline_animation.c_str() ? timeline_animation.c_str() : "<no HUD animation>"))
+    {
+        for (const shared_str& animation : animations)
+        {
+            const bool selected = timeline_animation.c_str() && !_stricmp(animation.c_str(), timeline_animation.c_str());
+            if (ImGui::Selectable(animation.c_str(), selected))
+                timeline_animation = animation;
+            if (selected)
+                ImGui::SetItemDefaultFocus();
+        }
+        ImGui::EndCombo();
+    }
+
+    const bool has_mix = std::any_of(timeline_layers.begin(), timeline_layers.end(), [](const TimelineLayerEditor& layer) {
+        return layer.sound[0] != 0;
+    });
+    ImGui::BeginDisabled(!has_mix || timeline_preview_started);
+    if (ImGui::Button("Preview final mix"))
+        start_timeline_preview(false);
+    ImGui::EndDisabled();
+    ImGui::SameLine();
+    ImGui::BeginDisabled(!has_mix || !weapon || !timeline_animation.c_str() || timeline_preview_started);
+    if (ImGui::Button("Preview mix with animation"))
+        start_timeline_preview(true);
+    ImGui::EndDisabled();
+    if (timeline_preview_started)
+    {
+        const float elapsed = float(Device.dwTimeGlobal - timeline_preview_started) / 1000.f;
+        const float total = _max(timeline_preview_duration, timeline_preview_animation_duration);
+        const float progress = total > EPS_S ? clampr(elapsed / total, 0.f, 1.f) : 1.f;
+        string64 progress_text;
+        xr_sprintf(progress_text, "%.2f / %.2f s", _min(elapsed, total), total);
+        ImGui::ProgressBar(progress, ImVec2(-1.f, 0.f), progress_text);
+        if (timeline_preview_with_animation && timeline_preview_duration > timeline_preview_animation_duration + EPS_S)
+            ImGui::TextColored(ImVec4(1.f, 0.7f, 0.2f, 1.f), "Mix tail exceeds animation by %.3f s",
+                timeline_preview_duration - timeline_preview_animation_duration);
+        if (elapsed >= total)
+            finish_timeline_preview();
+    }
+
     if (timeline_sound_files.empty() && ImGui::Button("Scan game sounds"))
         refresh_sound_files();
     else if (!timeline_sound_files.empty() && ImGui::Button("Rescan game sounds"))
@@ -92,7 +230,7 @@ void render_timeline_editor()
         TimelineLayerEditor& layer = timeline_layers[i];
         ImGui::PushID(i);
         ImGui::InputText("Layer name", layer.name, std::size(layer.name));
-        const char* preview = layer.sound[0] ? layer.sound : "<select .ogg>";
+        const char* preview = layer.sound[0] ? layer.sound : "<select sound>";
         if (ImGui::BeginCombo("Sound", preview))
         {
             static ImGuiTextFilter filter;

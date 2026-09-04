@@ -655,6 +655,11 @@ float CWeapon::GetCurrentHudMotionProgress() const
     return clampr(float(Device.dwTimeGlobal - m_dwMotionStartTm) / float(m_dwMotionEndTm - m_dwMotionStartTm), 0.f, 1.f);
 }
 
+float CWeapon::GetCurrentHudMotionDuration() const
+{
+    return m_dwMotionEndTm > m_dwMotionStartTm ? float(m_dwMotionEndTm - m_dwMotionStartTm) / 1000.f : 0.f;
+}
+
 bool CWeapon::PreviewHandPoseIKEditorMotion(LPCSTR motion)
 {
     if (!motion || !motion[0] || !GetHUDmode() || !AnimationExist(motion))
@@ -662,6 +667,43 @@ bool CWeapon::PreviewHandPoseIKEditorMotion(LPCSTR motion)
     m_hand_pose_ik_editor_preview_motion = motion;
     PlayHUDMotion(motion, true, eIdle, false);
     return true;
+}
+
+bool CWeapon::PreviewSoundEditorMotion(LPCSTR motion)
+{
+    if (!motion || !motion[0] || !GetHUDmode() || !AnimationExist(motion))
+        return false;
+
+    // The sound editor plays its unsaved draft mix itself. Suppress an
+    // already configured snd_anm_* entry so it cannot double the draft.
+    m_sound_editor_suppresses_motion_sound = true;
+    PlayHUDMotion(motion, true, eIdle, false);
+    m_sound_editor_suppresses_motion_sound = false;
+    return true;
+}
+
+void CWeapon::CollectSoundEditorMotions(xr_vector<shared_str>& motions) const
+{
+    motions.clear();
+    const auto append_unique = [&](LPCSTR motion) {
+        if (!motion || !motion[0] || !AnimationExist(motion))
+            return;
+        const auto found = std::find_if(motions.begin(), motions.end(), [motion](const shared_str& candidate) {
+            return !_stricmp(candidate.c_str(), motion);
+        });
+        if (found == motions.end())
+            motions.emplace_back(motion);
+    };
+
+    append_unique(GetCurrentHudMotion());
+    if (!hud_sect.c_str() || !pSettings->section_exist(hud_sect))
+        return;
+    for (const auto& entry : pSettings->r_section(hud_sect).Ordered_Data)
+    {
+        LPCSTR key = entry.first.c_str();
+        if (key && !_strnicmp(key, "anm_", 4))
+            append_unique(key);
+    }
 }
 
 void CWeapon::CollectHandPoseIKEditorMotions(u8 visual_index, xr_vector<shared_str>& motions) const

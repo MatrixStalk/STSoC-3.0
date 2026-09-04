@@ -192,6 +192,8 @@ void CWeaponMagazined::OnHudMotionStart(LPCSTR motion, float speed)
     for (auto& [key, cached] : m_resolved_sounds)
         if (cached && cached->m_config_line.c_str() && !_strnicmp(cached->m_config_line.c_str(), "snd_anm_", 8))
             HUD_SOUND::StopSound(*cached);
+    if (SoundEditorSuppressesMotionSound())
+        return;
     string256 line;
     xr_sprintf(line, "snd_anm_%s", motion);
     if (HUD_SOUND* sound = ResolveSoundLine(line, m_eSoundReload))
