@@ -178,46 +178,54 @@ namespace
 void update_arc9_spring(Fvector& value, Fvector& velocity, Fvector& acceleration, const float spring_constant,
     const float spring_magnitude, const float spring_damping, float dt)
 {
+    // ARC9 adds a constant-magnitude pull toward the origin. Normalizing the
+    // displacement directly makes that force discontinuous at zero and creates
+    // a small perpetual limit cycle. Soften only that tiny central region while
+    // retaining the authored response at normal recoil amplitudes.
+    constexpr float return_soft_zone = 0.01f;
+    constexpr float settle_value = 0.0005f;
+    constexpr float settle_velocity = 0.005f;
+    constexpr float state_limit = 210.f;
+
     while (dt > 0.f)
     {
-        const float step = _min(dt, 1.f / 120.f);
-
-        Fvector next_value = value;
-        next_value.mad(velocity, step);
-        next_value.mad(acceleration, step * step * 0.5f);
+        const float step = _min(dt, 1.f / 240.f);
 
         Fvector drag = velocity;
         drag.mul(-velocity.magnitude() * 0.5f);
 
-        Fvector restoring = next_value;
+        Fvector restoring = value;
         const float value_length = restoring.magnitude();
         restoring.mul(-value_length * spring_constant);
         if (value_length > EPS_S)
-        {
-            Fvector constant_return = next_value;
-            constant_return.mul(-spring_magnitude / value_length);
-            restoring.add(constant_return);
-        }
+            restoring.mad(value, -spring_magnitude / sqrtf(value_length * value_length + return_soft_zone * return_soft_zone));
         restoring.mad(velocity, -spring_damping);
 
-        Fvector next_acceleration = drag;
-        next_acceleration.add(restoring);
-        velocity.mad(acceleration, step * 0.5f);
-        velocity.mad(next_acceleration, step * 0.5f);
-        value = next_value;
-        acceleration = next_acceleration;
+        acceleration = drag;
+        acceleration.add(restoring);
+        clamp(acceleration.x, -state_limit, state_limit);
+        clamp(acceleration.y, -state_limit, state_limit);
+        clamp(acceleration.z, -state_limit, state_limit);
+        velocity.mad(acceleration, step);
+        value.mad(velocity, step);
 
-        const float limit = 210.f;
-        clamp(value.x, -limit, limit);
-        clamp(value.y, -limit, limit);
-        clamp(value.z, -limit, limit);
-        clamp(velocity.x, -limit, limit);
-        clamp(velocity.y, -limit, limit);
-        clamp(velocity.z, -limit, limit);
-        clamp(acceleration.x, -limit, limit);
-        clamp(acceleration.y, -limit, limit);
-        clamp(acceleration.z, -limit, limit);
+        if (!_valid(value) || !_valid(velocity) || !_valid(acceleration) || value.magnitude() > state_limit || velocity.magnitude() > state_limit)
+        {
+            value.set(0.f, 0.f, 0.f);
+            velocity.set(0.f, 0.f, 0.f);
+            acceleration.set(0.f, 0.f, 0.f);
+            return;
+        }
         dt -= step;
+    }
+
+    // EPS_S is intentionally much smaller than a visible HUD displacement and
+    // kept the effector alive for minutes. Snap only genuinely sub-pixel motion.
+    if (value.square_magnitude() < settle_value * settle_value && velocity.square_magnitude() < settle_velocity * settle_velocity)
+    {
+        value.set(0.f, 0.f, 0.f);
+        velocity.set(0.f, 0.f, 0.f);
+        acceleration.set(0.f, 0.f, 0.f);
     }
 }
 
@@ -453,8 +461,6 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
         150.f * m_modern_params.subtle_visual_recoil_speed, 0.3f, 2.8f, dt);
     update_arc9_spring(m_subtle_rotation, m_subtle_rotation_velocity, m_subtle_rotation_acceleration,
         150.f * m_modern_params.subtle_visual_recoil_speed, 0.3f, 2.8f, dt);
-    m_subtle_rotation.x *= 0.25f;
-
     // Preserve the old query API used by third-person actor orientation and
     // scripts, while the camera itself is driven by the spring values above.
     fAngleVert = m_camera_offset.x;
@@ -479,7 +485,9 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
 void CCameraShotEffector::GetHudRecoil(Fmatrix& transform) const
 {
     Fvector rotation = m_hud_rotation;
-    rotation.add(m_subtle_rotation);
+    Fvector subtle_rotation = m_subtle_rotation;
+    subtle_rotation.x *= 0.25f;
+    rotation.add(subtle_rotation);
     rotation.mul(deg2rad(1.f) * 2.5f);
     rotation.y = -rotation.y;
 

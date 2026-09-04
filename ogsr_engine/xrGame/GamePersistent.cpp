@@ -20,6 +20,7 @@
 #include "../xr_3da/x_ray.h"
 #include "string_table.h"
 #include "HUDManager.h"
+#include "step_manager.h"
 #include "..\xr_3da\DiscordRPC.hpp"
 
 #ifndef MASTER_GOLD
@@ -83,6 +84,9 @@ CGamePersistent::CGamePersistent(void)
 
 CGamePersistent::~CGamePersistent(void)
 {
+    // Release cached footstep ref_sound objects while the sound backend still
+    // exists. Leaving this to CRT static destruction causes a shutdown crash.
+    destroy_eft_footstep_library();
     FS.r_close(pDemoFile);
     Device.seqFrame.Remove(this);
     Engine.Event.Handler_Detach(eDemoStart, this);

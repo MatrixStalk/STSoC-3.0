@@ -66,6 +66,10 @@ void CSoundRender_CoreA::load_settings()
     occlusion_low_floor = ini.line_exist("fmod", "occlusion_low_floor") ? ini.r_float("fmod", "occlusion_low_floor") : occlusion_low_floor;
     occlusion_mid_floor = ini.line_exist("fmod", "occlusion_mid_floor") ? ini.r_float("fmod", "occlusion_mid_floor") : occlusion_mid_floor;
     occlusion_high_floor = ini.line_exist("fmod", "occlusion_high_floor") ? ini.r_float("fmod", "occlusion_high_floor") : occlusion_high_floor;
+    default_shot_gain = ini.line_exist("fmod", "helmet_default_shot_gain") ? ini.r_float("fmod", "helmet_default_shot_gain") : default_shot_gain;
+    default_explosion_gain = ini.line_exist("fmod", "helmet_default_explosion_gain") ? ini.r_float("fmod", "helmet_default_explosion_gain") : default_explosion_gain;
+    default_world_gain = ini.line_exist("fmod", "helmet_default_world_gain") ? ini.r_float("fmod", "helmet_default_world_gain") : default_world_gain;
+    default_hud_gain = ini.line_exist("fmod", "helmet_default_hud_gain") ? ini.r_float("fmod", "helmet_default_hud_gain") : default_hud_gain;
 
     sample_rate = clampr(sample_rate, 22050, 192000);
     dsp_buffer_length = clampr(dsp_buffer_length, 256, 4096);
@@ -74,6 +78,11 @@ void CSoundRender_CoreA::load_settings()
     occlusion_low_floor = clampr(occlusion_low_floor, 0.f, 1.f);
     occlusion_mid_floor = clampr(occlusion_mid_floor, 0.f, 1.f);
     occlusion_high_floor = clampr(occlusion_high_floor, 0.f, 1.f);
+    default_shot_gain = clampr(default_shot_gain, 0.f, 2.f);
+    default_explosion_gain = clampr(default_explosion_gain, 0.f, 2.f);
+    default_world_gain = clampr(default_world_gain, 0.f, 2.f);
+    default_hud_gain = clampr(default_hud_gain, 0.f, 2.f);
+    set_listener_sound_profile(-1.f, -1.f, -1.f, -1.f);
 }
 
 bool CSoundRender_CoreA::enumerate_devices()
@@ -288,6 +297,14 @@ void CSoundRender_CoreA::update(const Fvector& P, const Fvector& D, const Fvecto
     inherited::update(P, D, N);
     if (fmod_system)
         fmod_system->update();
+}
+
+void CSoundRender_CoreA::set_listener_sound_profile(float shot_gain, float explosion_gain, float world_gain, float hud_gain)
+{
+    listener_shot_gain = shot_gain < 0.f ? default_shot_gain : clampr(shot_gain, 0.f, 2.f);
+    listener_explosion_gain = explosion_gain < 0.f ? default_explosion_gain : clampr(explosion_gain, 0.f, 2.f);
+    listener_world_gain = world_gain < 0.f ? default_world_gain : clampr(world_gain, 0.f, 2.f);
+    listener_hud_gain = hud_gain < 0.f ? default_hud_gain : clampr(hud_gain, 0.f, 2.f);
 }
 
 void CSoundRender_CoreA::update_listener(const Fvector& P, const Fvector& D, const Fvector& N, float dt)

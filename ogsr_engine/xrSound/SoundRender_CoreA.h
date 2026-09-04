@@ -23,6 +23,14 @@ class CSoundRender_CoreA : public CSoundRender_Core
     float occlusion_low_floor{0.25f};
     float occlusion_mid_floor{0.08f};
     float occlusion_high_floor{0.025f};
+    float default_shot_gain{1.10f};
+    float default_explosion_gain{1.f};
+    float default_world_gain{1.f};
+    float default_hud_gain{1.f};
+    float listener_shot_gain{1.10f};
+    float listener_explosion_gain{1.f};
+    float listener_world_gain{1.f};
+    float listener_hud_gain{1.f};
 
     struct SListener
     {
@@ -47,6 +55,7 @@ public:
     virtual void _restart();
     virtual void update(const Fvector& P, const Fvector& D, const Fvector& N);
     virtual void set_master_volume(float f);
+    virtual void set_listener_sound_profile(float shot_gain, float explosion_gain, float world_gain, float hud_gain) override;
 
     FMOD::System* FmodSystem() const { return fmod_system; }
     unsigned int SteamAudioSpatializer() const { return steam_audio_spatializer; }
@@ -57,5 +66,11 @@ public:
     float OcclusionLowFloor() const { return occlusion_low_floor; }
     float OcclusionMidFloor() const { return occlusion_mid_floor; }
     float OcclusionHighFloor() const { return occlusion_high_floor; }
+    float ListenerShotGain() const { return listener_shot_gain; }
+    float ListenerExplosionGain() const { return listener_explosion_gain; }
+    float ListenerWorldGain() const { return listener_world_gain; }
+    float ListenerHudGain() const { return listener_hud_gain; }
     virtual const Fvector& listener_position() { return Listener.position; }
+    const Fvector& ListenerForward() const { return Listener.orientation[0]; }
+    const Fvector& ListenerUp() const { return Listener.orientation[1]; }
 };

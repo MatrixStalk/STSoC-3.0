@@ -4,6 +4,10 @@
 class CEntityAlive;
 class CBlend;
 
+// Must run before the global sound manager is destroyed. The EFT library owns
+// ref_sound resources whose destructors call back into that manager.
+void destroy_eft_footstep_library();
+
 class CStepManager
 {
     u8 m_legs_count;

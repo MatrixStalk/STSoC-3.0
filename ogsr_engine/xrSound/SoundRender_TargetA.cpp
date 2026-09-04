@@ -3,6 +3,7 @@
 #include "soundrender_TargetA.h"
 #include "soundrender_emitter.h"
 #include "soundrender_source.h"
+#include "../COMMON_AI/ai_sounds.h"
 
 #include <fmod_errors.h>
 
@@ -358,7 +359,21 @@ void CSoundRender_TargetA::fill_parameters(CSoundRender_Core* base_core)
     if (!m_pEmitter || !fmod_channel)
         return;
 
-    float gain = clampr(m_pEmitter->smooth_volume, 0.f, 1.f);
+    auto* core = static_cast<CSoundRender_CoreA*>(base_core);
+    float listener_gain = 1.f;
+    if (m_pEmitter->owner_data && m_pEmitter->owner_data->s_type == st_Effect && m_pEmitter->owner_data->g_type != sg_Interface)
+    {
+        const int type = m_pEmitter->owner_data->g_type;
+        if ((type & SOUND_TYPE_OBJECT_EXPLODING) == SOUND_TYPE_OBJECT_EXPLODING)
+            listener_gain = core->ListenerExplosionGain();
+        else if ((type & SOUND_TYPE_WEAPON_SHOOTING) == SOUND_TYPE_WEAPON_SHOOTING)
+            listener_gain = core->ListenerShotGain();
+        else if (m_pEmitter->b2D)
+            listener_gain = core->ListenerHudGain();
+        else
+            listener_gain = core->ListenerWorldGain();
+    }
+    float gain = clampr(m_pEmitter->smooth_volume * listener_gain, 0.f, 2.f);
     if (!fsimilar(gain, cache_gain, 0.005f))
     {
         cache_gain = gain;
@@ -377,10 +392,21 @@ void CSoundRender_TargetA::fill_parameters(CSoundRender_Core* base_core)
     attributes.absolute.position = {m_pEmitter->p_source.position.x, m_pEmitter->p_source.position.y, -m_pEmitter->p_source.position.z};
     attributes.absolute.forward = {0.f, 0.f, 1.f};
     attributes.absolute.up = {0.f, 1.f, 0.f};
-    attributes.relative = attributes.absolute;
+
+    // Steam Audio consumes the relative member for binaural direction. Passing
+    // world coordinates here makes panning rotate and drift with the listener.
+    // Transform the emitter into the listener basis explicitly because these
+    // streams are intentionally FMOD_2D and use a manually attached spatializer.
+    Fvector listener_right;
+    listener_right.crossproduct(core->ListenerUp(), core->ListenerForward()).normalize_safe();
+    Fvector listener_delta;
+    listener_delta.sub(m_pEmitter->p_source.position, core->listener_position());
+    attributes.relative.position = {
+        listener_delta.dotproduct(listener_right), listener_delta.dotproduct(core->ListenerUp()), listener_delta.dotproduct(core->ListenerForward())};
+    attributes.relative.forward = {0.f, 0.f, 1.f};
+    attributes.relative.up = {0.f, 1.f, 0.f};
     steam_audio_dsp->setParameterData(IPL_SPATIALIZE_SOURCE_POSITION, &attributes, sizeof(attributes));
 
-    auto* core = static_cast<CSoundRender_CoreA*>(base_core);
     const float min_distance = m_pEmitter->p_source.min_distance;
     const float max_distance = _max(min_distance + EPS_L, m_pEmitter->p_source.max_distance);
     const float distance = core->listener_position().distance_to(m_pEmitter->p_source.position);

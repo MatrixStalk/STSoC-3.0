@@ -26,6 +26,24 @@ CInifile* GetSoundTimelineConfig()
     return sound_timeline_config.get();
 }
 
+float GetHudSoundVolume()
+{
+    static const float volume = []
+    {
+        float result = READ_IF_EXISTS(pSettings, r_float, "hud_sound", "hud_sound_vol_k", 1.f);
+        string_path path;
+        FS.update_path(path, "$game_config$", "sound_fmod.ltx");
+        if (FS.exist(path))
+        {
+            CInifile ini(path, TRUE, TRUE, FALSE);
+            if (ini.section_exist("fmod") && ini.line_exist("fmod", "hud_sound_gain"))
+                result = ini.r_float("fmod", "hud_sound_gain");
+        }
+        return clampr(result, 0.f, 2.f);
+    }();
+    return volume;
+}
+
 void LoadSoundVariants(CInifile* ini, LPCSTR section, LPCSTR line, xr_vector<HUD_SOUND::SSnd>& sounds, int type)
 {
     string256 sound_line;
@@ -184,7 +202,7 @@ void HUD_SOUND::PlaySound(HUD_SOUND& hud_snd, const Fvector& position, const COb
             StopSound(hud_snd);
         const u32 flags = (b_hud_mode ? sm_2D : 0) | (looped ? sm_Looped : 0);
         Fvector pos = (flags & sm_2D) ? Fvector{} : position;
-        static const float hud_vol = READ_IF_EXISTS(pSettings, r_float, "hud_sound", "hud_sound_vol_k", 1.0f);
+        const float hud_vol = GetHudSoundVolume();
         for (auto& layer : hud_snd.timeline_layers)
         {
             if (layer.empty())
@@ -220,7 +238,7 @@ void HUD_SOUND::PlaySound(HUD_SOUND& hud_snd, const Fvector& position, const COb
     float freq = hud_snd.m_activeSnd->freq;
     Fvector pos = (flags & sm_2D) ? Fvector{} : position;
 
-    static const float hud_vol = READ_IF_EXISTS(pSettings, r_float, "hud_sound", "hud_sound_vol_k", 1.0f);
+    const float hud_vol = GetHudSoundVolume();
     float vol = hud_snd.m_activeSnd->volume * (b_hud_mode ? hud_vol : 1.0f);
 
     if (overlap)

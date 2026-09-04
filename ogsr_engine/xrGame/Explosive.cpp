@@ -49,7 +49,9 @@ CExplosive::CExplosive(void)
     m_fFragHit = 50;
     m_fUpThrowFactor = 0.f;
 
-    m_eSoundExplode = ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING);
+    // Keep the shooting bit for AI danger handling and add an explicit
+    // explosion bit so listener equipment can mix blasts independently.
+    m_eSoundExplode = ESoundTypes(SOUND_TYPE_WEAPON_SHOOTING | SOUND_TYPE_WORLD_OBJECT_EXPLODING);
 
     m_eHitTypeBlast = ALife::eHitTypeExplosion;
     m_eHitTypeFrag = ALife::eHitTypeFireWound;

@@ -776,6 +776,23 @@ bool Is3dssZoomed{};
 
 void CActor::UpdateCL()
 {
+    if (Level().CurrentEntity() == this && ::Sound)
+    {
+        float shot_gain = -1.f;
+        float explosion_gain = -1.f;
+        float world_gain = -1.f;
+        float hud_gain = -1.f;
+        if (PIItem helmet = inventory().ItemFromSlot(HELMET_SLOT))
+        {
+            LPCSTR section = *helmet->object().cNameSect();
+            shot_gain = READ_IF_EXISTS(pSettings, r_float, section, "helmet_shot_gain", -1.f);
+            explosion_gain = READ_IF_EXISTS(pSettings, r_float, section, "helmet_explosion_gain", -1.f);
+            world_gain = READ_IF_EXISTS(pSettings, r_float, section, "helmet_world_gain", -1.f);
+            hud_gain = READ_IF_EXISTS(pSettings, r_float, section, "helmet_hud_gain", -1.f);
+        }
+        ::Sound->set_listener_sound_profile(shot_gain, explosion_gain, world_gain, hud_gain);
+    }
+
     if (m_feel_touch_characters > 0)
     {
         for (xr_vector<CObject*>::iterator it = feel_touch.begin(); it != feel_touch.end(); it++)

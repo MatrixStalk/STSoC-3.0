@@ -194,11 +194,19 @@ public:
     }
 };
 
+CEftFootstepLibrary*& eft_footstep_library_instance()
+{
+    static CEftFootstepLibrary* library{};
+    return library;
+}
+
 CEftFootstepLibrary& eft_footsteps()
 {
-    static CEftFootstepLibrary library;
-    library.load();
-    return library;
+    CEftFootstepLibrary*& library = eft_footstep_library_instance();
+    if (!library)
+        library = xr_new<CEftFootstepLibrary>();
+    library->load();
+    return *library;
 }
 
 bool eft_is_on_ground(CEntityAlive* object)
@@ -243,6 +251,12 @@ bool eft_is_moving(CEntityAlive* object)
     return false;
 }
 } // namespace
+
+void destroy_eft_footstep_library()
+{
+    CEftFootstepLibrary*& library = eft_footstep_library_instance();
+    xr_delete(library);
+}
 
 CStepManager::CStepManager() {}
 

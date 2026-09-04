@@ -2118,11 +2118,6 @@ void player_hud::refresh_source_skeleton_merge()
         if (!source || !is_source_hand_skeleton(source, target_idx))
             continue;
 
-        u16 merged_bones = 0;
-        u16 remapped_bones = 0;
-        u16 converted_bones = 0;
-        u16 following_bones = 0;
-        u16 direct_merge_bones = 0;
         const bool source_uses_bone_merge_markers = is_base_human_hud_skeleton(source);
         for (u16 target_bone_id = 0; target_bone_id < target->LL_BoneCount(); ++target_bone_id)
         {
@@ -2141,8 +2136,6 @@ void player_hud::refresh_source_skeleton_merge()
             if (source_bone_id == BI_NONE)
                 continue; // Optional helpers may only exist in one of the rigs.
 
-            remapped_bones += source_bone_id != exact_source_bone_id;
-
             CBoneInstance& target_bone = target->LL_GetBoneInstance(target_bone_id);
             target_bone.set_param(0, static_cast<float>(source_bone_id));
             target_bone.set_param(1, 0.f);
@@ -2159,9 +2152,6 @@ void player_hud::refresh_source_skeleton_merge()
             // 3: Source/ARC9 bone-merge marker; copy its final model-space pose.
             const u16 retarget_mode = direct_marker_merge ? 3 : (own_bind_differs ? 1 : (retarget_bind_chain ? 2 : 0));
             target_bone.set_param(3, static_cast<float>(retarget_mode));
-            converted_bones += retarget_mode == 1;
-            following_bones += retarget_mode == 2;
-            direct_merge_bones += retarget_mode == 3;
             if (target_idx == 0)
             {
                 if (!xr_strcmp(bone_name, source_r_thumb0))
@@ -2172,13 +2162,9 @@ void player_hud::refresh_source_skeleton_merge()
                     target_bone.set_param(1, 3.f);
             }
             target_bone.set_callback(bctCustom, callbacks[target_idx], this, TRUE);
-            ++merged_bones;
         }
 
         m_source_skeletons[target_idx] = source;
-        Msg("HUD Source skeleton merge: [%s] drives [%s], %u bones matched, %u direct, %u remapped, %u converted, %u follow-parent",
-            source->getDebugName().c_str(), target->getDebugName().c_str(), merged_bones, direct_merge_bones, remapped_bones,
-            converted_bones, following_bones);
     }
 }
 

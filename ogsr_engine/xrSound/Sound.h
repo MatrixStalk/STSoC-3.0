@@ -323,6 +323,9 @@ public:
     virtual void play_no_feedback(ref_sound& S, CObject* O, u32 flags = 0, float delay = 0.f, Fvector* pos = 0, float* vol = 0, float* freq = 0, Fvector2* range = 0) = 0;
 
     virtual void set_master_volume(float f = 1.f) = 0;
+    // Negative values restore the backend defaults. The game uses this for
+    // listener equipment such as helmets and active hearing protection.
+    virtual void set_listener_sound_profile(float shot_gain, float explosion_gain, float world_gain, float hud_gain) = 0;
     virtual void set_geometry_env(IReader* I) = 0;
     virtual void set_geometry_som(IReader* I) = 0;
     virtual void set_geometry_occ(CDB::MODEL* M) = 0;
@@ -359,7 +362,14 @@ IC ref_sound_data::ref_sound_data()
     fTimeTotal = 0.0f;
 }
 IC ref_sound_data::ref_sound_data(LPCSTR fName, esound_type sound_type, int game_type) { ::Sound->_create_data(*this, fName, sound_type, game_type); }
-IC ref_sound_data::~ref_sound_data() { ::Sound->_destroy_data(*this); }
+IC ref_sound_data::~ref_sound_data()
+{
+    // Static game-side sound caches may be destroyed by the CRT after the
+    // sound backend. At that point the backend has already released all source
+    // handles, so there is nothing left to unregister and no valid callback.
+    if (::Sound)
+        ::Sound->_destroy_data(*this);
+}
 
 IC void ref_sound::create(LPCSTR name, esound_type sound_type, int game_type)
 {
