@@ -210,28 +210,32 @@ void CKinematicsAnimated::LL_CloseCycle(u16 part, u8 mask_channel /*= (1<<0)*/)
         return;
 
     // destroy cycle(s)
-    BlendSVecIt I = blend_cycles[part].begin();
-    while (I != blend_cycles[part].end())
+    BlendSVec& blends = blend_cycles[part];
+    u32 index = 0;
+    while (index < blends.size())
     {
-        CBlend& B = *(*I);
+        CBlend* blend = blends[index];
+        CBlend& B = *blend;
         if (!(mask_channel & (1 << B.channel)))
         {
-            ++I;
+            ++index;
             continue;
         }
         // B.blend = CBlend::eFREE_SLOT;
         B.set_free_state();
 
         if (B.cycle_bone != BI_NONE)
-            Bone_Motion_Stop_IM((*bones)[B.cycle_bone], *I);
+            Bone_Motion_Stop_IM((*bones)[B.cycle_bone], blend);
         else
         {
             CPartDef& P = (*m_Partition)[B.bone_or_part];
             for (const unsigned int bone : P.bones)
-                Bone_Motion_Stop_IM((*bones)[bone], *I);
+                Bone_Motion_Stop_IM((*bones)[bone], blend);
         }
 
-        I = blend_cycles[part].erase(I);
+        // svector::erase returns void; keep the same index because the next
+        // element is shifted into the erased slot.
+        blends.erase(blends.begin() + index);
     }
     // blend_cycles[part].clear	(); // ?
 }

@@ -1,6 +1,8 @@
 #include "stdafx.h"
 #include "hudmanager.h"
 #include "WeaponMagazined.h"
+#include "player_hud.h"
+#include "../Include/xrRender/Kinematics.h"
 #include "weaponBM16.h"
 #include "entity.h"
 #include "actor.h"
