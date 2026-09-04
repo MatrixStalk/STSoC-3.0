@@ -19,6 +19,10 @@ class CSoundRender_CoreA : public CSoundRender_Core
     bool hrtf_enabled{true};
     bool air_absorption_enabled{true};
     bool occlusion_enabled{true};
+    float air_absorption_strength{0.35f};
+    float occlusion_low_floor{0.25f};
+    float occlusion_mid_floor{0.08f};
+    float occlusion_high_floor{0.025f};
 
     struct SListener
     {
@@ -49,5 +53,9 @@ public:
     bool HrtfEnabled() const { return hrtf_enabled; }
     bool AirAbsorptionEnabled() const { return air_absorption_enabled; }
     bool OcclusionEnabled() const { return occlusion_enabled; }
+    float AirAbsorptionStrength() const { return air_absorption_strength; }
+    float OcclusionLowFloor() const { return occlusion_low_floor; }
+    float OcclusionMidFloor() const { return occlusion_mid_floor; }
+    float OcclusionHighFloor() const { return occlusion_high_floor; }
     virtual const Fvector& listener_position() { return Listener.position; }
 };

@@ -93,7 +93,9 @@ void CSoundRender_TargetA::apply_equalizer(void* data, u32 bytes, const WAVEFORM
             filter.z2[channel] = filter.b2 * value - filter.a2 * out;
             value = out;
         }
-        return clampr(value, -1.f, 1.f);
+        // FMOD mixes in float and provides its own output headroom. Clamping
+        // each source here would flatten transients before spatialization.
+        return value;
     };
 
     if (format.wFormatTag == WAVE_FORMAT_IEEE_FLOAT)
@@ -108,7 +110,7 @@ void CSoundRender_TargetA::apply_equalizer(void* data, u32 bytes, const WAVEFORM
         s16* samples = static_cast<s16*>(data);
         const u32 count = bytes / sizeof(s16);
         for (u32 i = 0; i < count; ++i)
-            samples[i] = static_cast<s16>(process(samples[i] / 32768.f, i % channels) * 32767.f);
+            samples[i] = static_cast<s16>(clampr(process(samples[i] / 32768.f, i % channels), -1.f, 1.f) * 32767.f);
     }
 }
 
@@ -243,8 +245,19 @@ void CSoundRender_TargetA::attach_steam_audio()
     // X-Ray sounds. Physics-based inverse falloff made distant shots and NPCs
     // much quieter than the engine's original attenuation model.
     steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_DISTANCEATTENUATION, 2);
-    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_AIRABSORPTION, core->AirAbsorptionEnabled() ? 1 : 0);
+    // Feed Steam Audio gently shaped three-band values instead of its full
+    // physical air loss and a broadband volume-only occlusion. This keeps
+    // distant sounds intelligible and makes cover sound naturally muffled.
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_AIRABSORPTION, core->AirAbsorptionEnabled() ? 2 : 0);
     steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_OCCLUSION, core->OcclusionEnabled() ? 2 : 0);
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_APPLY_TRANSMISSION, core->OcclusionEnabled() ? 2 : 0);
+    steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_TRANSMISSION_TYPE, 1);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_AIRABSORPTION_LOW, 1.f);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_AIRABSORPTION_MID, 1.f);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_AIRABSORPTION_HIGH, 1.f);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_TRANSMISSION_LOW, 1.f);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_TRANSMISSION_MID, 1.f);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_TRANSMISSION_HIGH, 1.f);
     steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_HRTF_INTERPOLATION, 1);
     steam_audio_dsp->setParameterBool(IPL_SPATIALIZE_DIRECT_BINAURAL, core->HrtfEnabled());
     steam_audio_dsp->setParameterInt(IPL_SPATIALIZE_DISTANCEATTENUATION_ROLLOFFTYPE, 2);
@@ -366,7 +379,27 @@ void CSoundRender_TargetA::fill_parameters(CSoundRender_Core* base_core)
     attributes.absolute.up = {0.f, 1.f, 0.f};
     attributes.relative = attributes.absolute;
     steam_audio_dsp->setParameterData(IPL_SPATIALIZE_SOURCE_POSITION, &attributes, sizeof(attributes));
-    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_OCCLUSION, clampr(m_pEmitter->occluder_volume, 0.f, 1.f));
+
+    auto* core = static_cast<CSoundRender_CoreA*>(base_core);
+    const float min_distance = m_pEmitter->p_source.min_distance;
+    const float max_distance = _max(min_distance + EPS_L, m_pEmitter->p_source.max_distance);
+    const float distance = core->listener_position().distance_to(m_pEmitter->p_source.position);
+    const float normalized_distance = clampr((distance - min_distance) / (max_distance - min_distance), 0.f, 1.f);
+    const float air = core->AirAbsorptionStrength() * normalized_distance;
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_AIRABSORPTION_LOW, 1.f - air * 0.12f);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_AIRABSORPTION_MID, 1.f - air * 0.40f);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_AIRABSORPTION_HIGH, 1.f - air);
+
+    const float visibility = clampr(m_pEmitter->occluder_volume, 0.f, 1.f);
+    const float low_visibility = sqrtf(visibility);
+    const float high_visibility = visibility * sqrtf(visibility);
+    const float transmission_low = core->OcclusionLowFloor() + (1.f - core->OcclusionLowFloor()) * low_visibility;
+    const float transmission_mid = core->OcclusionMidFloor() + (1.f - core->OcclusionMidFloor()) * visibility;
+    const float transmission_high = core->OcclusionHighFloor() + (1.f - core->OcclusionHighFloor()) * high_visibility;
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_OCCLUSION, visibility);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_TRANSMISSION_LOW, transmission_low);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_TRANSMISSION_MID, transmission_mid);
+    steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_TRANSMISSION_HIGH, transmission_high);
     steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_DISTANCEATTENUATION_MINDISTANCE, m_pEmitter->p_source.min_distance);
     steam_audio_dsp->setParameterFloat(IPL_SPATIALIZE_DISTANCEATTENUATION_MAXDISTANCE, m_pEmitter->p_source.max_distance);
 }

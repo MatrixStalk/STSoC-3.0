@@ -58,13 +58,22 @@ void CSoundRender_CoreA::load_settings()
     sample_rate = ini.line_exist("fmod", "sample_rate") ? ini.r_s32("fmod", "sample_rate") : sample_rate;
     dsp_buffer_length = ini.line_exist("fmod", "dsp_buffer_length") ? ini.r_s32("fmod", "dsp_buffer_length") : dsp_buffer_length;
     dsp_buffer_count = ini.line_exist("fmod", "dsp_buffer_count") ? ini.r_s32("fmod", "dsp_buffer_count") : dsp_buffer_count;
+    snd_enable_float_pcm = ini.line_exist("fmod", "float_pcm") ? ini.r_bool("fmod", "float_pcm") : snd_enable_float_pcm;
     hrtf_enabled = ini.line_exist("fmod", "hrtf") ? ini.r_bool("fmod", "hrtf") : hrtf_enabled;
     air_absorption_enabled = ini.line_exist("fmod", "air_absorption") ? ini.r_bool("fmod", "air_absorption") : air_absorption_enabled;
     occlusion_enabled = ini.line_exist("fmod", "occlusion") ? ini.r_bool("fmod", "occlusion") : occlusion_enabled;
+    air_absorption_strength = ini.line_exist("fmod", "air_absorption_strength") ? ini.r_float("fmod", "air_absorption_strength") : air_absorption_strength;
+    occlusion_low_floor = ini.line_exist("fmod", "occlusion_low_floor") ? ini.r_float("fmod", "occlusion_low_floor") : occlusion_low_floor;
+    occlusion_mid_floor = ini.line_exist("fmod", "occlusion_mid_floor") ? ini.r_float("fmod", "occlusion_mid_floor") : occlusion_mid_floor;
+    occlusion_high_floor = ini.line_exist("fmod", "occlusion_high_floor") ? ini.r_float("fmod", "occlusion_high_floor") : occlusion_high_floor;
 
     sample_rate = clampr(sample_rate, 22050, 192000);
     dsp_buffer_length = clampr(dsp_buffer_length, 256, 4096);
     dsp_buffer_count = clampr(dsp_buffer_count, 2, 8);
+    air_absorption_strength = clampr(air_absorption_strength, 0.f, 1.f);
+    occlusion_low_floor = clampr(occlusion_low_floor, 0.f, 1.f);
+    occlusion_mid_floor = clampr(occlusion_mid_floor, 0.f, 1.f);
+    occlusion_high_floor = clampr(occlusion_high_floor, 0.f, 1.f);
 }
 
 bool CSoundRender_CoreA::enumerate_devices()
@@ -145,6 +154,12 @@ bool CSoundRender_CoreA::initialize_fmod()
     fmod_system->setSoftwareFormat(sample_rate, FMOD_SPEAKERMODE_DEFAULT, 0);
     fmod_system->setDSPBufferSize(dsp_buffer_length, dsp_buffer_count);
     fmod_system->set3DSettings(1.f, 1.f, psSoundRolloff);
+
+    FMOD_ADVANCEDSETTINGS advanced{};
+    advanced.cbSize = sizeof(advanced);
+    advanced.resamplerMethod = FMOD_DSP_RESAMPLER_SPLINE;
+    if (!fmod_ok(fmod_system->setAdvancedSettings(&advanced), "setAdvancedSettings(spline resampler)"))
+        return false;
 
     char plugin_path[MAX_PATH]{};
     backend_dll_path(plugin_path, "phonon_fmod.dll");

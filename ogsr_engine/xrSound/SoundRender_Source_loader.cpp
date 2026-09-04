@@ -102,9 +102,10 @@ static void load_non_ogg(CSoundRender_Source& source, IReader& file, LPCSTR name
     u32 sample_rate = 0;
     u64 frames = 0;
     void* decoded = nullptr;
-    // Keep fully decoded non-Vorbis effects compact. The FMOD user stream accepts
-    // PCM16 directly, while float output would double large WAV/MP3/FLAC banks.
-    const bool use_float = false;
+    // Keep the whole processing path in float when the backend supports it.
+    // This preserves 24-bit WAV/FLAC detail and avoids requantizing every
+    // WAV/MP3/FLAC source to PCM16 before EQ and spatial processing.
+    const bool use_float = SoundRender->supports_float_pcm;
 
     if (source.m_codec == CSoundRender_Source::ECodec::Wav)
     {
