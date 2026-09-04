@@ -15,9 +15,9 @@ void DiscordRPC::Init()
 #ifndef DISABLE_DISCORD
     DiscordEventHandlers nullHandlers{};
     if (IS_OGSR_GA)
-        Discord_Initialize("934890865237839992", &nullHandlers, TRUE, nullptr);
+        Discord_Initialize("1545526939849334795", &nullHandlers, TRUE, nullptr);
     else
-        Discord_Initialize("777186147456778272", &nullHandlers, TRUE, nullptr);
+        Discord_Initialize("1545526939849334795", &nullHandlers, TRUE, nullptr);
 
     start_time = time(nullptr);
 #endif
@@ -82,7 +82,7 @@ void DiscordRPC::Update(const char* level_name_translated, const char* level_nam
     if (!lname_and_task.empty())
         presenseInfo.largeImageText = lname_and_task.c_str(); //название уровня + активное задание на большой картинке
 
-    presenseInfo.buttons[0] = {"OGSR Github", "https://github.com/OGSR"};
+    presenseInfo.buttons[0] = {"Protocol B.L.A.C.K.O.U.T", "https://discord.gg/7dR6wtRkJh"};
     presenseInfo.buttons[1] = {"OGSR Discord", "https://discord.com/servers/ogsr-508530704674455562"};
 
     Discord_UpdatePresence(&presenseInfo);
