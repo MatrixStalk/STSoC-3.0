@@ -143,6 +143,17 @@ bool create_mesh_derived_shell(CPhysicsShellHolder* owner)
         shell_mass = _max(inventory_item->Weight(), 0.05f);
     shell->setMass(shell_mass);
     shell->SetMaterial(root_bone.game_mtl_idx);
+
+    // A freshly activated, long and thin inventory box may begin its first
+    // ground step with a relatively deep contact. ODE's generic 150 m/s limit
+    // lets the one-frame correction launch the item across the level before
+    // the contact manifold becomes stable. Exact integration reduces that
+    // initial overshoot, and the item-specific limit remains above ordinary
+    // drops and the burer's configured 8 m/s weapon throw.
+    constexpr float auto_collision_linear_limit = 12.f;
+    constexpr float auto_collision_angular_limit = 10.f;
+    shell->SetPrefereExactIntegration();
+    shell->set_DynamicLimits(auto_collision_linear_limit, auto_collision_angular_limit);
     owner->PPhysicsShell() = shell;
 
     Msg("* Auto collision [%s]: generated %u mesh box(es), scale [%g]", owner->cNameSect().c_str(), boxes.size(), scale);
