@@ -486,6 +486,19 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
 
         merge_ui_model_visual_bounds(submission.visual, local, bounds);
     }
+
+    // Inventory icons are authored around the base item's bounds. External
+    // addon submissions may appear or disappear a few frames after gameplay
+    // state changes, so including them in fitting changes both center and zoom.
+    // Use the root visual's stable full bounds while still rendering every
+    // collected addon with its normal local transform.
+    if (params.fit_root_visual_only)
+    {
+        Fbox root_bounds;
+        root_bounds.xform(ui_model_submissions.front().visual->getVisData().box, local_transforms.front());
+        if (root_bounds.is_valid())
+            bounds = root_bounds;
+    }
     if (!bounds.is_valid())
     {
         ui_model_submissions.clear();

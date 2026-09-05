@@ -53,13 +53,10 @@ bool DrawInventoryItem3D(CInventoryItem* item, CUIWindow* viewport, const u32 co
     params.rotation.y += fmodf(Device.fTimeGlobal * deg2rad(item->m_icon_3d_rotation_speed), PI_MUL_2);
     params.offset = item->m_icon_3d_offset;
     params.scale = _max(item->m_icon_3d_scale, 0.05f);
-
-    // Bounds change when an addon visual is attached, sometimes a few frames
-    // after the gameplay state changes. Rotating around their center made that
-    // asynchronous bounds update look like a random change of weapon angle.
-    // The object's own origin is stable for the lifetime of the inventory item.
-    params.pivot = params.root_transform.c;
-    params.use_pivot = true;
+    // Attachment submissions must not change the center or fitted scale of the
+    // base item. Besides making installation look like a random rotation, using
+    // the model origin here invalidated existing inv_icon_3d_offset settings.
+    params.fit_root_visual_only = true;
 
     constexpr float byte_to_float = 1.f / 255.f;
     params.tint.set(color_get_R(color) * byte_to_float, color_get_G(color) * byte_to_float,

@@ -383,6 +383,20 @@ void play_world_idle(IRenderVisual* visual, LPCSTR section)
     animated->PlayCycle(idle, FALSE);
     animated->dcast_PKinematics()->CalculateBones_Invalidate();
 }
+
+Fmatrix addon_bone_transform(IKinematics* model, const u16 bone_id, const bool bind_pose)
+{
+    if (!bind_pose)
+        return model->LL_GetTransform(bone_id);
+
+    // Separately rendered world addons are created lazily by the render path.
+    // Their runtime bone matrices may therefore still contain the previous or
+    // initial pose. Building the bind pose is deterministic and does not force
+    // CalculateBones from rendering, which can contend with render workers.
+    xr_vector<Fmatrix> bind_transforms;
+    model->LL_GetBindTransform(bind_transforms);
+    return bone_id < bind_transforms.size() ? bind_transforms[bone_id] : Fidentity;
+}
 } // namespace
 
 void CWeapon::DestroyAddonVisuals()
@@ -470,6 +484,7 @@ void CWeapon::CollectAddonUISlots(xr_vector<SAddonUISlot>& slots) const
 
         IKinematics* attach_model = weapon_model;
         Fmatrix attach_transform = weapon_transform;
+        bool attach_model_is_addon = false;
         LPCSTR owner_section = cNameSect().c_str();
         const shared_str parent = FindAddonParentSection(section.c_str(), false);
         LPCSTR requested_parent = read_addon_parent(section.c_str(), false);
@@ -490,6 +505,7 @@ void CWeapon::CollectAddonUISlots(xr_vector<SAddonUISlot>& slots) const
                 {
                     attach_model = parent_model;
                     attach_transform = m_addon_visuals[parent_index].world_transform;
+                    attach_model_is_addon = true;
                     owner_section = parent.c_str();
                 }
                 break;
@@ -513,7 +529,10 @@ void CWeapon::CollectAddonUISlots(xr_vector<SAddonUISlot>& slots) const
 
         Fmatrix anchor = attach_transform;
         if (bone_id != BI_NONE)
-            anchor.mul_43(attach_transform, attach_model->LL_GetTransform(bone_id));
+        {
+            const Fmatrix target_bone = addon_bone_transform(attach_model, bone_id, attach_model_is_addon);
+            anchor.mul_43(attach_transform, target_bone);
+        }
 
         const Fvector position = read_addon_vector(
             section.c_str(), owner_section, GetAddonVisualSlotName(visual_index), "attach_position", "position", false);
@@ -1595,10 +1614,11 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
         else if (attach_space == EAddonAttachSpace::WeaponBone)
         {
             // Attach the addon's origin directly to the current weapon-bone
-            // transform. Hidden replacement bones keep their animated
-            // mTransform, so no skinning/bind-pose compensation is needed.
+            // transform. World children use their parent's bind pose because
+            // a lazily created addon has no guaranteed runtime pose yet.
             Fmatrix bone_transform;
-            bone_transform.mul_43(attach_transform, attach_model->LL_GetTransform(bone_id));
+            const Fmatrix target_bone = addon_bone_transform(attach_model, bone_id, !hud_mode && parent_index >= 0);
+            bone_transform.mul_43(attach_transform, target_bone);
             result.mul_43(bone_transform, offset);
 
             if (visual_bone_name && visual_bone_name[0])
@@ -1608,7 +1628,8 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
                 {
                     visual_bone_found = true;
                     Fmatrix inverse_visual_bone, aligned_result;
-                    inverse_visual_bone.invert(visual_model->LL_GetTransform(visual_bone_id));
+                    const Fmatrix visual_bone = addon_bone_transform(visual_model, visual_bone_id, !hud_mode);
+                    inverse_visual_bone.invert(visual_bone);
                     aligned_result.mul_43(result, inverse_visual_bone);
                     result = aligned_result;
                 }
@@ -1617,7 +1638,8 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
         else
         {
             Fmatrix bone_transform;
-            bone_transform.mul_43(attach_transform, attach_model->LL_GetTransform(bone_id));
+            const Fmatrix target_bone = addon_bone_transform(attach_model, bone_id, !hud_mode && parent_index >= 0);
+            bone_transform.mul_43(attach_transform, target_bone);
             result.mul_43(bone_transform, offset);
 
             // Optional bone-to-bone alignment. This preserves following of the
@@ -1629,7 +1651,8 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             {
                 visual_bone_found = true;
                 Fmatrix inverse_visual_bone, aligned_result;
-                inverse_visual_bone.invert(visual_model->LL_GetTransform(visual_bone_id));
+                const Fmatrix visual_bone = addon_bone_transform(visual_model, visual_bone_id, !hud_mode);
+                inverse_visual_bone.invert(visual_bone);
                 aligned_result.mul_43(result, inverse_visual_bone);
                 result = aligned_result;
             }

@@ -35,6 +35,8 @@ struct SUIModelRenderParams
     Fvector pivot{}; // world-space point used as the rotation center
     bool use_root_transform{};
     bool use_pivot{};
+    // Keep inventory framing independent of separately submitted addon models.
+    bool fit_root_visual_only{};
     float scale{1.f};
     Fvector4 tint{1.f, 1.f, 1.f, 1.f};
     xr_vector<SUIModelRenderPoint>* points{};
