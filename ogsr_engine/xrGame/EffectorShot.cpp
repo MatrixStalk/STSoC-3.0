@@ -286,6 +286,13 @@ void apply_recoil_impulse(Fvector& value, Fvector& impulse, const float blend)
     if (impulse.square_magnitude() < EPS_S * EPS_S)
         impulse.set(0.f, 0.f, 0.f);
 }
+
+void clear_recoil_spring(Fvector& value, Fvector& velocity, Fvector& acceleration)
+{
+    value.set(0.f, 0.f, 0.f);
+    velocity.set(0.f, 0.f, 0.f);
+    acceleration.set(0.f, 0.f, 0.f);
+}
 } // namespace
 
 CCameraShotEffector::CCameraShotEffector(float max_angle, float relax_speed, float max_angle_horz, float step_angle_horz, float angle_frac,
@@ -504,6 +511,25 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
     update_arc9_spring(m_hud_rotation, m_hud_rotation_velocity, m_hud_rotation_acceleration,
         m_modern_params.visual_recoil_spring_constant, m_modern_params.visual_recoil_spring_magnitude,
         m_modern_params.visual_recoil_spring_damping, dt, returning_to_rest);
+
+    // A damped multi-axis spring can retain a tiny amount of angular momentum
+    // and circle the origin without crossing an individual axis near enough to
+    // trigger the regular settling checks. A later shot changes that orbit,
+    // which made the stuck hand/weapon tremble appear to clear at random.
+    // The visual recoil is no longer meaningful after the recoil sequence has
+    // fully reset, so give it a finite lifetime and put every spring state at
+    // the exact neutral pose. Keep a short margin for unusually slow impulses.
+    const float visual_settle_timeout = _max(m_modern_params.recoil_full_reset_time,
+        visual_return_delay + 0.5f);
+    if (Device.fTimeGlobal - m_last_shot_time > visual_settle_timeout)
+    {
+        m_hud_position_impulse.set(0.f, 0.f, 0.f);
+        m_hud_rotation_impulse.set(0.f, 0.f, 0.f);
+        m_subtle_position_impulse.set(0.f, 0.f, 0.f);
+        m_subtle_rotation_impulse.set(0.f, 0.f, 0.f);
+        clear_recoil_spring(m_hud_position, m_hud_position_velocity, m_hud_position_acceleration);
+        clear_recoil_spring(m_hud_rotation, m_hud_rotation_velocity, m_hud_rotation_acceleration);
+    }
     // Preserve the old query API used by third-person actor orientation and
     // scripts, while the camera itself is driven by the spring values above.
     fAngleVert = m_camera_offset.x;
