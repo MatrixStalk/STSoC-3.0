@@ -3,6 +3,7 @@
 #include "PhysicsShell.h"
 #include "gameobject.h"
 #include "physicsshellholder.h"
+#include "inventory_item.h"
 #include "../Include/xrRender/Kinematics.h"
 #include "../xr_3da/bone.h"
 
@@ -73,12 +74,54 @@ bool create_mesh_derived_shell(CPhysicsShellHolder* owner)
         boxes.push_back({fallback, fallback.m_halfsize.x * fallback.m_halfsize.y * fallback.m_halfsize.z * 8.f});
     }
 
-    std::sort(boxes.begin(), boxes.end(), [](const SAutoCollisionBox& left, const SAutoCollisionBox& right) {
-        return left.volume > right.volume;
-    });
     const u32 max_boxes = clampr(owner->PHAutoCollisionMaxBoxes(), 1u, 64u);
-    if (boxes.size() > max_boxes)
-        boxes.resize(max_boxes);
+    if (max_boxes == 1 && boxes.size() > 1)
+    {
+        // Several overlapping geoms on one small item create competing ground
+        // contacts in ODE and make weapons/attachments sink, jump or crawl away.
+        // A single envelope is deliberately preferred for dropped inventory items.
+        Fvector bounds_min;
+        Fvector bounds_max;
+        bounds_min.set(flt_max, flt_max, flt_max);
+        bounds_max.set(-flt_max, -flt_max, -flt_max);
+        for (const SAutoCollisionBox& collision_box : boxes)
+        {
+            const Fvector& center = collision_box.box.m_translate;
+            const Fvector& halfsize = collision_box.box.m_halfsize;
+            bounds_min.x = _min(bounds_min.x, center.x - halfsize.x);
+            bounds_min.y = _min(bounds_min.y, center.y - halfsize.y);
+            bounds_min.z = _min(bounds_min.z, center.z - halfsize.z);
+            bounds_max.x = _max(bounds_max.x, center.x + halfsize.x);
+            bounds_max.y = _max(bounds_max.y, center.y + halfsize.y);
+            bounds_max.z = _max(bounds_max.z, center.z + halfsize.z);
+        }
+
+        SAutoCollisionBox envelope;
+        envelope.box.m_rotate.identity();
+        envelope.box.m_translate.add(bounds_min, bounds_max).mul(0.5f);
+        envelope.box.m_halfsize.sub(bounds_max, bounds_min).mul(0.5f);
+        boxes.clear();
+        boxes.push_back(envelope);
+    }
+    else
+    {
+        std::sort(boxes.begin(), boxes.end(), [](const SAutoCollisionBox& left, const SAutoCollisionBox& right) {
+            return left.volume > right.volume;
+        });
+        if (boxes.size() > max_boxes)
+            boxes.resize(max_boxes);
+    }
+
+    // ODE can tunnel through or continuously re-penetrate with millimetre-thin
+    // imported sights and mounts. Keep the collision thickness physically useful
+    // without changing the rendered model.
+    constexpr float min_collision_half_extent = 0.01f;
+    for (SAutoCollisionBox& collision_box : boxes)
+    {
+        collision_box.box.m_halfsize.x = _max(collision_box.box.m_halfsize.x, min_collision_half_extent);
+        collision_box.box.m_halfsize.y = _max(collision_box.box.m_halfsize.y, min_collision_half_extent);
+        collision_box.box.m_halfsize.z = _max(collision_box.box.m_halfsize.z, min_collision_half_extent);
+    }
 
     CPhysicsElement* element = P_create_Element();
     if (!element)
@@ -95,7 +138,10 @@ bool create_mesh_derived_shell(CPhysicsShellHolder* owner)
 
     shell->add_Element(element);
     const CBoneData& root_bone = kinematics->LL_GetData(kinematics->LL_GetBoneRoot());
-    shell->setMass(_max(root_bone.mass, 0.01f));
+    float shell_mass = _max(root_bone.mass, 0.01f);
+    if (const CInventoryItem* inventory_item = smart_cast<CInventoryItem*>(owner))
+        shell_mass = _max(inventory_item->Weight(), 0.05f);
+    shell->setMass(shell_mass);
     shell->SetMaterial(root_bone.game_mtl_idx);
     owner->PPhysicsShell() = shell;
 

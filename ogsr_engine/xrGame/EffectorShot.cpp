@@ -176,7 +176,7 @@ void CWeaponShotEffector::ApplyDeltaAngles(float* pitch, float* yaw)
 namespace
 {
 void update_arc9_spring(Fvector& value, Fvector& velocity, Fvector& acceleration, const float spring_constant,
-    const float spring_magnitude, const float spring_damping, float dt)
+    const float spring_magnitude, const float spring_damping, float dt, const bool stop_at_origin)
 {
     // ARC9 adds a constant-magnitude pull toward the origin. Normalizing the
     // displacement directly makes that force discontinuous at zero and creates
@@ -190,6 +190,7 @@ void update_arc9_spring(Fvector& value, Fvector& velocity, Fvector& acceleration
     while (dt > 0.f)
     {
         const float step = _min(dt, 1.f / 240.f);
+        const Fvector previous_value = value;
 
         Fvector drag = velocity;
         drag.mul(-velocity.magnitude() * 0.5f);
@@ -208,6 +209,26 @@ void update_arc9_spring(Fvector& value, Fvector& velocity, Fvector& acceleration
         clamp(acceleration.z, -state_limit, state_limit);
         velocity.mad(acceleration, step);
         value.mad(velocity, step);
+
+        // Once the shot impulse has finished, an axis is returning to rest,
+        // not starting another recoil motion. Stop it on its first crossing of
+        // the neutral pose. This preserves the authored spring-driven return
+        // while preventing an under-damped spring from shaking hands forever.
+        if (stop_at_origin)
+        {
+            const auto stop_crossed_axis = [](const float previous, float& current, float& speed, float& force)
+            {
+                if ((previous > 0.f && current <= 0.f) || (previous < 0.f && current >= 0.f))
+                {
+                    current = 0.f;
+                    speed = 0.f;
+                    force = 0.f;
+                }
+            };
+            stop_crossed_axis(previous_value.x, value.x, velocity.x, acceleration.x);
+            stop_crossed_axis(previous_value.y, value.y, velocity.y, acceleration.y);
+            stop_crossed_axis(previous_value.z, value.z, velocity.z, acceleration.z);
+        }
 
         if (!_valid(value) || !_valid(velocity) || !_valid(acceleration) || value.magnitude() > state_limit || velocity.magnitude() > state_limit)
         {
@@ -229,10 +250,12 @@ void update_arc9_spring(Fvector& value, Fvector& velocity, Fvector& acceleration
     }
 }
 
-bool recoil_vector_settled(const Fvector& value, const Fvector& velocity, const Fvector& acceleration)
+bool recoil_vector_settled(const Fvector& value, const Fvector& velocity)
 {
-    return value.square_magnitude() < EPS_S * EPS_S && velocity.square_magnitude() < EPS_S * EPS_S &&
-        acceleration.square_magnitude() < EPS_S * EPS_S;
+    constexpr float settle_value = 0.0005f;
+    constexpr float settle_velocity = 0.005f;
+    return value.square_magnitude() < settle_value * settle_value &&
+        velocity.square_magnitude() < settle_velocity * settle_velocity;
 }
 
 float recoil_impulse_blend(const float dt, const float duration)
@@ -393,8 +416,11 @@ void CCameraShotEffector::Shot(float angle, float state_multiplier)
         const float direction_scale = 1.3f - _min(m_recoil_amount, 4.5f) / 4.5f;
         m_subtle_position_impulse.add(Fvector().set(::Random.randF(-0.05f, 0.03f), -1.f,
             ::Random.randF(-0.06f, 0.03f)).mul(subtle));
-        m_subtle_rotation_impulse.add(Fvector().set(::Random.randF(0.1f, 0.2f), 0.f,
-            m_modern_params.subtle_visual_recoil_direction * direction_scale + ::Random.randF(-1.35f, 1.35f)).mul(subtle));
+        Fvector subtle_rotation;
+        subtle_rotation.set(::Random.randF(0.1f, 0.2f), 0.f,
+            m_modern_params.subtle_visual_recoil_direction * direction_scale + ::Random.randF(-1.35f, 1.35f)).mul(subtle);
+        subtle_rotation.x *= 0.25f;
+        m_subtle_rotation_impulse.add(subtle_rotation);
     }
 
     m_last_shot_time = now;
@@ -448,19 +474,36 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
     const float visual_blend = recoil_impulse_blend(dt, m_modern_params.camera_impulse_duration);
     apply_recoil_impulse(m_hud_position, m_hud_position_impulse, visual_blend);
     apply_recoil_impulse(m_hud_rotation, m_hud_rotation_impulse, visual_blend);
-    apply_recoil_impulse(m_subtle_position, m_subtle_position_impulse, visual_blend);
-    apply_recoil_impulse(m_subtle_rotation, m_subtle_rotation_impulse, visual_blend);
+    // Subtle recoil is another input to the same mechanical HUD spring. Two
+    // independent springs with different constants produced random beat
+    // frequencies: hands could keep trembling until a later shot cancelled
+    // their phase. Speed now controls only how quickly this impulse enters the
+    // common spring, so every contribution has one coherent return path.
+    const float subtle_duration = m_modern_params.camera_impulse_duration /
+        _max(m_modern_params.subtle_visual_recoil_speed, 0.01f);
+    const float subtle_blend = recoil_impulse_blend(dt, subtle_duration);
+    apply_recoil_impulse(m_hud_position, m_subtle_position_impulse, subtle_blend);
+    apply_recoil_impulse(m_hud_rotation, m_subtle_rotation_impulse, subtle_blend);
+
+    // Four impulse time constants retain more than 98% of the authored kick.
+    // The tiny tail must not keep feeding the spring after the trigger stops,
+    // otherwise it can re-excite an axis immediately after it reaches zero.
+    const float visual_return_delay = _max(_max(m_modern_params.camera_impulse_duration, subtle_duration) * 4.f, 0.15f);
+    const bool returning_to_rest = Device.fTimeGlobal - m_last_shot_time > visual_return_delay;
+    if (returning_to_rest)
+    {
+        m_hud_position_impulse.set(0.f, 0.f, 0.f);
+        m_hud_rotation_impulse.set(0.f, 0.f, 0.f);
+        m_subtle_position_impulse.set(0.f, 0.f, 0.f);
+        m_subtle_rotation_impulse.set(0.f, 0.f, 0.f);
+    }
 
     update_arc9_spring(m_hud_position, m_hud_position_velocity, m_hud_position_acceleration,
         m_modern_params.visual_recoil_spring_constant, m_modern_params.visual_recoil_spring_magnitude,
-        m_modern_params.visual_recoil_spring_damping, dt);
+        m_modern_params.visual_recoil_spring_damping, dt, returning_to_rest);
     update_arc9_spring(m_hud_rotation, m_hud_rotation_velocity, m_hud_rotation_acceleration,
         m_modern_params.visual_recoil_spring_constant, m_modern_params.visual_recoil_spring_magnitude,
-        m_modern_params.visual_recoil_spring_damping, dt);
-    update_arc9_spring(m_subtle_position, m_subtle_position_velocity, m_subtle_position_acceleration,
-        150.f * m_modern_params.subtle_visual_recoil_speed, 0.3f, 2.8f, dt);
-    update_arc9_spring(m_subtle_rotation, m_subtle_rotation_velocity, m_subtle_rotation_acceleration,
-        150.f * m_modern_params.subtle_visual_recoil_speed, 0.3f, 2.8f, dt);
+        m_modern_params.visual_recoil_spring_damping, dt, returning_to_rest);
     // Preserve the old query API used by third-person actor orientation and
     // scripts, while the camera itself is driven by the spring values above.
     fAngleVert = m_camera_offset.x;
@@ -473,10 +516,8 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
         m_hud_rotation_impulse.square_magnitude() < EPS_S * EPS_S &&
         m_subtle_position_impulse.square_magnitude() < EPS_S * EPS_S &&
         m_subtle_rotation_impulse.square_magnitude() < EPS_S * EPS_S &&
-        recoil_vector_settled(m_hud_position, m_hud_position_velocity, m_hud_position_acceleration) &&
-        recoil_vector_settled(m_hud_rotation, m_hud_rotation_velocity, m_hud_rotation_acceleration) &&
-        recoil_vector_settled(m_subtle_position, m_subtle_position_velocity, m_subtle_position_acceleration) &&
-        recoil_vector_settled(m_subtle_rotation, m_subtle_rotation_velocity, m_subtle_rotation_acceleration);
+        recoil_vector_settled(m_hud_position, m_hud_position_velocity) &&
+        recoil_vector_settled(m_hud_rotation, m_hud_rotation_velocity);
 
     if (camera_settled && hud_settled && Device.fTimeGlobal - m_last_shot_time > m_modern_params.recoil_full_reset_time)
         bActive = FALSE;
@@ -485,14 +526,10 @@ void CCameraShotEffector::UpdateModernRecoil(float dt)
 void CCameraShotEffector::GetHudRecoil(Fmatrix& transform) const
 {
     Fvector rotation = m_hud_rotation;
-    Fvector subtle_rotation = m_subtle_rotation;
-    subtle_rotation.x *= 0.25f;
-    rotation.add(subtle_rotation);
     rotation.mul(deg2rad(1.f) * 2.5f);
     rotation.y = -rotation.y;
 
     Fvector position = m_hud_position;
-    position.add(m_subtle_position);
     position.mul(m_modern_params.visual_recoil_scale);
 
     Fvector center;
@@ -527,13 +564,7 @@ void CCameraShotEffector::Clear()
     m_hud_rotation_impulse.set(0.f, 0.f, 0.f);
     m_hud_rotation_velocity.set(0.f, 0.f, 0.f);
     m_hud_rotation_acceleration.set(0.f, 0.f, 0.f);
-    m_subtle_position.set(0.f, 0.f, 0.f);
     m_subtle_position_impulse.set(0.f, 0.f, 0.f);
-    m_subtle_position_velocity.set(0.f, 0.f, 0.f);
-    m_subtle_position_acceleration.set(0.f, 0.f, 0.f);
-    m_subtle_rotation.set(0.f, 0.f, 0.f);
     m_subtle_rotation_impulse.set(0.f, 0.f, 0.f);
-    m_subtle_rotation_velocity.set(0.f, 0.f, 0.f);
-    m_subtle_rotation_acceleration.set(0.f, 0.f, 0.f);
     m_burst_shots = 0;
 }

@@ -469,7 +469,10 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
     }
 
     Fmatrix base_inverse;
-    base_inverse.invert(ui_model_submissions.front().transform);
+    if (params.use_root_transform)
+        base_inverse.invert(params.root_transform);
+    else
+        base_inverse.invert(ui_model_submissions.front().transform);
 
     xr_vector<Fmatrix> local_transforms;
     local_transforms.reserve(ui_model_submissions.size());

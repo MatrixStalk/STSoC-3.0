@@ -223,7 +223,8 @@ bool SelectTexture(const char* label, shared_str& texName)
             strconcat(100, tex, curr_dir, filtered[cur].c_str());
 
             const LPSTR ext = strext(tex);
-            if (ext && (0 == _stricmp(ext, ".tga") || 0 == _stricmp(ext, ".dds") || 0 == _stricmp(ext, ".bmp") || 0 == _stricmp(ext, ".ogm")))
+            if (ext && (0 == _stricmp(ext, ".tga") || 0 == _stricmp(ext, ".dds") || 0 == _stricmp(ext, ".png") ||
+                           0 == _stricmp(ext, ".bmp") || 0 == _stricmp(ext, ".ogm")))
             {
                 *ext = 0;
             }

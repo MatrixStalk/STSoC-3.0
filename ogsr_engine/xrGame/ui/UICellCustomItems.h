@@ -2,6 +2,8 @@
 #include "UICellItem.h"
 #include "../Weapon.h"
 
+bool DrawInventoryItem3D(CInventoryItem* item, CUIWindow* viewport, u32 color);
+
 class CUIInventoryCellItem : public CUICellItem
 {
     typedef CUICellItem inherited;

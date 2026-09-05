@@ -5,9 +5,18 @@
 void fix_texture_name(const char* fn)
 {
     char* _ext = strext(fn);
-    if (_ext && (0 == _stricmp(_ext, ".tga") || 0 == _stricmp(_ext, ".dds") || 0 == _stricmp(_ext, ".bmp") || 0 == _stricmp(_ext, ".ogm")))
+    if (_ext && (0 == _stricmp(_ext, ".tga") || 0 == _stricmp(_ext, ".dds") || 0 == _stricmp(_ext, ".png") ||
+                    0 == _stricmp(_ext, ".bmp") || 0 == _stricmp(_ext, ".ogm")))
         *_ext = 0;
 }
+
+namespace
+{
+bool find_texture_file(string_path& result, LPCSTR root, LPCSTR name)
+{
+    return FS.exist(result, root, name, ".dds") || FS.exist(result, root, name, ".png");
+}
+} // namespace
 
 static inline int get_texture_load_lod(const char* fn)
 {
@@ -97,20 +106,21 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
     xr_strcpy(fname, fRName);
     fix_texture_name(fname);
 
-    if (strstr(fname, "_bump") && !FS.exist(fn, "$game_textures$", fname, ".dds"))
+    if (strstr(fname, "_bump") && !find_texture_file(fn, "$game_textures$", fname))
     {
         Msg("! Fallback to default bump map: [%s]", fname);
 
         if (strstr(fname, "_bump#"))
-            R_ASSERT(FS.exist(fn, "$game_textures$", "ed\\ed_dummy_bump#", ".dds"), "ed_dummy_bump#");
+            R_ASSERT(find_texture_file(fn, "$game_textures$", "ed\\ed_dummy_bump#"), "ed_dummy_bump#");
         else
-            R_ASSERT(FS.exist(fn, "$game_textures$", "ed\\ed_dummy_bump", ".dds"), "ed_dummy_bump");
+            R_ASSERT(find_texture_file(fn, "$game_textures$", "ed\\ed_dummy_bump"), "ed_dummy_bump");
     }
-    else if (!FS.exist(fn, "$level$", fname, ".dds") && !FS.exist(fn, "$game_saves$", fname, ".dds") && !FS.exist(fn, "$game_textures$", fname, ".dds"))
+    else if (!find_texture_file(fn, "$level$", fname) && !find_texture_file(fn, "$game_saves$", fname) &&
+        !find_texture_file(fn, "$game_textures$", fname))
     {
         Msg("! Can't find texture [%s]", fname);
 
-        R_ASSERT(FS.exist(fn, "$game_textures$", "ed\\ed_not_existing_texture", ".dds"));
+        R_ASSERT(find_texture_file(fn, "$game_textures$", "ed\\ed_not_existing_texture"));
     }
 
     // Load and get header
@@ -124,13 +134,42 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
     DirectX::TexMetadata IMG{};
     DirectX::DDS_FLAGS dds_flags{DirectX::DDS_FLAGS_PERMISSIVE};
     bool allowFallback = true;
+    const char* file_ext = strext(fn);
+    const bool is_png = file_ext && 0 == _stricmp(file_ext, ".png");
 
     do
     {
         DirectX::ScratchImage texture{};
-        if (const auto hr = LoadFromDDSMemory(reinterpret_cast<const uint8_t*>(File->pointer()), File->length(), dds_flags, &IMG, texture); FAILED(hr))
+        HRESULT load_hr = S_OK;
+        if (is_png)
         {
-            Msg("! Failed to load DDS texture from memory: [%s], hr: [%d]", fn, hr);
+            load_hr = LoadFromWICMemory(reinterpret_cast<const uint8_t*>(File->pointer()), File->length(),
+                DirectX::WIC_FLAGS_NONE, &IMG, texture);
+            if (SUCCEEDED(load_hr) && IMG.mipLevels == 1 && IMG.dimension == DirectX::TEX_DIMENSION_TEXTURE2D &&
+                IMG.arraySize == 1 && (IMG.width > 1 || IMG.height > 1))
+            {
+                DirectX::ScratchImage mip_chain;
+                const HRESULT mip_hr = GenerateMipMaps(*texture.GetImage(0, 0, 0), DirectX::TEX_FILTER_DEFAULT, 0, mip_chain);
+                if (SUCCEEDED(mip_hr))
+                {
+                    texture = std::move(mip_chain);
+                    IMG = texture.GetMetadata();
+                }
+                else
+                {
+                    Msg("! Failed to generate PNG mipmaps: [%s], hr: [%d]", fn, mip_hr);
+                }
+            }
+        }
+        else
+        {
+            load_hr = LoadFromDDSMemory(reinterpret_cast<const uint8_t*>(File->pointer()), File->length(), dds_flags,
+                &IMG, texture);
+        }
+
+        if (FAILED(load_hr))
+        {
+            Msg("! Failed to load %s texture from memory: [%s], hr: [%d]", is_png ? "PNG" : "DDS", fn, load_hr);
             break;
         }
 
@@ -158,11 +197,12 @@ ID3DBaseTexture* CRender::texture_load(LPCSTR fRName, u32& ret_msize)
         if (SUCCEEDED(hr))
         {
             // Получилось. Считаем сколько весит текстура и сваливаем.
-            ret_msize = calc_texture_size(img_loaded_lod, IMG.mipLevels, File->length());
+            const size_t source_size = is_png ? texture.GetPixelsSize() : File->length();
+            ret_msize = calc_texture_size(img_loaded_lod, IMG.mipLevels, source_size);
             break;
         }
 
-        if (!allowFallback)
+        if (is_png || !allowFallback)
         {
             Msg("! Failed CreateTextureEx: [%s], hr: [%d]", fn, hr);
             break; // Уже была вторая попытка, прекращаем.

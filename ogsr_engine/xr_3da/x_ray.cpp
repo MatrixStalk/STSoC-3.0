@@ -716,7 +716,8 @@ bool validate_logo_path(string_path& path, pcstr level_name, int num = -1)
 {
     generate_logo_path(path, level_name, num);
     string_path temp;
-    return FS.exist(temp, "$game_textures$", path, ".dds") || FS.exist(temp, "$level$", path, ".dds");
+    return FS.exist(temp, "$game_textures$", path, ".dds") || FS.exist(temp, "$game_textures$", path, ".png") ||
+        FS.exist(temp, "$level$", path, ".dds") || FS.exist(temp, "$level$", path, ".png");
 }
 
 void CApplication::Level_Set(u32 L)

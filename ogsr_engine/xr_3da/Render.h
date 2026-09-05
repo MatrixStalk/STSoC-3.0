@@ -29,9 +29,11 @@ struct SUIModelRenderPoint
 struct SUIModelRenderParams
 {
     Frect viewport{}; // physical screen pixels
+    Fmatrix root_transform{}; // stable world transform used as the model-space basis
     Fvector rotation{}; // radians
     Fvector offset{}; // model-space offset after centering
     Fvector pivot{}; // world-space point used as the rotation center
+    bool use_root_transform{};
     bool use_pivot{};
     float scale{1.f};
     Fvector4 tint{1.f, 1.f, 1.f, 1.f};

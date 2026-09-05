@@ -50,9 +50,7 @@ void CPhysicItem::Load(LPCSTR section)
 
     m_use_hud_model_as_world = READ_IF_EXISTS(pSettings, r_bool, section, "use_hud_model_as_world", false);
     m_auto_generate_collision = READ_IF_EXISTS(pSettings, r_bool, section, "auto_generate_collision", true);
-    m_force_auto_generated_collision = READ_IF_EXISTS(
-        pSettings, r_bool, section, "force_auto_generated_collision", m_use_hud_model_as_world);
-    m_auto_collision_max_boxes = READ_IF_EXISTS(pSettings, r_u32, section, "auto_collision_max_boxes", 16);
+    m_auto_collision_max_boxes = READ_IF_EXISTS(pSettings, r_u32, section, "auto_collision_max_boxes", 1);
     clamp(m_auto_collision_max_boxes, 1u, 64u);
 
     m_world_model_scale = READ_IF_EXISTS(pSettings, r_float, section, "world_scaling", 1.f);
@@ -80,11 +78,17 @@ void CPhysicItem::Load(LPCSTR section)
         {
             Msg("! [%s]: use_hud_model_as_world is enabled, but neither hud_world_visual nor HUD item_visual exists", section);
             m_use_hud_model_as_world = false;
-            m_force_auto_generated_collision = READ_IF_EXISTS(pSettings, r_bool, section, "force_auto_generated_collision", false);
         }
     }
 
     clamp(m_world_model_scale, 0.001f, 100.f);
+    // Imported HUD/world models and standalone attachments are commonly authored at a
+    // different scale. Their embedded bone shapes remain in authoring units and tend
+    // to produce tunnelling or unstable contacts, so use the scaled visual envelope
+    // unless a section explicitly opts out.
+    const bool scaled_imported_visual = !fsimilar(m_world_model_scale, 1.f);
+    m_force_auto_generated_collision = READ_IF_EXISTS(pSettings, r_bool, section, "force_auto_generated_collision",
+        m_use_hud_model_as_world || scaled_imported_visual);
 }
 
 void CPhysicItem::reload(LPCSTR section) { inherited::reload(section); }
@@ -258,10 +262,10 @@ void CPhysicItem::ApplyHudWorldVisual()
         cNameVisual_set(original_visual);
         ::Render->hud_loading = previous_hud_loading;
         m_use_hud_model_as_world = false;
-        m_force_auto_generated_collision = READ_IF_EXISTS(
-            pSettings, r_bool, cNameSect().c_str(), "force_auto_generated_collision", false);
         m_world_model_scale = READ_IF_EXISTS(pSettings, r_float, cNameSect().c_str(), "world_scaling", 1.f);
         clamp(m_world_model_scale, 0.001f, 100.f);
+        m_force_auto_generated_collision = READ_IF_EXISTS(pSettings, r_bool, cNameSect().c_str(),
+            "force_auto_generated_collision", !fsimilar(m_world_model_scale, 1.f));
         return;
     }
 

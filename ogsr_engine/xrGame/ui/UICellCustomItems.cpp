@@ -26,6 +26,51 @@ Fvector2 custom_addon_icon_offset(const shared_str& addon_section, const Fvector
 }
 } // namespace
 
+bool DrawInventoryItem3D(CInventoryItem* item, CUIWindow* viewport, const u32 color)
+{
+    if (!item || !viewport || !item->m_icon_3d_enabled)
+        return false;
+
+    CGameObject& game_object = item->object();
+    if (!g_pGameLevel || Level().is_removing_objects() || game_object.getDestroy() || !game_object.m_spawned ||
+        !game_object.Visual())
+        return false;
+
+    Frect ui_rect;
+    viewport->GetAbsoluteRect(ui_rect);
+
+    SUIModelRenderParams params;
+    UI()->ClientToScreenScaled(params.viewport.lt, ui_rect.x1, ui_rect.y1);
+    UI()->ClientToScreenScaled(params.viewport.rb, ui_rect.x2, ui_rect.y2);
+    const Fvector2 animation_offset = UIRender->GetAnimationOffset();
+    params.viewport.lt.add(animation_offset);
+    params.viewport.rb.add(animation_offset);
+
+    params.root_transform = game_object.renderable_WorldTransform();
+    params.use_root_transform = true;
+    params.rotation.set(deg2rad(item->m_icon_3d_rotation.x), deg2rad(item->m_icon_3d_rotation.y),
+        deg2rad(item->m_icon_3d_rotation.z));
+    params.rotation.y += fmodf(Device.fTimeGlobal * deg2rad(item->m_icon_3d_rotation_speed), PI_MUL_2);
+    params.offset = item->m_icon_3d_offset;
+    params.scale = _max(item->m_icon_3d_scale, 0.05f);
+
+    // Bounds change when an addon visual is attached, sometimes a few frames
+    // after the gameplay state changes. Rotating around their center made that
+    // asynchronous bounds update look like a random change of weapon angle.
+    // The object's own origin is stable for the lifetime of the inventory item.
+    params.pivot = params.root_transform.c;
+    params.use_pivot = true;
+
+    constexpr float byte_to_float = 1.f / 255.f;
+    params.tint.set(color_get_R(color) * byte_to_float, color_get_G(color) * byte_to_float,
+        color_get_B(color) * byte_to_float, color_get_A(color) * byte_to_float * UIRender->GetAnimationAlpha());
+
+    UI()->PushScissor(ui_rect);
+    const bool rendered = Render->RenderUIModel(smart_cast<IRenderable*>(&game_object), params);
+    UI()->PopScissor();
+    return rendered;
+}
+
 CUIInventoryCellItem::CUIInventoryCellItem(CInventoryItem* itm)
 {
     m_pData = (void*)itm;
@@ -56,36 +101,7 @@ void CUIInventoryCellItem::Draw()
         TextureOn();
     };
 
-    CGameObject& game_object = item->object();
-    if (!g_pGameLevel || Level().is_removing_objects() || game_object.getDestroy() || !game_object.m_spawned || !game_object.Visual())
-    {
-        draw_overlays_without_atlas();
-        return;
-    }
-
-    Frect ui_rect;
-    GetAbsoluteRect(ui_rect);
-
-    SUIModelRenderParams params;
-    UI()->ClientToScreenScaled(params.viewport.lt, ui_rect.x1, ui_rect.y1);
-    UI()->ClientToScreenScaled(params.viewport.rb, ui_rect.x2, ui_rect.y2);
-    const Fvector2 animation_offset = UIRender->GetAnimationOffset();
-    params.viewport.lt.add(animation_offset);
-    params.viewport.rb.add(animation_offset);
-
-    params.rotation.set(deg2rad(item->m_icon_3d_rotation.x), deg2rad(item->m_icon_3d_rotation.y), deg2rad(item->m_icon_3d_rotation.z));
-    params.rotation.y += Device.fTimeGlobal * deg2rad(item->m_icon_3d_rotation_speed);
-    params.offset = item->m_icon_3d_offset;
-    params.scale = _max(item->m_icon_3d_scale, 0.05f);
-
-    const u32 color = GetColor();
-    constexpr float byte_to_float = 1.f / 255.f;
-    params.tint.set(color_get_R(color) * byte_to_float, color_get_G(color) * byte_to_float, color_get_B(color) * byte_to_float,
-                    color_get_A(color) * byte_to_float * UIRender->GetAnimationAlpha());
-
-    UI()->PushScissor(ui_rect);
-    Render->RenderUIModel(smart_cast<IRenderable*>(&game_object), params);
-    UI()->PopScissor();
+    DrawInventoryItem3D(item, this, GetColor());
 
     // The model replaces only the atlas image. Counts, condition bars and
     // other overlays retain their normal UI ordering above it.
@@ -542,6 +558,11 @@ CUIStatic* MakeAddonStatic(CUIDragItem* i, CIconParams& params)
 CUIDragItem* CUIWeaponCellItem::CreateDragItem()
 {
     CUIDragItem* i = inherited::CreateDragItem();
+
+    // The complete weapon, including installed addon visuals, is rendered by
+    // CUIDragItem. Do not duplicate it with the old atlas addon layers.
+    if (object()->m_icon_3d_enabled)
+        return i;
 
     CIconParams params;
 

@@ -19,7 +19,7 @@ class CPhysicItem : public CPhysicsShellHolder, public CPHShellSimpleCreator
     bool m_auto_generate_collision{true};
     bool m_force_auto_generated_collision{};
     float m_world_model_scale{1.f};
-    u32 m_auto_collision_max_boxes{16};
+    u32 m_auto_collision_max_boxes{1};
     shared_str m_hud_world_visual;
     mutable Fbox m_scaled_bounding_box;
 

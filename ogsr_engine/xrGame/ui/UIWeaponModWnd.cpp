@@ -287,6 +287,8 @@ void CUIWeaponModWnd::DrawPreview()
     SUIModelRenderParams params;
     UI()->ClientToScreenScaled(params.viewport.lt, rect.x1, rect.y1);
     UI()->ClientToScreenScaled(params.viewport.rb, rect.x2, rect.y2);
+    params.root_transform = m_weapon->renderable_WorldTransform();
+    params.use_root_transform = true;
     params.rotation = m_rotation;
     params.offset = m_offset;
     params.scale = m_scale;
@@ -295,8 +297,7 @@ void CUIWeaponModWnd::DrawPreview()
     {
         if (IKinematics* model = smart_cast<IKinematics*>(weapon_object.Visual()))
         {
-            const Fmatrix weapon_transform = m_weapon->renderable_WorldTransform();
-            weapon_transform.transform_tiny(params.pivot, model->LL_GetTransform(m_center_bone_id).c);
+            params.root_transform.transform_tiny(params.pivot, model->LL_GetTransform(m_center_bone_id).c);
             params.use_pivot = true;
         }
     }

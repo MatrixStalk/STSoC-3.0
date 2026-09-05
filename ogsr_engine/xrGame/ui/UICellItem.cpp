@@ -294,7 +294,21 @@ void CUIDragItem::Draw()
     MoveWndDelta(tmp);
     UI()->PushScissor(UI()->ScreenRect(), true);
 
+    bool use_3d_icon = false;
+    if (CUIInventoryCellItem* inventory_cell = smart_cast<CUIInventoryCellItem*>(m_pParent))
+    {
+        if (CInventoryItem* item = inventory_cell->object(); item && item->m_icon_3d_enabled)
+        {
+            use_3d_icon = true;
+            DrawInventoryItem3D(item, &m_static, m_static.GetColor());
+            m_static.TextureOff();
+        }
+    }
+
     inherited::Draw();
+
+    if (use_3d_icon)
+        m_static.TextureOn();
 
     UI()->PopScissor();
 }

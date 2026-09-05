@@ -70,14 +70,8 @@ protected:
     Fvector m_hud_rotation_impulse{};
     Fvector m_hud_rotation_velocity{};
     Fvector m_hud_rotation_acceleration{};
-    Fvector m_subtle_position{};
     Fvector m_subtle_position_impulse{};
-    Fvector m_subtle_position_velocity{};
-    Fvector m_subtle_position_acceleration{};
-    Fvector m_subtle_rotation{};
     Fvector m_subtle_rotation_impulse{};
-    Fvector m_subtle_rotation_velocity{};
-    Fvector m_subtle_rotation_acceleration{};
     float m_last_shot_time{-1000.f};
     u32 m_burst_shots{};
 

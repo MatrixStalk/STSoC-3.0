@@ -14,6 +14,7 @@
 #include "../PhysicsShellHolder.h"
 #include "UIWpnParams.h"
 #include "ui_af_params.h"
+#include "UICellCustomItems.h"
 #include <format>
 
 CUIItemInfo::CUIItemInfo()
@@ -187,18 +188,26 @@ void CUIItemInfo::InitItem(CInventoryItem* pInvItem)
     }
     if (UIItemImage)
     {
-        // Загружаем картинку
-        pInvItem->m_icon_params.set_shader(UIItemImage);
+        if (pInvItem->m_icon_3d_enabled)
+        {
+            UIItemImage->TextureOff();
+            UIItemImage->SetWndSize(UIItemImageSize);
+        }
+        else
+        {
+            // Загружаем картинку
+            pInvItem->m_icon_params.set_shader(UIItemImage);
 
-        Frect rect = pInvItem->m_icon_params.original_rect();
-        UIItemImage->TextureOn();
-        UIItemImage->ClipperOn();
-        Frect v_r = {0.0f, 0.0f, rect.width(), rect.height()};
-        v_r.x2 *= UI()->get_current_kx();
+            Frect rect = pInvItem->m_icon_params.original_rect();
+            UIItemImage->TextureOn();
+            UIItemImage->ClipperOn();
+            Frect v_r = {0.0f, 0.0f, rect.width(), rect.height()};
+            v_r.x2 *= UI()->get_current_kx();
 
-        UIItemImage->GetUIStaticItem().SetRect(v_r);
-        UIItemImage->SetWidth(_min(v_r.width(), UIItemImageSize.x));
-        UIItemImage->SetHeight(_min(v_r.height(), UIItemImageSize.y));
+            UIItemImage->GetUIStaticItem().SetRect(v_r);
+            UIItemImage->SetWidth(_min(v_r.width(), UIItemImageSize.x));
+            UIItemImage->SetHeight(_min(v_r.height(), UIItemImageSize.y));
+        }
     }
 }
 
@@ -237,5 +246,17 @@ void CUIItemInfo::TryAddCustomInfo(CPhysicsShellHolder& obj)
 void CUIItemInfo::Draw()
 {
     if (m_pInvItem || m_b_force_drawing)
+    {
+        const bool use_3d_icon = m_pInvItem && UIItemImage && m_pInvItem->m_icon_3d_enabled;
+        if (use_3d_icon)
+            UIItemImage->SetCustomDraw(true);
+
         inherited::Draw();
+
+        if (use_3d_icon)
+        {
+            UIItemImage->SetCustomDraw(false);
+            DrawInventoryItem3D(m_pInvItem, UIItemImage, UIItemImage->GetColor());
+        }
+    }
 }
