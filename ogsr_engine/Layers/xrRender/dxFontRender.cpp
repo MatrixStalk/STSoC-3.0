@@ -39,8 +39,8 @@ void dxFontRender::RenderFragment(CGameFont& owner, u32& i, bool shadow_mode, fl
 
         if (len)
         {
-            float X = float(iFloor(PS.x)) + dX;
-            float Y = float(iFloor(PS.y)) + dY;
+            float X = float(iFloor(PS.x));
+            float Y = float(iFloor(PS.y));
 
             float S = PS.height * g_current_font_scale.y * owner.GetHeightScale(); // g_current_font_scale это еще один скейлинг шрифтов для pp эффектов похоже
 
@@ -88,6 +88,11 @@ void dxFontRender::RenderFragment(CGameFont& owner, u32& i, bool shadow_mode, fl
             Y -= 0.5f;
             Y2 -= 0.5f;
 
+            const auto set_vertex = [&PS, dX, dY](FVF::TL* vertex, float x, float y, u32 color, float u, float texture_y) {
+                PS.transform.transform(x, y);
+                vertex->set(x + dX, y + dY, color, u, texture_y);
+            };
+
             for (u32 j = 0; j < len; j++)
             {
                 const Fvector l = owner.IsMultibyte() ? owner.GetCharTC(wsStr[1 + j]) : owner.GetCharTC((u8)PS.string[j]);
@@ -101,14 +106,14 @@ void dxFontRender::RenderFragment(CGameFont& owner, u32& i, bool shadow_mode, fl
                     const float tu = (l.x / owner.vTS.x);
                     const float tv = (l.y / owner.vTS.y);
 
-                    v->set(X, Y2, clr2, tu, tv + owner.fTCHeight);
+                    set_vertex(v, X, Y2, clr2, tu, tv + owner.fTCHeight);
                     v++;
-                    v->set(X, Y, clr, tu, tv);
+                    set_vertex(v, X, Y, clr, tu, tv);
                     v++;
 
-                    v->set(X + scw, Y2, clr2, tu + fTCWidth, tv + owner.fTCHeight);
+                    set_vertex(v, X + scw, Y2, clr2, tu + fTCWidth, tv + owner.fTCHeight);
                     v++;
-                    v->set(X + scw, Y, clr, tu + fTCWidth, tv);
+                    set_vertex(v, X + scw, Y, clr, tu + fTCWidth, tv);
                     v++;
                 }
 

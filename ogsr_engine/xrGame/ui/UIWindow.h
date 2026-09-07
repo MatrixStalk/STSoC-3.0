@@ -17,7 +17,9 @@ public:
         SlideLeft,
         SlideRight,
         SlideUp,
-        SlideDown
+        SlideDown,
+        RotateClockwise,
+        RotateCounterClockwise
     };
 
     enum class EMotionEffect : u8
@@ -119,8 +121,14 @@ public:
     void SetAnimationTimes(float show_time_ms, float hide_time_ms);
     void SetAnimationDelay(float delay_ms);
     void SetAnimationDistance(float distance);
+    void SetAnimationRotation(float degrees);
     float GetAnimationAlpha() const { return m_animationAlpha; }
     const Fvector2& GetAnimationOffset() const { return m_animationOffset; }
+
+    void SetRotation(float degrees);
+    float GetRotation() const;
+    void SetRotationSpeed(float degrees_per_second);
+    void SetRotationSmoothing(float smoothing);
 
     void SetMotionEffect(LPCSTR effect);
     void SetMotionMouseStrength(float x, float y);
@@ -210,6 +218,7 @@ protected:
     void StartAnimation(bool show);
     void UpdateAnimation();
     void UpdateMotion();
+    void UpdateRotation();
 
     int priority_index{};
     
@@ -268,6 +277,10 @@ protected:
     float m_hideAnimationTime{160.f};
     float m_animationDelay{};
     float m_animationDistance{24.f};
+    float m_animationRotationAmount{PI_DIV_2};
+    float m_animationRotation{};
+    float m_animationStartRotation{};
+    float m_animationTargetRotation{};
     u32 m_animationStartTime{};
     bool m_animationStarted{};
     bool m_requestedVisible{true};
@@ -280,6 +293,11 @@ protected:
     float m_motionSpeed{};
     float m_motionSmoothing{8.f};
     float m_motionPhase{};
+
+    float m_rotation{};
+    float m_rotationSpeed{};
+    float m_rotationTargetSpeed{};
+    float m_rotationSmoothing{8.f};
 
 #ifdef DEBUG
     int m_dbg_id;

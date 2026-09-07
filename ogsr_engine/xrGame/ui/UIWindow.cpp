@@ -52,6 +52,15 @@ Fvector2 animation_offset(CUIWindow::EAnimationPreset preset, float distance)
     return result;
 }
 
+float animation_rotation(CUIWindow::EAnimationPreset preset, float amount)
+{
+    if (preset == CUIWindow::EAnimationPreset::RotateClockwise)
+        return amount;
+    if (preset == CUIWindow::EAnimationPreset::RotateCounterClockwise)
+        return -amount;
+    return 0.f;
+}
+
 float animation_curve(CUIWindow::EAnimationPreset preset, float value)
 {
     value = clampr(value, 0.f, 1.f);
@@ -220,29 +229,25 @@ void CUIWindow::DrawWithAnimation()
         return;
     }
 
-    const float previous_alpha = UIRender->GetAnimationAlpha();
-    const Fvector2 previous_offset = UIRender->GetAnimationOffset();
-    UIRender->SetAnimationAlpha(_min(previous_alpha, m_animationAlpha));
-    UIRender->SetAnimationOffset(previous_offset.x + m_animationOffset.x + m_motionOffset.x,
-                                 previous_offset.y + m_animationOffset.y + m_motionOffset.y);
+    Frect rect;
+    GetAbsoluteRect(rect);
+    Fvector2 pivot;
+    UI()->ClientToScreenScaled(pivot, (rect.x1 + rect.x2) * .5f, (rect.y1 + rect.y2) * .5f);
+    UIRender->PushAnimationTransform(m_animationAlpha, m_animationOffset.x + m_motionOffset.x,
+        m_animationOffset.y + m_motionOffset.y, m_animationRotation + m_rotation,
+        pivot.x, pivot.y);
     Draw();
-    UIRender->SetAnimationAlpha(previous_alpha);
-    UIRender->SetAnimationOffset(previous_offset.x, previous_offset.y);
+    UIRender->PopAnimationTransform();
     m_wasDrawn = true;
 }
 
 void CUIWindow::DrawWithoutAnimation()
 {
     const bool previous_bypass = g_bypass_window_animations;
-    const float previous_alpha = UIRender->GetAnimationAlpha();
-    const Fvector2 previous_offset = UIRender->GetAnimationOffset();
-
     g_bypass_window_animations = true;
-    UIRender->SetAnimationAlpha(1.f);
-    UIRender->SetAnimationOffset(0.f, 0.f);
+    UIRender->PushIdentityAnimationTransform();
     Draw();
-    UIRender->SetAnimationAlpha(previous_alpha);
-    UIRender->SetAnimationOffset(previous_offset.x, previous_offset.y);
+    UIRender->PopAnimationTransform();
     g_bypass_window_animations = previous_bypass;
     m_wasDrawn = true;
 }
@@ -311,6 +316,7 @@ void CUIWindow::Update()
 {
     UpdateAnimation();
     UpdateMotion();
+    UpdateRotation();
 
     for (auto it = m_ChildWndList.begin(); m_ChildWndList.end() != it; ++it)
         if ((*it)->IsVisibleForRender())
@@ -403,6 +409,12 @@ CUIWindow::EAnimationPreset CUIWindow::ParseAnimationPreset(LPCSTR preset)
         return EAnimationPreset::SlideUp;
     if (0 == xr_strcmp(preset, "slide_down") || 0 == xr_strcmp(preset, "slide-down"))
         return EAnimationPreset::SlideDown;
+    if (0 == xr_strcmp(preset, "rotate_cw") || 0 == xr_strcmp(preset, "rotate-cw") ||
+        0 == xr_strcmp(preset, "rotate_clockwise"))
+        return EAnimationPreset::RotateClockwise;
+    if (0 == xr_strcmp(preset, "rotate_ccw") || 0 == xr_strcmp(preset, "rotate-ccw") ||
+        0 == xr_strcmp(preset, "rotate_counterclockwise"))
+        return EAnimationPreset::RotateCounterClockwise;
 
     Msg("! Unknown UI animation preset [%s], using [curve_fade]", preset);
     return EAnimationPreset::CurveFade;
@@ -416,7 +428,11 @@ void CUIWindow::SetAnimationPresets(LPCSTR show_preset, LPCSTR hide_preset)
     m_hideAnimation = ParseAnimationPreset(hide_preset);
 
     if (m_animationState == EAnimationState::Showing && fis_zero(m_animationAlpha))
+    {
         m_animationStartOffset = m_animationOffset = animation_offset(m_showAnimation, m_animationDistance);
+        m_animationStartRotation = m_animationRotation =
+            animation_rotation(m_showAnimation, m_animationRotationAmount);
+    }
 
     if ((m_requestedVisible && m_showAnimation == EAnimationPreset::None) || (!m_requestedVisible && m_hideAnimation == EAnimationPreset::None))
         ShowImmediate(m_requestedVisible);
@@ -437,6 +453,32 @@ void CUIWindow::SetAnimationDistance(float distance)
         m_animationStartOffset = m_animationOffset = animation_offset(m_showAnimation, m_animationDistance);
 }
 
+void CUIWindow::SetAnimationRotation(float degrees)
+{
+    m_animationRotationAmount = deg2rad(_abs(degrees));
+    if (m_animationState == EAnimationState::Showing && !m_animationStarted)
+        m_animationStartRotation = m_animationRotation =
+            animation_rotation(m_showAnimation, m_animationRotationAmount);
+}
+
+void CUIWindow::SetRotation(float degrees) { m_rotation = deg2rad(degrees); }
+float CUIWindow::GetRotation() const { return rad2deg(m_rotation); }
+void CUIWindow::SetRotationSpeed(float degrees_per_second) { m_rotationTargetSpeed = deg2rad(degrees_per_second); }
+void CUIWindow::SetRotationSmoothing(float smoothing) { m_rotationSmoothing = _max(smoothing, 0.f); }
+
+void CUIWindow::UpdateRotation()
+{
+    if (fis_zero(m_rotationSpeed) && fis_zero(m_rotationTargetSpeed))
+        return;
+
+    const float dt = clampr(Device.fTimeDelta, 0.f, .1f);
+    const float blend = m_rotationSmoothing > 0.f ? 1.f - expf(-m_rotationSmoothing * dt) : 1.f;
+    m_rotationSpeed += (m_rotationTargetSpeed - m_rotationSpeed) * blend;
+    if (fis_zero(m_rotationTargetSpeed) && _abs(m_rotationSpeed) < EPS_S)
+        m_rotationSpeed = 0.f;
+    m_rotation = angle_normalize(m_rotation + m_rotationSpeed * dt);
+}
+
 void CUIWindow::ShowImmediate(bool status)
 {
     m_requestedVisible = status;
@@ -444,6 +486,7 @@ void CUIWindow::ShowImmediate(bool status)
     m_animationStarted = false;
     m_animationAlpha = status ? 1.f : 0.f;
     m_animationOffset.set(0.f, 0.f);
+    m_animationRotation = 0.f;
     SetVisible(status);
     Enable(status);
 }
@@ -489,11 +532,16 @@ void CUIWindow::StartAnimation(bool show)
     m_animationStarted = false;
     m_animationStartAlpha = m_animationAlpha;
     m_animationStartOffset = m_animationOffset;
+    m_animationStartRotation = m_animationRotation;
 
     if (show && fis_zero(m_animationStartAlpha))
+    {
         m_animationStartOffset = m_animationOffset = animation_offset(preset, m_animationDistance);
+        m_animationStartRotation = m_animationRotation = animation_rotation(preset, m_animationRotationAmount);
+    }
 
     m_animationTargetOffset = show ? Fvector2{} : animation_offset(preset, m_animationDistance);
+    m_animationTargetRotation = show ? 0.f : animation_rotation(preset, m_animationRotationAmount);
 }
 
 void CUIWindow::UpdateAnimation()
@@ -520,6 +568,7 @@ void CUIWindow::UpdateAnimation()
     m_animationAlpha = m_animationStartAlpha + (target_alpha - m_animationStartAlpha) * curve;
     m_animationOffset.x = m_animationStartOffset.x + (m_animationTargetOffset.x - m_animationStartOffset.x) * curve;
     m_animationOffset.y = m_animationStartOffset.y + (m_animationTargetOffset.y - m_animationStartOffset.y) * curve;
+    m_animationRotation = m_animationStartRotation + (m_animationTargetRotation - m_animationStartRotation) * curve;
 
     if (progress < 1.f)
         return;
@@ -529,6 +578,7 @@ void CUIWindow::UpdateAnimation()
     m_animationStarted = false;
     m_animationAlpha = shown ? 1.f : 0.f;
     m_animationOffset.set(0.f, 0.f);
+    m_animationRotation = 0.f;
     SetVisible(shown);
 }
 

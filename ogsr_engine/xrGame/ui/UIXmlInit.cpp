@@ -165,6 +165,10 @@ bool CUIXmlInit::InitWindow(CUIXml& xml_doc, LPCSTR path, int index, CUIWindow* 
                             xml_doc.ReadAttribFlt(path, index, "animation_hide_time", 160.f));
     pWnd->SetAnimationDelay(xml_doc.ReadAttribFlt(path, index, "animation_delay", 0.f));
     pWnd->SetAnimationDistance(xml_doc.ReadAttribFlt(path, index, "animation_distance", 24.f));
+    pWnd->SetAnimationRotation(xml_doc.ReadAttribFlt(path, index, "animation_rotation", 90.f));
+    pWnd->SetRotation(xml_doc.ReadAttribFlt(path, index, "rotation", 0.f));
+    pWnd->SetRotationSpeed(xml_doc.ReadAttribFlt(path, index, "rotation_speed", 0.f));
+    pWnd->SetRotationSmoothing(xml_doc.ReadAttribFlt(path, index, "rotation_smoothing", 8.f));
 
     LPCSTR motion_effect = xml_doc.ReadAttrib(path, index, "motion_effect", "none");
     pWnd->SetMotionEffect(motion_effect);

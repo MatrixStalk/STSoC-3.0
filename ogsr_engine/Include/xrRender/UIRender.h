@@ -2,6 +2,20 @@
 
 class IUIShader;
 
+struct SUIRenderTransform
+{
+    float m00{1.f}, m01{}, m02{};
+    float m10{}, m11{1.f}, m12{};
+
+    void transform(float& x, float& y) const
+    {
+        const float source_x = x;
+        const float source_y = y;
+        x = m00 * source_x + m01 * source_y + m02;
+        y = m10 * source_x + m11 * source_y + m12;
+    }
+};
+
 class IUIRender
 {
 public:
@@ -41,6 +55,11 @@ public:
     virtual float GetAnimationAlpha() const = 0;
     virtual void SetAnimationOffset(float x, float y) = 0;
     virtual Fvector2 GetAnimationOffset() const = 0;
+    virtual const SUIRenderTransform& GetAnimationTransform() const = 0;
+    virtual void PushAnimationTransform(float alpha, float offset_x, float offset_y, float rotation, float pivot_x,
+        float pivot_y) = 0;
+    virtual void PushIdentityAnimationTransform() = 0;
+    virtual void PopAnimationTransform() = 0;
 
     virtual void SetScissor(Irect* rect = nullptr) = 0;
     virtual void GetActiveTextureResolution(Fvector2& res) = 0;

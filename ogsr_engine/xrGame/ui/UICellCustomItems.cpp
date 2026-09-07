@@ -42,12 +42,19 @@ bool DrawInventoryItem3D(CInventoryItem* item, CUIWindow* viewport, const u32 co
     SUIModelRenderParams params;
     UI()->ClientToScreenScaled(params.viewport.lt, ui_rect.x1, ui_rect.y1);
     UI()->ClientToScreenScaled(params.viewport.rb, ui_rect.x2, ui_rect.y2);
-    const Fvector2 animation_offset = UIRender->GetAnimationOffset();
-    params.viewport.lt.add(animation_offset);
-    params.viewport.rb.add(animation_offset);
+    const SUIRenderTransform& ui_transform = UIRender->GetAnimationTransform();
+    const float viewport_width = params.viewport.width();
+    const float viewport_height = params.viewport.height();
+    Fvector2 viewport_center;
+    viewport_center.set((params.viewport.x1 + params.viewport.x2) * .5f,
+        (params.viewport.y1 + params.viewport.y2) * .5f);
+    ui_transform.transform(viewport_center.x, viewport_center.y);
+    params.viewport.set(viewport_center.x - viewport_width * .5f, viewport_center.y - viewport_height * .5f,
+        viewport_center.x + viewport_width * .5f, viewport_center.y + viewport_height * .5f);
 
     params.rotation.set(deg2rad(item->m_icon_3d_rotation.x), deg2rad(item->m_icon_3d_rotation.y),
         deg2rad(item->m_icon_3d_rotation.z));
+    params.rotation.z += atan2f(ui_transform.m10, ui_transform.m00);
     params.rotation.y += fmodf(Device.fTimeGlobal * deg2rad(item->m_icon_3d_rotation_speed), PI_MUL_2);
     params.offset = item->m_icon_3d_offset;
     params.scale = _max(item->m_icon_3d_scale, 0.05f);

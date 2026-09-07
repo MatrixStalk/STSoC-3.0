@@ -329,10 +329,8 @@ void CGameFont::MasterOut(BOOL bCheckDevice, BOOL bUseCoords, BOOL bScaleCoords,
 
     if (UIRender)
     {
-        const Fvector2 animation_offset = UIRender->GetAnimationOffset();
-        rs.x += animation_offset.x;
-        rs.y += animation_offset.y;
         rs.color = subst_alpha(rs.color, static_cast<u32>(color_get_A(rs.color) * UIRender->GetAnimationAlpha()));
+        rs.transform = UIRender->GetAnimationTransform();
     }
     rs.height = fCurrentHeight;
     rs.align = eCurrentAlignment;

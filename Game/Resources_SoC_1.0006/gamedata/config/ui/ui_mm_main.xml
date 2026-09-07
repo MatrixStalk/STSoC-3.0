@@ -14,9 +14,11 @@
 
 	<!--
 		Animation presets: none, fade, curve_fade, slide_left, slide_right,
-		slide_up, slide_down. animation_in/animation_out may override each direction.
+		slide_up, slide_down, rotate_cw, rotate_ccw. animation_in/animation_out may override each direction.
 		animation_time, animation_hide_time and animation_delay are milliseconds;
 		animation_distance is measured in screen pixels.
+		animation_rotation is measured in degrees. rotation sets a fixed angle;
+		rotation_speed is degrees per second and rotation_smoothing controls smooth acceleration/deceleration.
 
 		Motion effects: none, parallax, panorama. motion_mouse_x/motion_mouse_y set
 		the cursor reaction in pixels; motion_auto_x/motion_auto_y set autonomous drift.
