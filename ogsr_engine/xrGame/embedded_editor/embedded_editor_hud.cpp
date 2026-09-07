@@ -13,6 +13,7 @@
 #include "../player_hud.h"
 #include "../Weapon.h"
 #include "../Missile.h"
+#include "../WeaponKnife.h"
 #include "../Inventory.h"
 #include "../inventory_item.h"
 
@@ -68,6 +69,54 @@ void RenderMissileThrowEditor(CMissile* missile, float drag_intensity)
     }
     ImGui::TextDisabled("Object section: [%s]", missile->cNameSect().c_str());
     ImGui::TextDisabled("Timing can also be placed in HUD section: [%s]", missile->HudSection().c_str());
+}
+
+void RenderKnifeStrikeEditor(CWeaponKnife* knife)
+{
+    if (!knife)
+        return;
+
+    ImGui::SeparatorText("Knife hit / stab");
+    const float progress = knife->AttackProgress();
+    string64 progress_text{};
+    xr_sprintf(progress_text, "current attack: %.1f%%", progress * 100.f);
+    ImGui::ProgressBar(progress, ImVec2(-1.f, 0.f), progress_text);
+
+    auto edit_time = [knife, progress](LPCSTR label, float value, bool hit) {
+        ImGui::PushID(hit ? 0 : 1);
+        bool timed = value >= 0.f;
+        if (ImGui::Checkbox("Timed strike", &timed))
+            value = timed ? (progress > 0.f ? progress : 0.5f) : -1.f;
+        if (timed)
+        {
+            value = _max(value, 0.f);
+            ImGui::SliderFloat(label, &value, 0.f, 1.f, "%.4f");
+            if (ImGui::Button("Set to current frame"))
+                value = progress;
+        }
+        if (hit)
+            knife->SetHitStrikeTime(value);
+        else
+            knife->SetStabStrikeTime(value);
+        ImGui::PopID();
+    };
+
+    edit_time("hit timeline", knife->HitStrikeTime(), true);
+    edit_time("stab timeline", knife->StabStrikeTime(), false);
+
+    if (ImGui::Button("Reset knife values from config"))
+        knife->ResetStrikeEditorValues();
+    ImGui::SameLine();
+    if (ImGui::Button("Copy knife config"))
+    {
+        string256 config{};
+        xr_sprintf(config, "hit_time = %.4f\nstab_time = %.4f",
+            knife->HitStrikeTime(), knife->StabStrikeTime());
+        ImGui::SetClipboardText(config);
+    }
+    ImGui::TextDisabled("-1 uses legacy motion marks; values 0..1 use the animation timeline.");
+    ImGui::TextDisabled("Object section: [%s]", knife->cNameSect().c_str());
+    ImGui::TextDisabled("Timing can also be placed in HUD section: [%s]", knife->HudSection().c_str());
 }
 
 void RenderBoneAdjustments(u16 item_idx)
@@ -572,6 +621,7 @@ void CImGuiHudEditorWnd::Render()
     auto item = g_player_hud->attached_item(0);
     auto Wpn = smart_cast<CWeapon*>(actor->inventory().ActiveItem());
     auto missile = smart_cast<CMissile*>(actor->inventory().ActiveItem());
+    auto knife = smart_cast<CWeaponKnife*>(actor->inventory().ActiveItem());
 
     if (ImGui::CollapsingHeader("3D inventory icons", ImGuiTreeNodeFlags_DefaultOpen))
         RenderInventoryIconEditor(actor->inventory());
@@ -582,6 +632,9 @@ void CImGuiHudEditorWnd::Render()
 
     if (missile && ImGui::CollapsingHeader("Missile / grenade animation timeline", ImGuiTreeNodeFlags_DefaultOpen))
         RenderMissileThrowEditor(missile, drag_intensity);
+
+    if (knife && ImGui::CollapsingHeader("Knife hit / stab timeline", ImGuiTreeNodeFlags_DefaultOpen))
+        RenderKnifeStrikeEditor(knife);
 
     if (item)
     {

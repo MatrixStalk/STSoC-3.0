@@ -17,6 +17,9 @@ protected:
     ESoundTypes m_eSoundHide;
     bool m_attackStart;
     bool m_attackMotionMarksAvailable;
+    bool m_attackStrikeApplied{};
+    float m_hitStrikeTime{-1.f};
+    float m_stabStrikeTime{-1.f};
 
     bool HeadLampSwitch{}, NightVisionSwitch{};
 
@@ -38,6 +41,8 @@ protected:
     void state_Attacking(float dt);
 
     virtual void KnifeStrike(u32 state, const Fvector& pos, const Fvector& dir);
+    void ApplyKnifeStrike(u32 state);
+    float StrikeTime(u32 state) const;
 
     float fWallmarkSize;
     u16 knife_material_idx;
@@ -69,6 +74,13 @@ public:
     virtual void FireStart();
 
     virtual bool Action(s32 cmd, u32 flags);
+
+    float AttackProgress() const;
+    float HitStrikeTime() const { return m_hitStrikeTime; }
+    float StabStrikeTime() const { return m_stabStrikeTime; }
+    void SetHitStrikeTime(float value) { m_hitStrikeTime = clampr(value, -1.f, 1.f); }
+    void SetStabStrikeTime(float value) { m_stabStrikeTime = clampr(value, -1.f, 1.f); }
+    void ResetStrikeEditorValues();
 
     virtual void GetBriefInfo(xr_string& str_name, xr_string& icon_sect_name, xr_string& str_count);
 

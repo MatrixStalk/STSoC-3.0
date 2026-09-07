@@ -15,8 +15,18 @@ public:
 
     void SetAnimationAlpha(float alpha) override { m_animationAlpha = alpha; }
     float GetAnimationAlpha() const override { return m_animationAlpha; }
-    void SetAnimationOffset(float x, float y) override { m_animationOffset.set(x, y); }
+    void SetAnimationOffset(float x, float y) override
+    {
+        m_animationTransform.m02 += x - m_animationOffset.x;
+        m_animationTransform.m12 += y - m_animationOffset.y;
+        m_animationOffset.set(x, y);
+    }
     Fvector2 GetAnimationOffset() const override { return m_animationOffset; }
+    const SUIRenderTransform& GetAnimationTransform() const override { return m_animationTransform; }
+    void PushAnimationTransform(float alpha, float offset_x, float offset_y, float rotation, float pivot_x,
+        float pivot_y) override;
+    void PushIdentityAnimationTransform() override;
+    void PopAnimationTransform() override;
 
     virtual void SetScissor(Irect* rect = nullptr);
     virtual void GetActiveTextureResolution(Fvector2& res);
@@ -40,6 +50,19 @@ private:
 
     float m_animationAlpha{1.f};
     Fvector2 m_animationOffset;
+    SUIRenderTransform m_animationTransform;
+
+    struct SAnimationRenderState
+    {
+        float alpha;
+        Fvector2 offset;
+        SUIRenderTransform transform;
+        bool scissor_enabled;
+        Irect scissor;
+    };
+    xr_vector<SAnimationRenderState> m_animationStack;
+    bool m_animationScissorEnabled{};
+    Irect m_animationScissor{};
 
     //	Vertex buffer attributes
     u32 m_iMaxVerts;

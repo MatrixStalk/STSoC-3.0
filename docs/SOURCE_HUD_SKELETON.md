@@ -245,3 +245,19 @@ fire/action-to-idle transitions, first without a hand-pose addon and then with
 one. Also pause/unpause with an attached addon: its cached HUD visual must remain
 visible while updates are paused. Source-order checks alone do not establish that
 the reported mesh jitter is gone.
+
+## Knife hit and stab timing
+
+Knife sections can replace legacy motion marks with normalized strike times:
+
+```ini
+hit_time  = 0.42
+stab_time = 0.57
+```
+
+`hit_time` controls the primary attack (`eFire`); `stab_time` controls the
+secondary attack (`eFire2`). Values are `0..1` across the active attack-start
+animation. Omit a value or set it to `-1` to retain motion marks and the legacy
+fallback. HUD-section values override the object section. The live values,
+animation progress, reset and copy controls are available under **Knife hit / stab
+timeline** in the HUD editor. Each attack can apply damage at most once.

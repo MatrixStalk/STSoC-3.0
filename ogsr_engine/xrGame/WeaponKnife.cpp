@@ -49,6 +49,54 @@ void CWeaponKnife::Load(LPCSTR section)
         HUD_SOUND::LoadSound(section, "snd_item_on", sndItemOn);
 
     knife_material_idx = GMLib.GetMaterialIdx(KNIFE_MATERIAL_NAME);
+    ResetStrikeEditorValues();
+}
+
+float CWeaponKnife::StrikeTime(u32 state) const
+{
+    return state == eFire2 ? m_stabStrikeTime : m_hitStrikeTime;
+}
+
+float CWeaponKnife::AttackProgress() const
+{
+    if ((GetState() != eFire && GetState() != eFire2) || !m_attackStart)
+        return 0.f;
+    if (m_dwMotionEndTm <= m_dwMotionStartTm)
+        return 1.f;
+    if (Device.dwTimeGlobal <= m_dwMotionStartTm)
+        return 0.f;
+    return clampr(float(Device.dwTimeGlobal - m_dwMotionStartTm) /
+        float(m_dwMotionEndTm - m_dwMotionStartTm), 0.f, 1.f);
+}
+
+void CWeaponKnife::ResetStrikeEditorValues()
+{
+    LPCSTR section = cNameSect().c_str();
+    m_hitStrikeTime = READ_IF_EXISTS(pSettings, r_float, section, "hit_time", -1.f);
+    m_stabStrikeTime = READ_IF_EXISTS(pSettings, r_float, section, "stab_time", -1.f);
+    if (HudSection().size())
+    {
+        m_hitStrikeTime = READ_IF_EXISTS(pSettings, r_float, HudSection(), "hit_time", m_hitStrikeTime);
+        m_stabStrikeTime = READ_IF_EXISTS(pSettings, r_float, HudSection(), "stab_time", m_stabStrikeTime);
+    }
+    m_hitStrikeTime = clampr(m_hitStrikeTime, -1.f, 1.f);
+    m_stabStrikeTime = clampr(m_stabStrikeTime, -1.f, 1.f);
+}
+
+void CWeaponKnife::ApplyKnifeStrike(u32 state)
+{
+    if (m_attackStrikeApplied)
+        return;
+
+    CEntity* parent = smart_cast<CEntity*>(H_Parent());
+    if (!parent)
+        return;
+
+    Fvector position = get_LastFP();
+    Fvector direction = get_LastFD();
+    parent->g_fireParams(this, position, direction);
+    KnifeStrike(state, position, direction);
+    m_attackStrikeApplied = true;
 }
 
 void CWeaponKnife::OnStateSwitch(u32 S, u32 oldState)
@@ -167,14 +215,8 @@ void CWeaponKnife::OnMotionMark(u32 state, const motion_marks& M)
 {
     inherited::OnMotionMark(state, M);
 
-    if (H_Parent())
-    {
-        Fvector p1, d;
-        p1.set(get_LastFP());
-        d.set(get_LastFD());
-        smart_cast<CEntity*>(H_Parent())->g_fireParams(this, p1, d);
-        KnifeStrike(state, p1, d);
-    }
+    if (StrikeTime(state) < 0.f)
+        ApplyKnifeStrike(state);
 }
 
 void CWeaponKnife::OnAnimationEnd(u32 state)
@@ -187,23 +229,16 @@ void CWeaponKnife::OnAnimationEnd(u32 state)
         u32 time = 0;
         if (m_attackStart)
         {
+            if (StrikeTime(state) >= 0.f)
+                ApplyKnifeStrike(state);
             m_attackStart = false;
             if (GetState() == eFire)
                 time = PlayHUDMotion({"anim_shoot1_end", "anm_attack_end"}, false, state);
             else // eFire2
                 time = PlayHUDMotion({"anim_shoot2_end", "anm_attack2_end"}, false, state);
 
-            Fvector p1, d;
-            p1.set(get_LastFP());
-            d.set(get_LastFD());
-
-            if (H_Parent())
-                smart_cast<CEntity*>(H_Parent())->g_fireParams(this, p1, d);
-            else
-                break;
-
             if (time != 0 && !m_attackMotionMarksAvailable)
-                KnifeStrike(state, p1, d);
+                ApplyKnifeStrike(state);
         }
         if (time == 0)
         {
@@ -225,6 +260,7 @@ void CWeaponKnife::switch2_Attacking(u32 state)
     if (IsPending())
         return;
 
+    m_attackStrikeApplied = false;
     if (state == eFire)
         PlayHUDMotion({"anim_shoot1_start", "anm_attack"}, false, state);
     else // eFire2
@@ -341,6 +377,12 @@ void CWeaponKnife::DeviceUpdate()
 
 void CWeaponKnife::UpdateCL()
 {
+    if (m_attackStart && !m_attackStrikeApplied)
+    {
+        const float strike_time = StrikeTime(GetState());
+        if (strike_time >= 0.f && AttackProgress() >= strike_time)
+            ApplyKnifeStrike(GetState());
+    }
     inherited::UpdateCL();
 }
 
