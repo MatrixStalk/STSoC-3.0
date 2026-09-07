@@ -185,6 +185,7 @@ public:
     // Render separate addon models attached to weapon skeleton bones. This is
     // optional and coexists with the legacy embedded-bone addon visuals.
     void RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mode, bool ui_preview = false);
+    void PrepareHUDAddonVisuals();
 
     //для отоброажения иконок апгрейдов в интерфейсе
     int GetScopeX() { return m_iScopeX; }
@@ -315,6 +316,7 @@ private:
         // mixing matrices produced by different player_hud update passes.
         Fmatrix hud_local_transform;
         bool hud_local_transform_valid{};
+        u32 hud_render_frame{u32(-1)};
         Fvector editor_position[2]{};
         Fvector editor_rotation[2]{};
         float editor_scale[2]{1.f, 1.f};
@@ -349,6 +351,7 @@ private:
     shared_str m_hand_pose_ik_editor_preview_motion;
     bool m_sound_editor_suppresses_motion_sound{};
     void DestroyAddonVisuals();
+    void UpdateAddonVisuals(u32 context_id, IRenderable* root, bool hud_mode, bool ui_preview, bool prepare_only);
     void UpdateAddonReplacementVisibility(bool hud_mode);
     shared_str GetAddonVisualSection(u8 visual_index) const;
     LPCSTR GetAddonVisualSlotName(u8 visual_index) const;

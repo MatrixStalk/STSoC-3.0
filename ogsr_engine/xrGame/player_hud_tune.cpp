@@ -419,6 +419,19 @@ void apply_single_bone_adjustment(IKinematics* model, u16 root_bone_id, const hu
     if (!model || root_bone_id == BI_NONE || root_bone_id >= model->LL_BoneCount())
         return;
 
+    // Adjusting a parent must not restore geometry hidden by the separated
+    // hands or by a replacement addon. Match CKinematics::CLBone here.
+    auto update_render_transform = [model](u16 bone_id) {
+        CBoneInstance& bone = model->LL_GetBoneInstance(bone_id);
+        if (model->LL_GetBoneVisible(bone_id))
+            bone.mRenderTransform.mul_43(bone.mTransform, model->LL_GetData(bone_id).m2b_transform);
+        else
+        {
+            bone.mRenderTransform.scale(0.f, 0.f, 0.f);
+            bone.mRenderTransform.c = bone.mTransform.c;
+        }
+    };
+
     const u16 bone_count = model->LL_BoneCount();
     xr_vector<Fmatrix> before(bone_count);
     for (u16 bone_id = 0; bone_id < bone_count; ++bone_id)
@@ -443,7 +456,7 @@ void apply_single_bone_adjustment(IKinematics* model, u16 root_bone_id, const hu
 
     CBoneInstance& root = model->LL_GetBoneInstance(root_bone_id);
     root.mTransform.mulB_43(correction);
-    root.mRenderTransform.mul_43(root.mTransform, model->LL_GetData(root_bone_id).m2b_transform);
+    update_render_transform(root_bone_id);
 
     // CalculateBones has already evaluated the whole model. Rebuild every
     // descendant from its PRE-adjustment animated parent-local transform,
@@ -471,7 +484,7 @@ void apply_single_bone_adjustment(IKinematics* model, u16 root_bone_id, const hu
 
             CBoneInstance& bone = model->LL_GetBoneInstance(bone_id);
             bone.mTransform.mul_43(model->LL_GetBoneInstance(parent_id).mTransform, animated_local);
-            bone.mRenderTransform.mul_43(bone.mTransform, model->LL_GetData(bone_id).m2b_transform);
+            update_render_transform(bone_id);
             moved[bone_id] = 1;
             progress = true;
         }

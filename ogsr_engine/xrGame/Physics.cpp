@@ -7,6 +7,7 @@
 #include "gameobject.h"
 #include "PhysicsShellHolder.h"
 #include "PHCollideValidator.h"
+#include "clsid_game.h"
 #ifdef DEBUG
 #include "PHDebug.h"
 #endif
@@ -33,6 +34,44 @@ const dReal default_k_w = 0.05f;
 
 const dReal mass_limit = 10000.f; // some conventional value used as evaluative param (there is no code restriction on mass)
 extern const u16 max_joint_allowed_for_exeact_integration = 30;
+
+namespace
+{
+bool IsWeaponAttachmentPhysicsObject(CPhysicsShellHolder* object)
+{
+    if (!object)
+        return false;
+
+    if (object->CLS_ID == CLSID_OBJECT_W_SCOPE || object->CLS_ID == CLSID_OBJECT_W_SILENCER ||
+        object->CLS_ID == CLSID_OBJECT_W_GLAUNCHER)
+        return true;
+
+    LPCSTR section = object->cNameSect().c_str();
+    return section && section[0] && pSettings->section_exist(section) && pSettings->line_exist(section, "addon_slot");
+}
+
+bool SuppressWeaponAttachmentContact(const dxGeomUserData* first, const dxGeomUserData* second)
+{
+    CPhysicsShellHolder* first_object = first ? first->ph_ref_object : nullptr;
+    CPhysicsShellHolder* second_object = second ? second->ph_ref_object : nullptr;
+    if (!first_object || !second_object)
+        return false;
+
+    if (first_object == second_object)
+        return first_object->cast_weapon() != nullptr || IsWeaponAttachmentPhysicsObject(first_object);
+
+    const bool first_weapon = first_object->cast_weapon() != nullptr;
+    const bool second_weapon = second_object->cast_weapon() != nullptr;
+    const bool first_attachment = IsWeaponAttachmentPhysicsObject(first_object);
+    const bool second_attachment = IsWeaponAttachmentPhysicsObject(second_object);
+
+    // Weapons still collide with other weapons and every object still collides
+    // with static level geometry. Only weapon/addon and addon/addon pairs pass
+    // through one another without an ODE contact joint or impulse.
+    return (first_weapon && second_attachment) || (second_weapon && first_attachment) ||
+        (first_attachment && second_attachment);
+}
+} // namespace
 
 // base	params
 const dReal base_fixed_step = 0.02f;
@@ -128,6 +167,9 @@ IC static int CollideIntoGroup(dGeomID o1, dGeomID o2, dJointGroupID jointGroup,
         surface.bounce_vel = 1.5f; // 0.005f;
         usr_data_1 = retrieveGeomUserData(g1);
         usr_data_2 = retrieveGeomUserData(g2);
+        const bool suppress_weapon_attachment_contact = SuppressWeaponAttachmentContact(usr_data_1, usr_data_2);
+        if (suppress_weapon_attachment_contact)
+            do_collide = false;
         ///////////////////////////////////////////////////////////////////////////////////////////////////
         if (usr_data_2)
             material_idx_2 = usr_data_2->material;
@@ -228,6 +270,12 @@ IC static int CollideIntoGroup(dGeomID o1, dGeomID o2, dJointGroupID jointGroup,
         {
             usr_data_1->object_callbacks->Call(do_collide, true, c, material_1, material_2);
         }
+
+        // A callback is allowed to re-enable an ordinary contact. This filter
+        // is intentionally final: weapon/attachment pairs must have zero
+        // physical response regardless of their per-object callbacks.
+        if (suppress_weapon_attachment_contact)
+            do_collide = false;
 
         if (usr_data_2)
         {

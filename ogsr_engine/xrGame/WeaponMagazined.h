@@ -78,7 +78,7 @@ protected:
     virtual void OnShot();
     virtual void PlaySoundShot();
     virtual void PlaySound(HUD_SOUND& snd, const Fvector& position, bool overlap = false) override;
-    virtual void OnHudMotionStart(LPCSTR motion, float speed) override;
+    virtual void OnHudAnimationSoundStart(LPCSTR motion, float speed) override;
 
     virtual void OnEmptyClick();
 

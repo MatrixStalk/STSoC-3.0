@@ -12,7 +12,7 @@ tables (`13/24 - 0.1` for magazine out and `61/24 - 0.2` for magazine in):
 
 ```ini
 [wpn_example]
-snd_anm_anm_reload = wpn_example_reload_timeline
+snd_anm_reload = wpn_example_reload_timeline
 animation_sounds_replace_legacy = true
 
 [wpn_example_reload_timeline]
@@ -27,6 +27,16 @@ resolved. This makes it possible to give every concrete animation its own
 timeline. Set `animation_sounds_replace_legacy = true` to silence the old
 hard-coded action sounds on that weapon; omit it to use animation timelines as
 additional layers.
+
+The common `CHudItem` path resolves `snd_anm_*` for every HUD item, not only
+magazine-fed weapons: missiles and grenades, bolts, knives, detectors,
+artefacts, binoculars, PDAs, and derived item classes. Put the key in the HUD
+section beside the animation, or in the object's main section as a fallback.
+The suffix is the alias that actually started, including cyclic aliases. Both
+literal and normalized spellings are accepted: `anm_show` checks
+`snd_anm_anm_show` and then `snd_anm_show`; `anim_show` similarly falls back to
+`snd_anm_show`. A definition may reference another key, for example
+`snd_anm_show = snd_draw`.
 
 The old layered format remains valid:
 
@@ -46,7 +56,7 @@ time. The attachment with the greatest `sound_override_priority` wins.
 sound_override_priority = 20
 snd_reload               = mag_example_reload_override
 snd_reload_empty         = mag_example_reload_empty_override
-snd_anm_anm_reload       = mag_example_reload_override
+snd_anm_reload           = mag_example_reload_override
 
 ; LTX inheritance permits replacing one named layer only.
 [mag_example_reload_override]:wpn_example_reload_timeline
@@ -72,6 +82,41 @@ indoor_sound_check_distance     = 30.0
 The listener is considered indoors when static geometry is found above the
 muzzle within `indoor_sound_check_distance`. Missing indoor definitions fall
 back to outdoor ones.
+
+## Explosion distance and environment variants
+
+All `CExplosive` descendants (grenades, rockets, explosive props, and similar
+objects) can select an explosion definition by both listener distance and the
+presence of an acoustically solid roof above the explosion:
+
+```ini
+snd_explode                         = explosions\example
+snd_explode_close                   = explosions\example_close
+snd_explode_distant                 = explosions\example_distant
+snd_explode_far                     = explosions\example_far
+snd_explode_indoor                  = explosions\example_indoor
+snd_explode_outdoor                 = explosions\example_outdoor
+snd_explode_close_indoor            = explosions\example_close_indoor
+snd_explode_close_outdoor           = explosions\example_close_outdoor
+snd_explode_distant_indoor          = explosions\example_distant_indoor
+snd_explode_distant_outdoor         = explosions\example_distant_outdoor
+snd_explode_far_indoor              = explosions\example_far_indoor
+snd_explode_far_outdoor             = explosions\example_far_outdoor
+explosion_sound_distant_distance    = 60.0
+explosion_sound_far_distance        = 150.0
+explosion_sound_indoor_check_distance = 30.0
+```
+
+Distances below `explosion_sound_distant_distance` use `close`; distances from
+that threshold up to `explosion_sound_far_distance` use `distant`; greater
+distances use `far`. The far threshold is clamped to be no smaller than the
+distant threshold when both are enabled. Set a threshold to `0` to disable that
+band. At far range, missing far definitions additionally fall back to their
+distant equivalents, preserving older configurations.
+
+The most specific available definition wins. Missing combined variants fall
+back to an environment variant, then a distance variant, and finally the legacy
+`snd_explode`. Every definition accepts the same layered/timeline formats.
 
 ## ImGui tools
 

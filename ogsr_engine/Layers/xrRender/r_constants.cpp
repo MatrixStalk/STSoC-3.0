@@ -85,6 +85,7 @@ void R_constant_table::merge(const R_constant_table* T)
             R_constant_load& dL = C->get_load(src->destination);
             dL.index = sL.index;
             dL.cls = sL.cls;
+            dL.size = sL.size;
         }
     }
 

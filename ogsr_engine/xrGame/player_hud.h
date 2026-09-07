@@ -341,6 +341,7 @@ public:
     void render_item_ui();
     bool render_item_ui_query();
     bool need_renderable();
+    bool need_renderable_hands();
     void set_bone_visible(const shared_str& bone_name, BOOL bVisibility, BOOL bSilent = FALSE);
     void set_bone_visible(const xr_vector<shared_str>& bone_names, BOOL bVisibility, BOOL bSilent = FALSE);
     BOOL get_bone_visible(const shared_str& bone_name);
@@ -370,6 +371,7 @@ public:
     void load(const shared_str& model_name, bool force = false);
     void load_default() { load("actor_hud_05"); };
     void update(const Fmatrix& trans);
+    void finalize_animation_pose();
     void render_hud(u32 context_id, IRenderable* root);
     void render_item_ui();
     bool render_item_ui_query();
@@ -479,7 +481,8 @@ private:
     static void SourceBoneMergeCallback1(CBoneInstance* B);
 
     void copy_source_bone(u16 target_idx, CBoneInstance* target_bone);
-    void apply_addon_hand_pose_ik(u16 hand_idx);
+    void update_animation_pose(bool final_pose);
+    void apply_addon_hand_pose_ik(u16 hand_idx, bool update_blend);
     void clear_source_skeleton_merge();
     void refresh_source_skeleton_merge();
     void setup_thumb_callbacks();
@@ -501,6 +504,8 @@ private:
     bool m_source_skeleton_mode{};
     xr_vector<u16> m_ancors;
     attachable_hud_item* m_attached_items[2]{};
+    u32 m_update_frame{u32(-1)};
+    u32 m_final_pose_frame{u32(-1)};
     xr_vector<attachable_hud_item*> m_pool;
 };
 

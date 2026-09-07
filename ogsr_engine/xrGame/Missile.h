@@ -55,6 +55,12 @@ public:
     virtual void PlayAnimThrowEnd();
     virtual void PlayAnimDeviceSwitch() override;
     virtual void GetBriefInfo(xr_string& str_name, xr_string& icon_sect_name, xr_string& str_count);
+    virtual bool need_renderable() override
+    {
+        const u32 state = GetState();
+        return !(m_throw_act_release_time >= 0.f && m_bThrowPointUpdated && (state == eThrow || state == eThrowEnd));
+    }
+    virtual bool need_renderable_hands() override { return true; }
 
 protected:
     virtual void UpdateXForm();
@@ -113,6 +119,7 @@ protected:
     HUD_SOUND sndHide;
     HUD_SOUND sndThrowStart;
     HUD_SOUND sndThrow;
+    HUD_SOUND sndThrowAfter;
     HUD_SOUND sndThrowEnd;
 
     u32 dwUpdateSounds_Frame{};
@@ -133,8 +140,16 @@ public:
     virtual void create_physic_shell();
     IC void set_destroy_time(u32 delta_destroy_time) { m_dwDestroyTime = delta_destroy_time + Device.dwTimeGlobal; }
 
+    float ThrowActProgress() const;
+    float ThrowActReleaseTime() const { return m_throw_act_release_time; }
+    void SetThrowActReleaseTime(float value) { m_throw_act_release_time = clampr(value, -1.f, 1.f); }
+    const Fvector& ThrowPoint() const { return m_vThrowPoint; }
+    void SetThrowPoint(const Fvector& value) { m_vThrowPoint = value; }
+    void ResetThrowEditorValues();
+
 protected:
     u32 m_ef_weapon_type;
+    float m_throw_act_release_time{-1.f};
 
 public:
     virtual u32 ef_weapon_type() const;

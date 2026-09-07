@@ -12,11 +12,64 @@
 #include "../../XR_3DA/device.h"
 #include "../player_hud.h"
 #include "../Weapon.h"
+#include "../Missile.h"
 #include "../Inventory.h"
 #include "../inventory_item.h"
 
 namespace
 {
+void RenderMissileThrowEditor(CMissile* missile, float drag_intensity)
+{
+    if (!missile)
+        return;
+
+    ImGui::SeparatorText("Missile / grenade throw");
+    const float progress = missile->ThrowActProgress();
+    string64 progress_text{};
+    xr_sprintf(progress_text, "anim_throw_act: %.1f%%", progress * 100.f);
+    ImGui::ProgressBar(progress, ImVec2(-1.f, 0.f), progress_text);
+
+    float release_time = missile->ThrowActReleaseTime();
+    bool timed_release = release_time >= 0.f;
+    if (ImGui::Checkbox("Timed throw release", &timed_release))
+    {
+        release_time = timed_release ? (progress > 0.f ? progress : 0.5f) : -1.f;
+        missile->SetThrowActReleaseTime(release_time);
+    }
+    if (timed_release)
+    {
+        release_time = _max(release_time, 0.f);
+        if (ImGui::SliderFloat("Release timeline", &release_time, 0.f, 1.f, "%.4f"))
+            missile->SetThrowActReleaseTime(release_time);
+        if (ImGui::Button("Set release to current frame"))
+            missile->SetThrowActReleaseTime(progress);
+        ImGui::TextDisabled("At this point the held grenade is released and Throw() is called.");
+    }
+    else
+        ImGui::TextDisabled("Motion marks are used; without marks the grenade is released at animation end.");
+
+    Fvector throw_point = missile->ThrowPoint();
+    if (ImGui::DragFloat3("throw_point", (float*)&throw_point, drag_intensity, 0.f, 0.f, "%.6f"))
+        missile->SetThrowPoint(throw_point);
+
+    if (ImGui::Button("Reset throw values from config"))
+        missile->ResetThrowEditorValues();
+    ImGui::SameLine();
+    if (ImGui::Button("Copy throw config"))
+    {
+        const Fvector& point = missile->ThrowPoint();
+        string512 config{};
+        if (missile->ThrowActReleaseTime() >= 0.f)
+            xr_sprintf(config, "throw_point = %.6f, %.6f, %.6f\nthrow_act_release_time = %.4f", point.x, point.y, point.z,
+                missile->ThrowActReleaseTime());
+        else
+            xr_sprintf(config, "throw_point = %.6f, %.6f, %.6f\n; throw_act_release_time = 0.5", point.x, point.y, point.z);
+        ImGui::SetClipboardText(config);
+    }
+    ImGui::TextDisabled("Object section: [%s]", missile->cNameSect().c_str());
+    ImGui::TextDisabled("Timing can also be placed in HUD section: [%s]", missile->HudSection().c_str());
+}
+
 void RenderBoneAdjustments(u16 item_idx)
 {
     static shared_str selected_bone[2];
@@ -518,6 +571,7 @@ void CImGuiHudEditorWnd::Render()
     bool showSeparator = true;
     auto item = g_player_hud->attached_item(0);
     auto Wpn = smart_cast<CWeapon*>(actor->inventory().ActiveItem());
+    auto missile = smart_cast<CMissile*>(actor->inventory().ActiveItem());
 
     if (ImGui::CollapsingHeader("3D inventory icons", ImGuiTreeNodeFlags_DefaultOpen))
         RenderInventoryIconEditor(actor->inventory());
@@ -525,6 +579,9 @@ void CImGuiHudEditorWnd::Render()
     static float drag_intensity = 0.0001f;
 
     ImGui::DragFloat("Drag Intensity", &drag_intensity, 0.000001f, 0.000001f, 1.0f, "%.6f");
+
+    if (missile && ImGui::CollapsingHeader("Missile / grenade animation timeline", ImGuiTreeNodeFlags_DefaultOpen))
+        RenderMissileThrowEditor(missile, drag_intensity);
 
     if (item)
     {

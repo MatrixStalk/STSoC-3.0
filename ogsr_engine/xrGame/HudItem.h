@@ -74,7 +74,7 @@ class CHudItem : public CHUDState
 {
 protected: //чтоб нельзя было вызвать на прямую
     CHudItem();
-    virtual ~CHudItem() = default;
+    virtual ~CHudItem();
     virtual DLL_Pure* _construct();
 
     Flags16 m_huditem_flags;
@@ -171,9 +171,9 @@ public:
     u32 PlayHUDMotion_noCB(const shared_str& M, const bool bMixIn, const bool randomAnim = true, float speed = 1.f);
 
     // Called after the engine has resolved an animation fallback to the
-    // actual motion that will be played. Weapons use this for data-driven
-    // per-animation sound timelines.
-    virtual void OnHudMotionStart(LPCSTR motion, float speed) {}
+    // actual motion that will be played. HUD items use this for data-driven
+    // per-animation sound timelines; weapons extend it with addon overrides.
+    virtual void OnHudAnimationSoundStart(LPCSTR motion, float speed);
 
     bool AnimationExist(const char* M) const;
     void StopCurrentAnimWithoutCallback();
@@ -192,6 +192,7 @@ public:
 
     virtual void render_hud_mode(u32 context_id, IRenderable* root){};
     virtual bool need_renderable() { return true; };
+    virtual bool need_renderable_hands() { return need_renderable(); };
     virtual void render_item_3d_ui() {}
     virtual bool render_item_3d_ui_query() { return false; }
     virtual bool CheckCompatibility(CHudItem*) { return true; }
@@ -310,6 +311,13 @@ protected:
     virtual void DeviceUpdate(){};
 
 private:
+    xr_map<shared_str, HUD_SOUND*> m_animation_sounds;
+    u32 m_animation_sound_revision{};
+    shared_str ResolveAnimationSoundProvider(LPCSTR line) const;
+    HUD_SOUND* ResolveAnimationSound(LPCSTR line);
+    void StopAnimationSounds();
+    void ClearAnimationSounds();
+
     shared_str world_sect;
     float hud_recalc_koef{};
     void UpdateCollision(Fmatrix& trans);

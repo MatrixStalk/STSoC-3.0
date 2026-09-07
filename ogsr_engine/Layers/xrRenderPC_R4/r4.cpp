@@ -36,11 +36,10 @@ void merge_ui_model_visual_bounds(dxRender_Visual* visual, const Fmatrix& transf
     case MT_SKELETON_ANIM:
     case MT_SKELETON_RIGID: {
         auto* kinematics = smart_cast<CKinematics*>(visual);
-        // UI previews reuse the pose prepared by the game update. Forcing a
-        // bone update here can deadlock with model teardown or render workers.
-        for (dxRender_Visual* child : kinematics->children)
-            if (child && child->getRZFlag())
-                merge_ui_model_visual_bounds(child, transform, bounds);
+        xr_vector<dxRender_Visual*> children;
+        kinematics->CollectUIRenderChildren(children);
+        for (dxRender_Visual* child : children)
+            merge_ui_model_visual_bounds(child, transform, bounds);
         return;
     }
     default: break;
@@ -84,11 +83,15 @@ u32 render_ui_model_visual(CBackend& cmd_list, dxRender_Visual* visual, const Fm
     case MT_SKELETON_RIGID: {
         auto* kinematics = smart_cast<CKinematics*>(visual);
 
-        // Do not enter the skeleton update mutex from the immediate UI pass.
+        // Use the authored idle pose prepared by the game update, including
+        // its bone visibility. The immediate UI pass must not change the live
+        // pose or enter the skeleton update mutex.
         u32 rendered = 0;
-        for (dxRender_Visual* child : kinematics->children)
-            if (child && child->getRZFlag())
-                rendered += render_ui_model_visual(cmd_list, child, world, tint, scissor);
+        xr_vector<dxRender_Visual*> children;
+        kinematics->CollectUIRenderChildren(children);
+        for (dxRender_Visual* child : children)
+            rendered += render_ui_model_visual(cmd_list, child, world, tint, scissor);
+
         return rendered;
     }
     default: break;
@@ -562,6 +565,9 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
     const Fmatrix previous_world = cmd_list.xforms.m_w;
     const Fmatrix previous_view = cmd_list.xforms.m_v;
     const Fmatrix previous_projection = cmd_list.xforms.m_p;
+    const Fmatrix previous_world_old = cmd_list.xforms.m_w_old;
+    const Fmatrix previous_view_old = cmd_list.xforms.m_v_old;
+    const Fmatrix previous_projection_old = cmd_list.xforms.m_p_old;
 
     UINT previous_viewport_count = 1;
     D3D_VIEWPORT previous_viewport{};
@@ -592,6 +598,8 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
     cmd_list.SetViewport(icon_viewport);
     cmd_list.set_xform_view(view);
     cmd_list.set_xform_project(projection);
+    cmd_list.set_xform_view_old(view);
+    cmd_list.set_xform_project_old(projection);
 
     Irect scissor;
     scissor.x1 = iFloor(viewport_rect.x1);
@@ -599,6 +607,8 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
     scissor.x2 = iCeil(viewport_rect.x2);
     scissor.y2 = iCeil(viewport_rect.y2);
 
+    const bool previous_ui_model_rendering = cmd_list.is_ui_model_rendering;
+    cmd_list.is_ui_model_rendering = true;
     u32 rendered = 0;
     for (u32 i = 0; i < ui_model_submissions.size(); ++i)
     {
@@ -606,6 +616,7 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
         world.mul_43(preview_transform, local_transforms[i]);
         rendered += render_ui_model_visual(cmd_list, ui_model_submissions[i].visual, world, params.tint, scissor);
     }
+    cmd_list.is_ui_model_rendering = previous_ui_model_rendering;
 
     if (previous_scissor_count)
     {
@@ -625,9 +636,11 @@ bool CRender::RenderUIModel(IRenderable* object, const SUIModelRenderParams& par
     if (previous_viewport_count)
         HW.get_context(cmd_list.context_id)->RSSetViewports(previous_viewport_count, &previous_viewport);
     cmd_list.set_xform_world(previous_world);
-    cmd_list.set_xform_world_old(previous_world);
     cmd_list.set_xform_view(previous_view);
     cmd_list.set_xform_project(previous_projection);
+    cmd_list.set_xform_world_old(previous_world_old);
+    cmd_list.set_xform_view_old(previous_view_old);
+    cmd_list.set_xform_project_old(previous_projection_old);
 
     ui_model_submissions.clear();
     return rendered != 0;

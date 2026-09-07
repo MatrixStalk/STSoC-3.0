@@ -125,6 +125,9 @@ shared_str CWeaponMagazined::ResolveSoundProvider(LPCSTR line) const
     };
 
     consider(cNameSect().c_str(), true);
+    // Animation declarations live in the HUD section, so allow their
+    // snd_anm_* companions to be kept beside them as well.
+    consider(HudSection().c_str(), true);
     if (IsScopeAttached())
         consider(m_sScopeName.c_str(), false);
     if (IsSilencerAttached())
@@ -156,7 +159,52 @@ HUD_SOUND* CWeaponMagazined::ResolveSoundLine(LPCSTR line, int type)
     if (found != m_resolved_sounds.end())
         return found->second;
 
-    LPCSTR definition = pSettings->r_string(provider, line);
+    shared_str resolved_provider = provider;
+    shared_str resolved_line = line;
+    xr_vector<shared_str> aliases;
+    for (u32 depth = 0; depth != 16; ++depth)
+    {
+        LPCSTR definition = pSettings->r_string(resolved_provider, resolved_line.c_str());
+        string256 first_item;
+        _GetItem(definition, 0, first_item);
+        if (!_stricmp(first_item, "none") || !_stricmp(first_item, "false"))
+        {
+            m_resolved_sounds[cache_id] = nullptr;
+            return nullptr;
+        }
+
+        // A single config key may reference another sound definition, e.g.
+        // snd_anm_reload = snd_reload. Paths, parameterized definitions and
+        // timeline section names continue to be handled by HUD_SOUND itself.
+        if (_GetItemCount(definition) != 1 || pSettings->section_exist(first_item))
+            break;
+
+        shared_str alias_provider;
+        if (pSettings->line_exist(resolved_provider, first_item))
+            alias_provider = resolved_provider;
+        else
+            alias_provider = ResolveSoundProvider(first_item);
+        if (!alias_provider.c_str())
+            break;
+
+        string512 alias_key;
+        xr_sprintf(alias_key, "%s|%s", alias_provider.c_str(), first_item);
+        const auto cycle = std::find_if(aliases.begin(), aliases.end(), [&](const shared_str& visited) {
+            return !_stricmp(visited.c_str(), alias_key);
+        });
+        if (cycle != aliases.end())
+        {
+            Msg("! cyclic weapon sound alias [%s] -> [%s]", line, first_item);
+            m_resolved_sounds[cache_id] = nullptr;
+            return nullptr;
+        }
+
+        aliases.emplace_back(alias_key);
+        resolved_provider = alias_provider;
+        resolved_line = first_item;
+    }
+
+    LPCSTR definition = pSettings->r_string(resolved_provider, resolved_line.c_str());
     string256 first_item;
     _GetItem(definition, 0, first_item);
     if (!_stricmp(first_item, "none") || !_stricmp(first_item, "false"))
@@ -166,7 +214,12 @@ HUD_SOUND* CWeaponMagazined::ResolveSoundLine(LPCSTR line, int type)
     }
 
     HUD_SOUND* sound = xr_new<HUD_SOUND>();
-    HUD_SOUND::LoadSound(provider.c_str(), line, *sound, type);
+    HUD_SOUND::LoadSound(resolved_provider.c_str(), resolved_line.c_str(), *sound, type);
+    // Keep the requested line for cache invalidation and snd_anm_* stopping;
+    // the loaded samples may have come from a referenced legacy sound key.
+    sound->m_config_section = provider;
+    sound->m_config_line = line;
+    sound->m_config_type = type;
     m_resolved_sounds[cache_id] = sound;
     return sound;
 }
@@ -187,7 +240,7 @@ void CWeaponMagazined::PlaySound(HUD_SOUND& sound, const Fvector& position, bool
         HUD_SOUND::PlaySound(*resolved, position, CHudItem::object().H_Root(), !!GetHUDmode(), false, overlap);
 }
 
-void CWeaponMagazined::OnHudMotionStart(LPCSTR motion, float speed)
+void CWeaponMagazined::OnHudAnimationSoundStart(LPCSTR motion, float speed)
 {
     if (!motion || !motion[0])
         return;
@@ -198,7 +251,19 @@ void CWeaponMagazined::OnHudMotionStart(LPCSTR motion, float speed)
         return;
     string256 line;
     xr_sprintf(line, "snd_anm_%s", motion);
-    if (HUD_SOUND* sound = ResolveSoundLine(line, m_eSoundReload))
+    const bool literal_declared = ResolveSoundProvider(line).c_str();
+    HUD_SOUND* sound = ResolveSoundLine(line, m_eSoundReload);
+    if (!sound && !literal_declared)
+    {
+        LPCSTR normalized_motion = !_strnicmp(motion, "anm_", 4) ? motion + 4 :
+            (!_strnicmp(motion, "anim_", 5) ? motion + 5 : nullptr);
+        if (normalized_motion && normalized_motion[0])
+        {
+            xr_sprintf(line, "snd_anm_%s", normalized_motion);
+            sound = ResolveSoundLine(line, m_eSoundReload);
+        }
+    }
+    if (sound)
         HUD_SOUND::PlaySound(*sound, get_LastFP(), CHudItem::object().H_Root(), !!GetHUDmode(), false, false, speed > EPS_S ? 1.f / speed : 1.f);
 }
 
@@ -2845,6 +2910,23 @@ void CWeaponMagazined::UpdateFireModePoses(bool force)
 {
     if (!m_bHasDifferentFireModes || m_aFireModes.empty())
         return;
+
+    const bool world_transition_finished =
+        m_world_firemode_transition_end && Device.dwTimeGlobal >= m_world_firemode_transition_end;
+    if (world_transition_finished)
+    {
+        // The transition occupies the world model's base animation channel.
+        // Merely applying the selector pose on channel 1 leaves a looping
+        // firemode_* cycle (or its final frame) on the model used by 3D icons.
+        // Restore the authored world idle before layering the selector pose.
+        m_world_firemode_transition_end = 0;
+        PlayWorldIdleAnimation();
+        if (IKinematics* model = smart_cast<IKinematics*>(Visual()))
+        {
+            model->CalculateBones_Invalidate();
+            model->CalculateBones(TRUE);
+        }
+    }
 
     if (!m_world_firemode_transition_end || Device.dwTimeGlobal >= m_world_firemode_transition_end)
     {

@@ -46,16 +46,16 @@ bool DrawInventoryItem3D(CInventoryItem* item, CUIWindow* viewport, const u32 co
     params.viewport.lt.add(animation_offset);
     params.viewport.rb.add(animation_offset);
 
-    params.root_transform = game_object.renderable_WorldTransform();
-    params.use_root_transform = true;
     params.rotation.set(deg2rad(item->m_icon_3d_rotation.x), deg2rad(item->m_icon_3d_rotation.y),
         deg2rad(item->m_icon_3d_rotation.z));
     params.rotation.y += fmodf(Device.fTimeGlobal * deg2rad(item->m_icon_3d_rotation_speed), PI_MUL_2);
     params.offset = item->m_icon_3d_offset;
     params.scale = _max(item->m_icon_3d_scale, 0.05f);
-    // Attachment submissions must not change the center or fitted scale of the
-    // base item. Besides making installation look like a random rotation, using
-    // the model origin here invalidated existing inv_icon_3d_offset settings.
+    // Use the exact root transform submitted in this render pass as the local
+    // basis. The gameplay world transform can change while an item is moving
+    // between an inventory and an equipment slot, leaving the UI with a
+    // one-frame rotational delta. Attachment submissions must not change the
+    // center or fitted scale of the base item either.
     params.fit_root_visual_only = true;
 
     constexpr float byte_to_float = 1.f / 255.f;

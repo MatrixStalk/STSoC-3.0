@@ -37,6 +37,8 @@ public:
 
 private:
     virtual void Explode();
+    bool IsExplosionIndoor(const Fvector& position);
+    LPCSTR SelectExplosionSound(const Fvector& position);
 
 public:
     virtual void ExplodeParams(const Fvector& pos, const Fvector& dir);
@@ -88,6 +90,9 @@ protected:
     u16 m_iCurrentParentID;
 
     HUD_SOUND_COLLECTION_LAYERED m_layered_sounds;
+    float m_explosion_sound_distant_distance{60.f};
+    float m_explosion_sound_far_distance{150.f};
+    float m_explosion_sound_indoor_check_distance{30.f};
 
     // bool						m_bReadyToExplode;
     Fvector m_vExplodePos;

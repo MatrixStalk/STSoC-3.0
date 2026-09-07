@@ -81,6 +81,8 @@ public:
 
 public:
     R_xforms xforms;
+    // UI previews consume a prepared pose without publishing skeletal history.
+    bool is_ui_model_rendering{};
     R_hemi hemi;
     R_lod lod;
 

@@ -64,8 +64,10 @@ float4 u_position(float4 v) { return float4(v.xyz, 1.f); } // -12..+12
 #ifndef SKIN_0
 cbuffer sbones
 {
-    float4 sbones_array[128 * 3];
-    float4 sbones_array_old[128 * 3];
+    // Bone indices are byte-sized. Keep both histories large enough for the
+    // complete hardware skinning range accepted by CSkeletonX.
+    float4 sbones_array[256 * 3];
+    float4 sbones_array_old[256 * 3];
 }
 
 float3 skinning_dir(float3 dir, float3 m0, float3 m1, float3 m2)

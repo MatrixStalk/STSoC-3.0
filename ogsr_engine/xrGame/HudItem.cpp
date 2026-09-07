@@ -5,6 +5,7 @@
 
 #include "stdafx.h"
 #include "HudItem.h"
+#include "HudSound.h"
 #include "player_hud.h"
 #include "../xr_3da/gamemtllib.h"
 #include <array>
@@ -29,6 +30,138 @@ CHudItem::CHudItem()
     m_current_motion_def = nullptr;
 }
 
+CHudItem::~CHudItem() { ClearAnimationSounds(); }
+
+void CHudItem::ClearAnimationSounds()
+{
+    for (auto& [key, sound] : m_animation_sounds)
+    {
+        if (sound)
+        {
+            HUD_SOUND::DestroySound(*sound);
+            xr_delete(sound);
+        }
+    }
+    m_animation_sounds.clear();
+}
+
+shared_str CHudItem::ResolveAnimationSoundProvider(LPCSTR line) const
+{
+    if (!line || !line[0])
+        return {};
+    // snd_anm_* normally lives beside its HUD animation. Keep the object
+    // section as a fallback for HUD items whose configs are not split.
+    if (hud_sect.c_str() && pSettings->section_exist(hud_sect) && pSettings->line_exist(hud_sect, line))
+        return hud_sect;
+    if (world_sect.c_str() && pSettings->section_exist(world_sect) && pSettings->line_exist(world_sect, line))
+        return world_sect;
+    return {};
+}
+
+HUD_SOUND* CHudItem::ResolveAnimationSound(LPCSTR line)
+{
+    const u32 revision = HUD_SOUND::TimelineConfigRevision();
+    if (m_animation_sound_revision != revision)
+    {
+        ClearAnimationSounds();
+        m_animation_sound_revision = revision;
+    }
+
+    const shared_str provider = ResolveAnimationSoundProvider(line);
+    if (!provider.c_str())
+        return nullptr;
+
+    string512 cache_key;
+    xr_sprintf(cache_key, "%s|%s", provider.c_str(), line);
+    const shared_str cache_id = cache_key;
+    const auto cached = m_animation_sounds.find(cache_id);
+    if (cached != m_animation_sounds.end())
+        return cached->second;
+
+    shared_str resolved_provider = provider;
+    shared_str resolved_line = line;
+    xr_vector<shared_str> visited;
+    for (u32 depth = 0; depth != 16; ++depth)
+    {
+        LPCSTR definition = pSettings->r_string(resolved_provider, resolved_line.c_str());
+        string256 first_item;
+        _GetItem(definition, 0, first_item);
+        if (!_stricmp(first_item, "none") || !_stricmp(first_item, "false"))
+        {
+            m_animation_sounds[cache_id] = nullptr;
+            return nullptr;
+        }
+
+        // A one-token definition may reference another key. Timeline section
+        // names (including external sound_timelines.ltx sections) are left for
+        // HUD_SOUND::LoadSound to resolve.
+        if (_GetItemCount(definition) != 1 || pSettings->section_exist(first_item))
+            break;
+        const shared_str alias_provider = ResolveAnimationSoundProvider(first_item);
+        if (!alias_provider.c_str())
+            break;
+
+        string512 alias_key;
+        xr_sprintf(alias_key, "%s|%s", alias_provider.c_str(), first_item);
+        const auto cycle = std::find_if(visited.begin(), visited.end(), [&](const shared_str& value) {
+            return !_stricmp(value.c_str(), alias_key);
+        });
+        if (cycle != visited.end())
+        {
+            Msg("! cyclic HUD animation sound alias [%s] -> [%s]", line, first_item);
+            m_animation_sounds[cache_id] = nullptr;
+            return nullptr;
+        }
+        visited.emplace_back(alias_key);
+        resolved_provider = alias_provider;
+        resolved_line = first_item;
+    }
+
+    HUD_SOUND* sound = xr_new<HUD_SOUND>();
+    HUD_SOUND::LoadSound(resolved_provider.c_str(), resolved_line.c_str(), *sound, sg_SourceType);
+    sound->m_config_section = provider;
+    sound->m_config_line = line;
+    m_animation_sounds[cache_id] = sound;
+    return sound;
+}
+
+void CHudItem::OnHudAnimationSoundStart(LPCSTR motion, float speed)
+{
+    if (!motion || !motion[0])
+        return;
+
+    for (auto& [key, sound] : m_animation_sounds)
+        if (sound)
+            HUD_SOUND::StopSound(*sound);
+
+    string256 line;
+    xr_sprintf(line, "snd_anm_%s", motion);
+    const bool literal_declared = ResolveAnimationSoundProvider(line).c_str();
+    HUD_SOUND* sound = ResolveAnimationSound(line);
+    // Accept the conventional short spelling too: anm_show/anim_show map to
+    // snd_anm_show as well as the literal snd_anm_anm_show/snd_anm_anim_show.
+    if (!sound && !literal_declared)
+    {
+        LPCSTR normalized_motion = !_strnicmp(motion, "anm_", 4) ? motion + 4 :
+            (!_strnicmp(motion, "anim_", 5) ? motion + 5 : nullptr);
+        if (normalized_motion && normalized_motion[0])
+        {
+            xr_sprintf(line, "snd_anm_%s", normalized_motion);
+            sound = ResolveAnimationSound(line);
+        }
+    }
+    if (sound)
+        HUD_SOUND::PlaySound(*sound, Device.vCameraPosition, object().H_Root(), !!GetHUDmode(), false, false,
+            speed > EPS_S ? 1.f / speed : 1.f);
+}
+
+void CHudItem::StopAnimationSounds()
+{
+    for (auto& [key, sound] : m_animation_sounds)
+        if (sound)
+            HUD_SOUND::StopSound(*sound);
+}
+
 DLL_Pure* CHudItem::_construct()
 {
     m_object = smart_cast<CPhysicItem*>(this);
@@ -42,6 +175,8 @@ DLL_Pure* CHudItem::_construct()
 
 void CHudItem::Load(LPCSTR section)
 {
+    ClearAnimationSounds();
+    m_animation_sound_revision = HUD_SOUND::TimelineConfigRevision();
     world_sect = section;
 
     //загрузить hud, если он нужен
@@ -377,6 +512,7 @@ void CHudItem::OnH_B_Chield()
 void CHudItem::OnH_B_Independent(bool just_before_destroy)
 {
     StopHUDSounds();
+    StopAnimationSounds();
     UpdateXForm();
 
     m_nearwall_last_hud_fov = m_base_fov > 0.0f ? m_base_fov : psHUD_FOV_def;
@@ -384,6 +520,7 @@ void CHudItem::OnH_B_Independent(bool just_before_destroy)
 
 void CHudItem::OnH_A_Independent()
 {
+    StopAnimationSounds();
     if (HudItemData())
         g_player_hud->detach_item(this);
     StopCurrentAnimWithoutCallback();
@@ -435,10 +572,13 @@ u32 CHudItem::PlayHUDMotion(const char* M, const bool bMixIn, const u32 state, c
         m_dwMotionCurrTm = m_dwMotionStartTm;
         m_dwMotionEndTm = m_dwMotionStartTm + anim_time;
         m_startedMotionState = state;
-        OnHudMotionStart(M, speed);
     }
     else
         m_bStopAtEndAnimIsRunning = false;
+
+    // snd_anm_* belongs to the resolved alias and must also start for cyclic
+    // animations, whose motion_length intentionally returns zero.
+    OnHudAnimationSoundStart(M, speed);
 
     return anim_time;
 }
@@ -475,6 +615,7 @@ u32 CHudItem::PlayHUDMotion_noCB(const shared_str& motion_name, const bool bMixI
 
 void CHudItem::StopCurrentAnimWithoutCallback()
 {
+    StopAnimationSounds();
     m_dwMotionStartTm = 0;
     m_dwMotionEndTm = 0;
     m_dwMotionCurrTm = 0;

@@ -8,6 +8,8 @@ class CSoundRender_CoreA : public CSoundRender_Core
     typedef CSoundRender_Core inherited;
 
     FMOD::System* fmod_system{};
+    FMOD::ChannelGroup* environment_group{};
+    FMOD::DSP* environment_reverb{};
     unsigned int steam_audio_plugin{};
     unsigned int steam_audio_spatializer{};
     IPLContext steam_audio_context{};
@@ -27,6 +29,9 @@ class CSoundRender_CoreA : public CSoundRender_Core
     float default_explosion_gain{1.f};
     float default_world_gain{1.f};
     float default_hud_gain{1.f};
+    bool environment_reverb_enabled{true};
+    float environment_reverb_strength{1.25f};
+    float environment_reverb_transition{0.2f};
     float listener_shot_gain{1.10f};
     float listener_explosion_gain{1.f};
     float listener_world_gain{1.f};
@@ -42,6 +47,8 @@ class CSoundRender_CoreA : public CSoundRender_Core
     bool enumerate_devices();
     bool initialize_fmod();
     bool initialize_steam_audio();
+    bool initialize_environment_reverb();
+    void update_environment_reverb(const Fvector& position, float dt);
     void release_backend();
 
 protected:
@@ -58,6 +65,7 @@ public:
     virtual void set_listener_sound_profile(float shot_gain, float explosion_gain, float world_gain, float hud_gain) override;
 
     FMOD::System* FmodSystem() const { return fmod_system; }
+    FMOD::ChannelGroup* EnvironmentChannelGroup() const { return environment_group; }
     unsigned int SteamAudioSpatializer() const { return steam_audio_spatializer; }
     bool HrtfEnabled() const { return hrtf_enabled; }
     bool AirAbsorptionEnabled() const { return air_absorption_enabled; }

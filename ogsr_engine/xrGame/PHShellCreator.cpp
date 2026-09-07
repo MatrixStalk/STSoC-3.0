@@ -75,33 +75,24 @@ bool create_mesh_derived_shell(CPhysicsShellHolder* owner)
     }
 
     const u32 max_boxes = clampr(owner->PHAutoCollisionMaxBoxes(), 1u, 64u);
-    if (max_boxes == 1 && boxes.size() > 1)
+    if (max_boxes == 1)
     {
-        // Several overlapping geoms on one small item create competing ground
-        // contacts in ODE and make weapons/attachments sink, jump or crawl away.
-        // A single envelope is deliberately preferred for dropped inventory items.
-        Fvector bounds_min;
-        Fvector bounds_max;
-        bounds_min.set(flt_max, flt_max, flt_max);
-        bounds_max.set(-flt_max, -flt_max, -flt_max);
-        for (const SAutoCollisionBox& collision_box : boxes)
+        // Per-mesh boxes of a skeletal HUD model are not guaranteed to use the
+        // same up-to-date pose on the frame where its world shell is created.
+        // Their union can therefore contain a remote stale mesh and produce an
+        // enormous contact correction on the first ground hit. The visual's
+        // root bounds are stable and already enclose the complete world model.
+        Fobb envelope;
+        owner->Visual()->getVisData().box.get_CD(envelope.m_translate, envelope.m_halfsize);
+        envelope.m_translate.mul(scale);
+        envelope.m_halfsize.mul(scale);
+        envelope.m_rotate.identity();
+        if (_valid(envelope.m_translate) && _valid(envelope.m_halfsize) && envelope.m_halfsize.x > EPS_S &&
+            envelope.m_halfsize.y > EPS_S && envelope.m_halfsize.z > EPS_S)
         {
-            const Fvector& center = collision_box.box.m_translate;
-            const Fvector& halfsize = collision_box.box.m_halfsize;
-            bounds_min.x = _min(bounds_min.x, center.x - halfsize.x);
-            bounds_min.y = _min(bounds_min.y, center.y - halfsize.y);
-            bounds_min.z = _min(bounds_min.z, center.z - halfsize.z);
-            bounds_max.x = _max(bounds_max.x, center.x + halfsize.x);
-            bounds_max.y = _max(bounds_max.y, center.y + halfsize.y);
-            bounds_max.z = _max(bounds_max.z, center.z + halfsize.z);
+            boxes.clear();
+            boxes.push_back({envelope, envelope.m_halfsize.x * envelope.m_halfsize.y * envelope.m_halfsize.z * 8.f});
         }
-
-        SAutoCollisionBox envelope;
-        envelope.box.m_rotate.identity();
-        envelope.box.m_translate.add(bounds_min, bounds_max).mul(0.5f);
-        envelope.box.m_halfsize.sub(bounds_max, bounds_min).mul(0.5f);
-        boxes.clear();
-        boxes.push_back(envelope);
     }
     else
     {

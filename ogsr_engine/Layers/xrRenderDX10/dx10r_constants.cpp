@@ -107,6 +107,7 @@ BOOL R_constant_table::parseConstants(ID3DShaderReflectionConstantBuffer* pTable
 
             L.index = r_index;
             L.cls = r_type;
+            L.size = VarDesc.Size;
 
             table.push_back(C);
         }
@@ -119,6 +120,7 @@ BOOL R_constant_table::parseConstants(ID3DShaderReflectionConstantBuffer* pTable
 
             L.index = r_index;
             L.cls = r_type;
+            L.size = VarDesc.Size;
         }
     }
     return TRUE;

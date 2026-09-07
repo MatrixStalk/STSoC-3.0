@@ -315,7 +315,12 @@ void CSoundRender_TargetA::render()
     if (!fmod_sound)
         return;
     auto* core = static_cast<CSoundRender_CoreA*>(SoundRender);
-    if (core->FmodSystem()->playSound(fmod_sound, nullptr, true, &fmod_channel) != FMOD_OK)
+    FMOD::ChannelGroup* channel_group{};
+    if (m_pEmitter && m_pEmitter->owner_data && m_pEmitter->owner_data->s_type == st_Effect &&
+        m_pEmitter->owner_data->g_type != sg_Interface &&
+        m_pEmitter->owner_data->g_type != SOUND_TYPE_WORLD_AMBIENT)
+        channel_group = core->EnvironmentChannelGroup();
+    if (core->FmodSystem()->playSound(fmod_sound, channel_group, true, &fmod_channel) != FMOD_OK)
         return;
     attach_steam_audio();
     fill_parameters(core);

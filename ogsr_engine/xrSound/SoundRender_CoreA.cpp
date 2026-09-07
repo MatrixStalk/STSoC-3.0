@@ -3,6 +3,7 @@
 #include "soundrender_coreA.h"
 #include "soundrender_targetA.h"
 
+#include <fmod_dsp_effects.h>
 #include <fmod_errors.h>
 
 namespace
@@ -70,6 +71,9 @@ void CSoundRender_CoreA::load_settings()
     default_explosion_gain = ini.line_exist("fmod", "helmet_default_explosion_gain") ? ini.r_float("fmod", "helmet_default_explosion_gain") : default_explosion_gain;
     default_world_gain = ini.line_exist("fmod", "helmet_default_world_gain") ? ini.r_float("fmod", "helmet_default_world_gain") : default_world_gain;
     default_hud_gain = ini.line_exist("fmod", "helmet_default_hud_gain") ? ini.r_float("fmod", "helmet_default_hud_gain") : default_hud_gain;
+    environment_reverb_enabled = ini.line_exist("fmod", "environment_reverb") ? ini.r_bool("fmod", "environment_reverb") : environment_reverb_enabled;
+    environment_reverb_strength = ini.line_exist("fmod", "environment_reverb_strength") ? ini.r_float("fmod", "environment_reverb_strength") : environment_reverb_strength;
+    environment_reverb_transition = ini.line_exist("fmod", "environment_reverb_transition") ? ini.r_float("fmod", "environment_reverb_transition") : environment_reverb_transition;
 
     sample_rate = clampr(sample_rate, 22050, 192000);
     dsp_buffer_length = clampr(dsp_buffer_length, 256, 4096);
@@ -82,7 +86,79 @@ void CSoundRender_CoreA::load_settings()
     default_explosion_gain = clampr(default_explosion_gain, 0.f, 2.f);
     default_world_gain = clampr(default_world_gain, 0.f, 2.f);
     default_hud_gain = clampr(default_hud_gain, 0.f, 2.f);
+    environment_reverb_strength = clampr(environment_reverb_strength, 0.f, 4.f);
+    environment_reverb_transition = clampr(environment_reverb_transition, 0.01f, 5.f);
     set_listener_sound_profile(-1.f, -1.f, -1.f, -1.f);
+}
+
+bool CSoundRender_CoreA::initialize_environment_reverb()
+{
+    if (!environment_reverb_enabled)
+        return true;
+
+    FMOD::ChannelGroup* master{};
+    if (!fmod_ok(fmod_system->getMasterChannelGroup(&master), "getMasterChannelGroup") || !master)
+        return false;
+    if (!fmod_ok(fmod_system->createChannelGroup("environment effects", &environment_group), "createChannelGroup(environment)"))
+        return false;
+    if (!fmod_ok(master->addGroup(environment_group), "addGroup(environment)"))
+    {
+        environment_group->release();
+        environment_group = nullptr;
+        return false;
+    }
+    if (!fmod_ok(fmod_system->createDSPByType(FMOD_DSP_TYPE_SFXREVERB, &environment_reverb), "createDSP(SFX reverb)"))
+    {
+        environment_group->release();
+        environment_group = nullptr;
+        return false;
+    }
+    if (!fmod_ok(environment_group->addDSP(FMOD_CHANNELCONTROL_DSP_TAIL, environment_reverb), "addDSP(SFX reverb)"))
+    {
+        environment_reverb->release();
+        environment_reverb = nullptr;
+        environment_group->release();
+        environment_group = nullptr;
+        return false;
+    }
+
+    environment_reverb->setBypass(true);
+    return true;
+}
+
+void CSoundRender_CoreA::update_environment_reverb(const Fvector& position, float dt)
+{
+    if (!environment_reverb)
+        return;
+
+    e_target = get_environment(position);
+    if (!e_currentPaused)
+    {
+        CSoundRender_Environment previous = e_current;
+        const float factor = clampr(1.f - expf(-dt / environment_reverb_transition), 0.f, 1.f);
+        e_current.lerp(previous, *e_target, factor);
+    }
+
+    // X-Ray stores acoustic levels in millibels, while FMOD expects dB.
+    // Combining Room and Reverb restores the effective late-reflection level
+    // used by the former EAX path. The identity/outdoor environment remains
+    // fully dry and bypasses the DSP.
+    const float wet_db = clampr((e_current.Room + e_current.Reverb) * 0.01f +
+        20.f * log10f(_max(environment_reverb_strength, EPS_S)), -80.f, 10.f);
+    const bool active = environment_reverb_enabled && wet_db > -79.5f;
+    environment_reverb->setBypass(!active);
+    if (!active)
+        return;
+
+    environment_reverb->setParameterFloat(FMOD_DSP_SFXREVERB_DECAYTIME, clampr(e_current.DecayTime * 1000.f, 100.f, 20000.f));
+    environment_reverb->setParameterFloat(FMOD_DSP_SFXREVERB_EARLYDELAY, clampr(e_current.ReflectionsDelay * 1000.f, 0.f, 300.f));
+    environment_reverb->setParameterFloat(FMOD_DSP_SFXREVERB_LATEDELAY, clampr(e_current.ReverbDelay * 1000.f, 0.f, 100.f));
+    environment_reverb->setParameterFloat(FMOD_DSP_SFXREVERB_HFDECAYRATIO, clampr(e_current.DecayHFRatio * 100.f, 10.f, 100.f));
+    environment_reverb->setParameterFloat(FMOD_DSP_SFXREVERB_DIFFUSION, clampr(e_current.EnvironmentDiffusion * 100.f, 0.f, 100.f));
+    environment_reverb->setParameterFloat(FMOD_DSP_SFXREVERB_DENSITY, clampr(e_current.EnvironmentSize, 1.f, 100.f));
+    environment_reverb->setParameterFloat(FMOD_DSP_SFXREVERB_EARLYLATEMIX, 65.f);
+    environment_reverb->setParameterFloat(FMOD_DSP_SFXREVERB_WETLEVEL, wet_db);
+    environment_reverb->setParameterFloat(FMOD_DSP_SFXREVERB_DRYLEVEL, 0.f);
 }
 
 bool CSoundRender_CoreA::enumerate_devices()
@@ -195,6 +271,9 @@ bool CSoundRender_CoreA::initialize_fmod()
 
     if (!fmod_ok(fmod_system->init(psSoundTargets, FMOD_INIT_3D_RIGHTHANDED, nullptr), "System::init"))
         return false;
+    // Environmental acoustics are optional: failure to create the DSP must
+    // not disable the complete sound backend.
+    initialize_environment_reverb();
     if (!initialize_steam_audio())
         return false;
 
@@ -247,6 +326,18 @@ void CSoundRender_CoreA::set_master_volume(float volume)
 
 void CSoundRender_CoreA::release_backend()
 {
+    if (environment_reverb)
+    {
+        if (environment_group)
+            environment_group->removeDSP(environment_reverb);
+        environment_reverb->release();
+        environment_reverb = nullptr;
+    }
+    if (environment_group)
+    {
+        environment_group->release();
+        environment_group = nullptr;
+    }
     if (steam_audio_hrtf)
         iplFMODTerminate();
     if (steam_audio_hrtf)
@@ -324,4 +415,5 @@ void CSoundRender_CoreA::update_listener(const Fvector& P, const Fvector& D, con
     const FMOD_VECTOR forward = fmod_vector(D);
     const FMOD_VECTOR up = fmod_vector(N);
     fmod_system->set3DListenerAttributes(0, &position, &velocity, &forward, &up);
+    update_environment_reverb(P, dt);
 }

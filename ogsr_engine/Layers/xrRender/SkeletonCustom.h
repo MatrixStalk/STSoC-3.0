@@ -102,6 +102,7 @@ public:
     u32 dwFirstRenderFrame;
 
     void StoreVisualMatrix(const Fmatrix& world_matrix);
+    void CollectUIRenderChildren(xr_vector<dxRender_Visual*>& result) const;
 
 protected:
     class wallmark_calculate_details

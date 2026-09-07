@@ -9,6 +9,7 @@
 #include "SkeletonCustom.h"
 #include "../../xr_3da/fmesh.h"
 #include "../../xrCDB/cl_intersect.h"
+#include <atomic>
 
 //////////////////////////////////////////////////////////////////////
 // Body Part
@@ -61,8 +62,13 @@ bool fill_array(Fvector4* bones_array, CKinematics* parent, bool need_old, u32 s
 //////////////////////////////////////////////////////////////////////
 void CSkeletonX::_Render(CBackend& cmd_list, ref_geom& hGeom, u32 vCount, u32 iOffset, u32 pCount)
 {
-    Parent->StoreVisualMatrix(cmd_list.xforms.m_w);
-    cmd_list.set_xform_world_old(Parent->mOldWorldMartrix);
+    if (cmd_list.is_ui_model_rendering)
+        cmd_list.set_xform_world_old(cmd_list.xforms.m_w);
+    else
+    {
+        Parent->StoreVisualMatrix(cmd_list.xforms.m_w);
+        cmd_list.set_xform_world_old(Parent->mOldWorldMartrix);
+    }
 
     cmd_list.stat.r.s_dynamic.add(vCount);
     switch (RenderMode)
@@ -74,7 +80,8 @@ void CSkeletonX::_Render(CBackend& cmd_list, ref_geom& hGeom, u32 vCount, u32 iO
         Fmatrix W;
         W.mul_43(cmd_list.xforms.m_w, Parent->LL_GetTransform_R(u16(RMS_boneid)));
         Fmatrix O;
-        O.mul_43(cmd_list.xforms.m_w_old, Parent->LL_GetTransform_R_old(u16(RMS_boneid)));
+        O.mul_43(cmd_list.xforms.m_w_old, cmd_list.is_ui_model_rendering ?
+            Parent->LL_GetTransform_R(u16(RMS_boneid)) : Parent->LL_GetTransform_R_old(u16(RMS_boneid)));
         cmd_list.set_xform_world(W);
         cmd_list.set_xform_world_old(O);
         cmd_list.set_Geometry(hGeom);
@@ -92,12 +99,35 @@ void CSkeletonX::_Render(CBackend& cmd_list, ref_geom& hGeom, u32 vCount, u32 iO
 
         static const shared_str s_bones_array_const{"sbones_array"}, s_bones_array_const_old{"sbones_array_old"};
 
+        const auto current_palette = cmd_list.get_c(s_bones_array_const);
+        const auto previous_palette = cmd_list.get_c(s_bones_array_const_old);
+        const u32 current_bytes = current_palette && (current_palette->destination & RC_dest_vertex) ? current_palette->vs.size : 0;
+        const bool has_previous_palette = previous_palette && (previous_palette->destination & RC_dest_vertex);
+        const u32 previous_bytes = has_previous_palette ? previous_palette->vs.size : 0;
+        // AccessDirect checks the whole constant buffer, not this variable.
+        // A 255-bone upload into an older 128-bone shader overwrites the next
+        // variable (the previous pose). Validate each palette before writing.
+        // Depth/UI shaders can legitimately optimize the old palette away.
+        if (RMS_bonecount > Parent->LL_BoneCount() || current_bytes < c_bones_array_size ||
+            (has_previous_palette && previous_bytes < c_bones_array_size_old))
+        {
+            static std::atomic_bool reported{false};
+            if (!reported.exchange(true))
+                Msg("! Skinning palette mismatch for [%s]: mesh uses %u bones, skeleton has %u, shader palettes hold %u/%u bytes, need %u. "
+                    "Update gamedata/shaders/r3/skin.h together with the renderer.",
+                    Parent->dbg_name.c_str(), u32(RMS_bonecount), u32(Parent->LL_BoneCount()), current_bytes, previous_bytes, c_bones_array_size);
+            cmd_list.set_xform_world_old(Fidentity);
+            return;
+        }
+
         Fvector4* c_bones_array{};
         Fvector4* c_bones_array_old{};
         cmd_list.get_ConstantDirect(s_bones_array_const, c_bones_array_size, reinterpret_cast<void**>(&c_bones_array), nullptr, nullptr);
         cmd_list.get_ConstantDirect(s_bones_array_const_old, c_bones_array_size_old, reinterpret_cast<void**>(&c_bones_array_old), nullptr, nullptr);
 
-        if (!fill_array(c_bones_array, Parent, false, RMS_bonecount) || !fill_array(c_bones_array_old, Parent, true, RMS_bonecount))
+        const bool filled_current = fill_array(c_bones_array, Parent, false, RMS_bonecount);
+        const bool filled_previous = fill_array(c_bones_array_old, Parent, !cmd_list.is_ui_model_rendering, RMS_bonecount);
+        if (!filled_current || (!cmd_list.is_ui_model_rendering && !filled_previous))
         {
             static bool logged{}; // чтоб не спамить в лог по сто раз за кадр.
             if (!logged)

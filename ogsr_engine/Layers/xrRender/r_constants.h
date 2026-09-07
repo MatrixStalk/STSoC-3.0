@@ -69,10 +69,11 @@ struct ECORE_API R_constant_load
 {
     u16 index; // linear index (pixel)
     u16 cls; // element class
+    u32 size{}; // reflected size of this variable in bytes, not its whole cbuffer
 
     R_constant_load() : index(u16(-1)), cls(u16(-1)){};
 
-    IC BOOL equal(R_constant_load& C) const { return (index == C.index) && (cls == C.cls); }
+    IC BOOL equal(R_constant_load& C) const { return (index == C.index) && (cls == C.cls) && (size == C.size); }
 };
 
 struct ECORE_API R_constant : public xr_resource

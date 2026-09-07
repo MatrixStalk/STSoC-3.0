@@ -10,6 +10,7 @@
 #include "physic_item.h"
 #include "physicsshell.h"
 #include "xrserver_objects.h"
+#include "clsid_game.h"
 #include "../Include/xrRender/Kinematics.h"
 #include "../Include/xrRender/KinematicsAnimated.h"
 
@@ -82,13 +83,11 @@ void CPhysicItem::Load(LPCSTR section)
     }
 
     clamp(m_world_model_scale, 0.001f, 100.f);
-    // Imported HUD/world models and standalone attachments are commonly authored at a
-    // different scale. Their embedded bone shapes remain in authoring units and tend
-    // to produce tunnelling or unstable contacts, so use the scaled visual envelope
-    // unless a section explicitly opts out.
-    const bool scaled_imported_visual = !fsimilar(m_world_model_scale, 1.f);
-    m_force_auto_generated_collision = READ_IF_EXISTS(pSettings, r_bool, section, "force_auto_generated_collision",
-        m_use_hud_model_as_world || scaled_imported_visual);
+    // Authored OGF bone shapes are authoritative, including scaled/HUD-world
+    // weapons and addons. Mesh-derived collision is only a missing-shape
+    // fallback unless the section explicitly forces it.
+    m_force_auto_generated_collision =
+        READ_IF_EXISTS(pSettings, r_bool, section, "force_auto_generated_collision", false);
 }
 
 void CPhysicItem::reload(LPCSTR section) { inherited::reload(section); }
@@ -115,6 +114,18 @@ void CPhysicItem::OnH_B_Chield()
     setEnabled(FALSE);
 
     inherited::deactivate_physics_shell();
+
+    // Physics callbacks may have supplied the last world pose. Restore idle
+    // after removing them before this model becomes an inventory icon.
+    if (m_world_idle_animation_started)
+    {
+        PlayWorldIdleAnimation();
+        if (IKinematics* model = Visual() ? Visual()->dcast_PKinematics() : nullptr)
+        {
+            model->CalculateBones_Invalidate();
+            model->CalculateBones(TRUE);
+        }
+    }
 }
 
 BOOL CPhysicItem::net_Spawn(CSE_Abstract* DC)
@@ -123,6 +134,7 @@ BOOL CPhysicItem::net_Spawn(CSE_Abstract* DC)
         return (FALSE);
 
     ApplyHudWorldVisual();
+    PlayWorldIdleAnimation();
 
     smart_cast<IKinematics*>(Visual())->CalculateBones_Invalidate();
     smart_cast<IKinematics*>(Visual())->CalculateBones();
@@ -151,6 +163,13 @@ void CPhysicItem::UpdateCL()
     //	if (!xr_strcmp("bolt",cName()))
     //		Log						("--- C - CBolt",renderable.xform);
     inherited::UpdateCL();
+    if (m_world_idle_animation_started)
+    {
+        // Hidden inventory models are not visited by the world renderer. Keep
+        // their authored pose ready for icons and addon anchors as well.
+        if (IKinematics* model = Visual() ? Visual()->dcast_PKinematics() : nullptr)
+            model->CalculateBones(TRUE);
+    }
     //	if (!xr_strcmp("bolt",cName()))
     //		Log						("--- D - CBolt",renderable.xform);
 }
@@ -265,16 +284,23 @@ void CPhysicItem::ApplyHudWorldVisual()
         m_world_model_scale = READ_IF_EXISTS(pSettings, r_float, cNameSect().c_str(), "world_scaling", 1.f);
         clamp(m_world_model_scale, 0.001f, 100.f);
         m_force_auto_generated_collision = READ_IF_EXISTS(pSettings, r_bool, cNameSect().c_str(),
-            "force_auto_generated_collision", !fsimilar(m_world_model_scale, 1.f));
+            "force_auto_generated_collision", false);
         return;
     }
 
-    PlayWorldIdleAnimation();
     spatial_move();
 }
 
 void CPhysicItem::PlayWorldIdleAnimation()
 {
+    m_world_idle_animation_started = false;
+    LPCSTR section = cNameSect().c_str();
+    const bool addon = CLS_ID == CLSID_OBJECT_W_SCOPE || CLS_ID == CLSID_OBJECT_W_SILENCER ||
+        CLS_ID == CLSID_OBJECT_W_GLAUNCHER || (section && section[0] && pSettings->section_exist(section) &&
+            (pSettings->line_exist(section, "addon_slot") || pSettings->line_exist(section, "addon_class")));
+    if (!m_use_hud_model_as_world && !cast_weapon() && !addon)
+        return;
+
     IKinematicsAnimated* animated = Visual() ? Visual()->dcast_PKinematicsAnimated() : nullptr;
     if (!animated)
         return;
@@ -282,12 +308,14 @@ void CPhysicItem::PlayWorldIdleAnimation()
     const MotionID idle = animated->ID_Cycle_Safe("idle");
     if (!idle.valid())
     {
-        Msg("! [%s]: HUD world visual [%s] has no [idle] animation; bind pose will be used", cNameSect().c_str(), cNameVisual().c_str());
+        if (m_use_hud_model_as_world)
+            Msg("! [%s]: world visual [%s] has no [idle] animation", cNameSect().c_str(), cNameVisual().c_str());
         return;
     }
 
     animated->PlayCycle(idle, FALSE);
     animated->dcast_PKinematics()->CalculateBones_Invalidate();
+    m_world_idle_animation_started = true;
 }
 
 Fmatrix CPhysicItem::renderable_WorldTransform() const

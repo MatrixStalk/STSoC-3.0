@@ -22,8 +22,11 @@ class CPhysicItem : public CPhysicsShellHolder, public CPHShellSimpleCreator
     u32 m_auto_collision_max_boxes{1};
     shared_str m_hud_world_visual;
     mutable Fbox m_scaled_bounding_box;
+    bool m_world_idle_animation_started{};
 
     void ApplyHudWorldVisual();
+
+protected:
     void PlayWorldIdleAnimation();
 
 public:

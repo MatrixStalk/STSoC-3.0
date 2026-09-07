@@ -243,6 +243,7 @@ void setup_hud_blend(CBlend* blend, const motion_params& params, const float spe
     if (params.stop_at_end)
         blend->stop_at_end = TRUE;
 }
+
 } // namespace
 
 player_hud_motion* player_hud_motion_container::find_motion(const shared_str& name)
@@ -543,6 +544,7 @@ void attachable_hud_item::setup_firedeps(firedeps& fd)
 }
 
 bool attachable_hud_item::need_renderable() { return m_parent_hud_item->need_renderable(); }
+bool attachable_hud_item::need_renderable_hands() { return m_parent_hud_item->need_renderable_hands(); }
 
 void attachable_hud_item::render(u32 context_id, IRenderable* root)
 {
@@ -860,15 +862,23 @@ void attachable_hud_item::load(const shared_str& sect_name)
 void attachable_hud_item::reload_motions()
 {
     IKinematicsAnimated* animatedHudItem = smart_cast<IKinematicsAnimated*>(m_model);
-    const bool can_merge_source_skeletons = m_has_separated_hands && animatedHudItem && is_source_hud_skeleton(m_parent->Model()) &&
-        is_source_hud_skeleton(m_model);
-    m_merge_skeleton = READ_IF_EXISTS(pSettings, r_bool, m_sect_name, "skeleton_merge", can_merge_source_skeletons);
+    const bool uses_item_visual = !pSettings->line_exist(m_sect_name, "visual");
+    const bool can_merge_source_skeletons = animatedHudItem && is_source_hud_skeleton(m_parent->Model()) && is_source_hud_skeleton(m_model);
+    const bool merge_by_default = uses_item_visual && can_merge_source_skeletons;
+    m_merge_skeleton = READ_IF_EXISTS(pSettings, r_bool, m_sect_name, "skeleton_merge", merge_by_default);
 
     if (m_merge_skeleton && !can_merge_source_skeletons)
     {
         Msg("! [%s] skeleton_merge requested for incompatible HUD skeletons in section [%s]; using the legacy animation path", __FUNCTION__, m_sect_name.c_str());
         m_merge_skeleton = false;
     }
+
+    // Missiles (including grenades) traditionally use `visual` for a complete
+    // HUD model, while weapons with replaceable hands use `item_visual`.
+    // An explicitly requested Source merge turns either form into the latter:
+    // the item skeleton drives the external HUD hands and remains the rendered
+    // item. Legacy `visual` sections without skeleton_merge keep their old path.
+    m_has_separated_hands = uses_item_visual || m_merge_skeleton;
 
     m_hand_motions.load(m_has_separated_hands, m_merge_skeleton, m_parent->AnimatedModel(), animatedHudItem, m_sect_name);
 }
@@ -1089,7 +1099,6 @@ void player_hud::load(const shared_str& player_hud_sect, bool force)
 
     clear_source_skeleton_merge();
     _m_hand_motions.clear();
-
     const bool b_reload = m_model_kinematics != nullptr || m_model_2_kinematics != nullptr;
     if (m_model_kinematics)
     {
@@ -1226,8 +1235,8 @@ void player_hud::render_hud(u32 context_id, IRenderable* root)
     //if (!m_attached_items[0] && !m_attached_items[1])
     //    return;
 
-	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable()) || script_anim_part == 0 || script_anim_part == 2);
-    bool b_r1 = ((m_attached_items[1] && m_attached_items[1]->need_renderable()) || script_anim_part == 1 || script_anim_part == 2);
+	bool b_r0 = ((m_attached_items[0] && m_attached_items[0]->need_renderable_hands()) || script_anim_part == 0 || script_anim_part == 2);
+    bool b_r1 = ((m_attached_items[1] && m_attached_items[1]->need_renderable_hands()) || script_anim_part == 1 || script_anim_part == 2);
 
     if (!b_r0 && !b_r1)
         return;
@@ -1244,10 +1253,10 @@ void player_hud::render_hud(u32 context_id, IRenderable* root)
 
     if (!script_override_item) // можно скрывать предметы в руках во время скриптовой анимаии, но выглядит кривовато
     {
-        if (m_attached_items[0])
+        if (m_attached_items[0] && m_attached_items[0]->need_renderable())
             m_attached_items[0]->render(context_id, root);
 
-        if (m_attached_items[1])
+        if (m_attached_items[1] && m_attached_items[1]->need_renderable())
             m_attached_items[1]->render(context_id, root);
     }
 
@@ -1649,6 +1658,58 @@ void player_hud::update(const Fmatrix& cam_trans)
         m_transform_2.k.mul(hud_scale);
     }
 
+    update_animation_pose(false);
+
+    if (script_anim_item_attached && script_anim_item_model)
+        update_script_item();
+
+    {
+        // single hand offset smoothing + syncing back to other hand animation on end
+        if (script_anim_part != static_cast<u8>(-1))
+        {
+            if (need_update_collision_local)
+                script_anim_offset_factor += Device.fTimeDelta * 2.5f;
+
+            if (m_bStopAtEndAnimIsRunning && Device.dwTimeGlobal >= script_anim_end)
+                script_anim_stop();
+        }
+        else if (need_update_collision_local)
+            script_anim_offset_factor -= Device.fTimeDelta * 5.f;
+
+        clamp(script_anim_offset_factor, 0.f, 1.f);
+    }
+
+    if (need_update_collision_local)
+        m_update_frame = Device.dwFrame;
+}
+
+void player_hud::finalize_animation_pose()
+{
+    if (m_update_frame != Device.dwFrame || m_final_pose_frame == Device.dwFrame)
+        return;
+
+    // CObjectList updates the actor before its held items. Keep the actor's
+    // early pose for firedeps/collision, then resolve any animation or bone
+    // visibility changes made by item UpdateCL before rendering ANY HUD mesh.
+    // Do not run update() here: inertia, bobbing and collision advance there.
+    const bool has_hands = (m_attached_items[0] && m_attached_items[0]->m_has_separated_hands) ||
+        (m_attached_items[1] && m_attached_items[1]->m_has_separated_hands) || script_anim_item_model;
+    if (has_hands)
+    {
+        m_model_kinematics->CalculateBones_Invalidate();
+        m_model_kinematics->CalculateBones(TRUE);
+        m_model_2_kinematics->CalculateBones_Invalidate();
+        m_model_2_kinematics->CalculateBones(TRUE);
+    }
+
+    update_animation_pose(true);
+    if (script_anim_item_attached && script_anim_item_model)
+        update_script_item();
+    m_final_pose_frame = Device.dwFrame;
+}
+
+void player_hud::update_animation_pose(bool final_pose)
+{
     if (m_attached_items[0])
     {
         m_attached_items[0]->update(true);
@@ -1659,6 +1720,14 @@ void player_hud::update(const Fmatrix& cam_trans)
     {
         m_attached_items[1]->update(true);
         hud_apply_bone_adjustments(m_attached_items[1]->m_model, m_attached_items[1]);
+    }
+
+    if (final_pose)
+    {
+        for (attachable_hud_item* item : m_attached_items)
+            if (item && item->m_parent_hud_item)
+                if (CWeapon* weapon = smart_cast<CWeapon*>(item->m_parent_hud_item))
+                    weapon->PrepareHUDAddonVisuals();
     }
 
     // Addon hand poses live in separately rendered animated visuals, so they
@@ -1702,29 +1771,10 @@ void player_hud::update(const Fmatrix& cam_trans)
         hud_apply_bone_adjustments(m_model_2_kinematics, item, m_source_skeletons[1]);
 
     // The weapon animation remains authoritative. Addon-authored grips are
-    // applied afterwards as a weighted two-bone IK goal, so action animation
-    // motion and finger poses remain intact instead of switching skeletons.
-    apply_addon_hand_pose_ik(0);
-    apply_addon_hand_pose_ik(1);
-
-    if (script_anim_item_attached && script_anim_item_model)
-        update_script_item();
-
-    {
-        // single hand offset smoothing + syncing back to other hand animation on end
-        if (script_anim_part != static_cast<u8>(-1))
-        {
-            if (need_update_collision_local)
-                script_anim_offset_factor += Device.fTimeDelta * 2.5f;
-
-            if (m_bStopAtEndAnimIsRunning && Device.dwTimeGlobal >= script_anim_end)
-                script_anim_stop();
-        }
-        else if (need_update_collision_local)
-            script_anim_offset_factor -= Device.fTimeDelta * 5.f;
-
-        clamp(script_anim_offset_factor, 0.f, 1.f);
-    }
+    // applied afterwards; advance their blend only in the final pose, once all
+    // item state changes and addon animation selections for this frame are known.
+    apply_addon_hand_pose_ik(0, final_pose);
+    apply_addon_hand_pose_ik(1, final_pose);
 }
 
 u32 player_hud::anim_play(u16 part, const motion_params& P, const motion_descr& M, BOOL bMixIn, const CMotionDef*& md, float speed, bool hasHands,
@@ -2200,24 +2250,43 @@ void player_hud::clear_addon_hand_pose_sources(const void* owner)
     (void)changed;
 }
 
-void player_hud::apply_addon_hand_pose_ik(u16 hand_idx)
+void player_hud::apply_addon_hand_pose_ik(u16 hand_idx, bool update_blend)
 {
     if (hand_idx >= 2)
         return;
 
     float& weight = m_addon_hand_pose_weights[hand_idx];
-    const float target_weight = m_addon_hand_pose_target_weights[hand_idx];
-    const float blend_time = target_weight > weight ? m_addon_hand_pose_blend_in[hand_idx] : m_addon_hand_pose_blend_out[hand_idx];
-    const float step = Device.fTimeDelta / _max(blend_time, EPS_S);
-    if (weight < target_weight)
-        weight = _min(weight + step, target_weight);
-    else if (weight > target_weight)
-        weight = _max(weight - step, target_weight);
+    // Collision/actor updates also assemble a HUD pose. Advance the blend only
+    // in the post-object-update final pose, never once per pose calculation.
+    if (update_blend)
+    {
+        const float target_weight = m_addon_hand_pose_target_weights[hand_idx];
+        const float blend_time = target_weight > weight ? m_addon_hand_pose_blend_in[hand_idx] : m_addon_hand_pose_blend_out[hand_idx];
+        const float step = Device.fTimeDelta / _max(blend_time, EPS_S);
+        if (weight < target_weight)
+            weight = _min(weight + step, target_weight);
+        else if (weight > target_weight)
+            weight = _max(weight - step, target_weight);
+    }
 
     IKinematics* source = m_addon_hand_pose_sources[hand_idx];
     IKinematics* target = hand_idx == 0 ? m_model_kinematics : m_model_2_kinematics;
     if (!source || !target || weight <= EPS_S)
         return;
+
+    // Post-pose edits must preserve CKinematics::CLBone visibility semantics.
+    // A shared arm submesh can remain submitted because another bone is visible;
+    // restoring a hidden bone's full matrix would draw the duplicate arm too.
+    auto update_render_transform = [](IKinematics* model, u16 bone_id) {
+        CBoneInstance& bone = model->LL_GetBoneInstance(bone_id);
+        if (model->LL_GetBoneVisible(bone_id))
+            bone.mRenderTransform.mul_43(bone.mTransform, model->LL_GetData(bone_id).m2b_transform);
+        else
+        {
+            bone.mRenderTransform.scale(0.f, 0.f, 0.f);
+            bone.mRenderTransform.c = bone.mTransform.c;
+        }
+    };
 
     // ARC9 LHIK/RHIK does not solve an analytical arm chain. It evaluates a
     // hidden attachment proxy and blends the model-space matrices of matching
@@ -2258,7 +2327,7 @@ void player_hud::apply_addon_hand_pose_ik(u16 hand_idx)
         blended_position.lerp(before[target_bone_id].c, proxy_transform.c, weight);
         target_bone.mTransform.rotation(blended_rotation);
         target_bone.mTransform.c.set(blended_position);
-        target_bone.mRenderTransform.mul_43(target_bone.mTransform, target->LL_GetData(target_bone_id).m2b_transform);
+        update_render_transform(target, target_bone_id);
         moved[target_bone_id] = 1;
     }
 
@@ -2288,7 +2357,7 @@ void player_hud::apply_addon_hand_pose_ik(u16 hand_idx)
 
             CBoneInstance& bone = target->LL_GetBoneInstance(bone_id);
             bone.mTransform.mul_43(target->LL_GetBoneInstance(parent_id).mTransform, animated_local);
-            bone.mRenderTransform.mul_43(bone.mTransform, target->LL_GetData(bone_id).m2b_transform);
+            update_render_transform(target, bone_id);
             moved[bone_id] = 1;
             progressed = true;
         }
@@ -2297,13 +2366,9 @@ void player_hud::apply_addon_hand_pose_ik(u16 hand_idx)
     }
 
 
-    // The separated-hands HUD renders two copies of the same c_arms mesh and
-    // hides the opposite arm in each copy. Mixed-weight vertices can still be
-    // submitted from that hidden branch. If only the visible copy receives IK,
-    // those vertices follow the old weapon animation and appear as long black
-    // strips. Mirror the final side pose into the hidden duplicate and reset
-    // its temporal matrices so neither skinning nor motion vectors can expose
-    // the stale animation.
+    // Keep the hidden duplicate's attachment/child transforms in sync without
+    // restoring its skinned geometry. Otherwise both c_arms copies contribute
+    // overlapping arm surfaces while the addon IK weight is nonzero.
     IKinematics* duplicate = hand_idx == 0 ? m_model_2_kinematics : m_model_kinematics;
     if (duplicate && duplicate != target)
     {
@@ -2318,10 +2383,7 @@ void player_hud::apply_addon_hand_pose_ik(u16 hand_idx)
 
             CBoneInstance& duplicate_bone = duplicate->LL_GetBoneInstance(duplicate_bone_id);
             duplicate_bone.mTransform.set(target->LL_GetBoneInstance(bone_id).mTransform);
-            duplicate_bone.mRenderTransform.mul_43(
-                duplicate_bone.mTransform, duplicate->LL_GetData(duplicate_bone_id).m2b_transform);
-            duplicate_bone.mRenderTransform_old.set(duplicate_bone.mRenderTransform);
-            duplicate_bone.mRenderTransform_tmp.set(duplicate_bone.mRenderTransform);
+            update_render_transform(duplicate, duplicate_bone_id);
         }
     }
 }

@@ -56,6 +56,7 @@ CMissile::~CMissile(void)
     HUD_SOUND::DestroySound(sndHide);
     HUD_SOUND::DestroySound(sndThrowStart);
     HUD_SOUND::DestroySound(sndThrow);
+    HUD_SOUND::DestroySound(sndThrowAfter);
     HUD_SOUND::DestroySound(sndThrowEnd);
 }
 
@@ -102,6 +103,11 @@ void CMissile::Load(LPCSTR section)
     if (pSettings->line_exist(section, "snd_throw"))
         HUD_SOUND::LoadSound(section, "snd_throw", sndThrow, SOUND_TYPE_WEAPON_SHOOTING);
 
+    if (HudSection().size() && pSettings->line_exist(HudSection(), "snd_anm_throw_act_after"))
+        HUD_SOUND::LoadSound(HudSection().c_str(), "snd_anm_throw_act_after", sndThrowAfter, SOUND_TYPE_WEAPON_SHOOTING);
+    else if (pSettings->line_exist(section, "snd_anm_throw_act_after"))
+        HUD_SOUND::LoadSound(section, "snd_anm_throw_act_after", sndThrowAfter, SOUND_TYPE_WEAPON_SHOOTING);
+
     if (pSettings->line_exist(section, "snd_throw_end"))
         HUD_SOUND::LoadSound(section, "snd_throw_end", sndThrowEnd, SOUND_TYPE_WEAPON_EMPTY_CLICKING);
 
@@ -112,6 +118,7 @@ void CMissile::Load(LPCSTR section)
     m_explode_by_timer_on_safe_dist = READ_IF_EXISTS(pSettings, r_bool, section, "explode_by_timer_on_safe_dist", true);
 
     m_sThrowPointBoneName = READ_IF_EXISTS(pSettings, r_string, section, "throw_point_bone", "");
+    ResetThrowEditorValues();
 }
 
 BOOL CMissile::net_Spawn(CSE_Abstract* DC)
@@ -252,6 +259,12 @@ void CMissile::UpdateCL()
         }
     }
 
+    if (GetState() == eThrow && m_throw_act_release_time >= 0.f && !m_bThrowPointUpdated &&
+        ThrowActProgress() >= m_throw_act_release_time)
+    {
+        Throw();
+    }
+
     UpdateHUDSounds();
 }
 
@@ -324,8 +337,9 @@ void CMissile::State(u32 state, u32 oldState)
     case eThrow: {
         SetPending(TRUE);
         m_throw = false;
+        m_bThrowPointUpdated = false;
         PlayAnimThrow();
-        m_throwMotionMarksAvailable = m_current_motion_def && !m_current_motion_def->marks.empty();
+        m_throwMotionMarksAvailable = m_throw_act_release_time < 0.f && m_current_motion_def && !m_current_motion_def->marks.empty();
     }
     break;
     case eThrowEnd: {
@@ -377,7 +391,7 @@ void CMissile::PlayAnimThrowStart() {
 
 void CMissile::PlayAnimThrow() { 
     PlaySound(sndThrow, Position());
-    PlayHUDMotion({"anim_throw_act", "anm_throw"}, true, GetState()); 
+    PlayHUDMotion({"anim_throw_act", "anm_throw_act", "anm_throw"}, true, GetState());
 }
 
 void CMissile::PlayAnimThrowEnd() {
@@ -393,9 +407,6 @@ void CMissile::OnStateSwitch(u32 S, u32 oldState)
 
 void CMissile::OnAnimationEnd(u32 state)
 {
-    if (state == eThrowEnd)
-        m_bThrowPointUpdated = false;
-
     switch (state)
     {
     case eHiding: {
@@ -423,7 +434,7 @@ void CMissile::OnAnimationEnd(u32 state)
     }
     break;
     case eThrow: {
-        if (!m_throwMotionMarksAvailable)
+        if (!m_bThrowPointUpdated)
             Throw();
         SwitchState(eThrowEnd);
     }
@@ -438,11 +449,36 @@ void CMissile::OnAnimationEnd(u32 state)
 void CMissile::OnMotionMark(u32 state, const motion_marks& M)
 {
     inherited::OnMotionMark(state, M);
-    if (state == eThrow && !m_throw)
+    if (state == eThrow && !m_throw && m_throw_act_release_time < 0.f)
     {
         if (H_Parent())
             Throw();
     }
+}
+
+float CMissile::ThrowActProgress() const
+{
+    if (GetState() != eThrow)
+        return 0.f;
+    if (m_dwMotionEndTm <= m_dwMotionStartTm)
+        return 1.f;
+    if (Device.dwTimeGlobal <= m_dwMotionStartTm)
+        return 0.f;
+
+    return clampr(float(Device.dwTimeGlobal - m_dwMotionStartTm) / float(m_dwMotionEndTm - m_dwMotionStartTm), 0.f, 1.f);
+}
+
+void CMissile::ResetThrowEditorValues()
+{
+    LPCSTR section = cNameSect().c_str();
+    m_vThrowPoint = pSettings->r_fvector3(section, "throw_point");
+    m_throw_act_release_time = READ_IF_EXISTS(pSettings, r_float, section, "throw_act_release_time", -1.f);
+    if (HudSection().size())
+    {
+        if (pSettings->line_exist(HudSection(), "throw_act_release_time"))
+            m_throw_act_release_time = pSettings->r_float(HudSection(), "throw_act_release_time");
+    }
+    m_throw_act_release_time = clampr(m_throw_act_release_time, -1.f, 1.f);
 }
 
 void CMissile::UpdatePosition(const Fmatrix& trans) { XFORM().mul(trans, offset()); }
@@ -586,6 +622,11 @@ void CMissile::Throw()
         P.w_u16(u16(m_fake_missile->ID()));
         u_EventSend(P);
     }
+
+    // Unlike snd_anm_throw_act (animation start), this event is emitted only
+    // after the grenade has received its throw parameters and ownership reject
+    // has been sent. Throw() is guarded above, so the cue cannot double-play.
+    PlaySound(sndThrowAfter, Device.vCameraPosition);
 }
 
 void CMissile::OnEvent(NET_Packet& P, u16 type)
@@ -923,6 +964,7 @@ void CMissile::StopHUDSounds()
     HUD_SOUND::StopSound(sndHide);
     HUD_SOUND::StopSound(sndThrowStart);
     HUD_SOUND::StopSound(sndThrow);
+    HUD_SOUND::StopSound(sndThrowAfter);
     HUD_SOUND::StopSound(sndThrowEnd);
 
     inherited::StopHUDSounds();
@@ -954,6 +996,9 @@ bool CMissile::UpdateHUDSounds() {
     if (sndThrow.playing())
         sndThrow.set_position(play_pos);
 
+    if (sndThrowAfter.playing())
+        sndThrowAfter.set_position(play_pos);
+
     if (sndThrowEnd.playing())
         sndThrowEnd.set_position(play_pos);
 
@@ -965,10 +1010,6 @@ bool CMissile::UpdateHUDSounds() {
 //-------------------------------------------------------------------------------------
 bool CMissile::g_ThrowPointParams(Fvector& FirePos, Fvector& FireDir)
 {
-    //-- no throw bone = user old method
-    if (!m_sThrowPointBoneName.size())
-        return false;
-
     auto pActor = smart_cast<CActor*>(H_Parent());
     if (!pActor)
         return false;
@@ -976,8 +1017,15 @@ bool CMissile::g_ThrowPointParams(Fvector& FirePos, Fvector& FireDir)
     if (pActor->active_cam() != eacFirstEye)
         return false;
 
+    auto* hud_item = HudItemData();
+    if (!g_player_hud || !hud_item || !hud_item->m_model)
+        return false;
+
     //-- hand format (cop/soc)
-    const bool isCopHands = g_player_hud->Model();
+    // A named bone keeps the legacy CoP-hands lookup. Without a named bone,
+    // use the held item's root so throw_point also works for Source rigs.
+    const bool hasThrowBone = m_sThrowPointBoneName.size();
+    const bool useCopHands = hasThrowBone && g_player_hud->Model();
 
     //-- Setup debug renderer
     auto* dbg = &Level().debug_renderer();
@@ -995,15 +1043,15 @@ bool CMissile::g_ThrowPointParams(Fvector& FirePos, Fvector& FireDir)
     //-- hud model/transform
     IKinematics* hi_model;
     Fmatrix hi_trans;
-    if (isCopHands)
+    if (useCopHands)
     {
         hi_model = g_player_hud->Model();
         hi_trans = g_player_hud->XFORM();
     }
     else
     {
-        hi_model = smart_cast<IKinematics*>(g_player_hud->attached_item(0)->m_model);
-        hi_trans = g_player_hud->attached_item(0)->m_item_transform;
+        hi_model = hud_item->m_model;
+        hi_trans = hud_item->m_item_transform;
     }
 
     Fmatrix m_offset, m_trans;
@@ -1011,8 +1059,8 @@ bool CMissile::g_ThrowPointParams(Fvector& FirePos, Fvector& FireDir)
     //-- attach offset from bone
     m_offset.translate_over(m_vThrowPoint);
 
-    u16 bid = hi_model->LL_BoneID(m_sThrowPointBoneName.c_str());
-    if (bid == BI_NONE)
+    u16 bid = hasThrowBone ? hi_model->LL_BoneID(m_sThrowPointBoneName.c_str()) : hi_model->LL_GetBoneRoot();
+    if (hasThrowBone && bid == BI_NONE)
     {
         bid = hi_model->LL_GetBoneRoot();
         Msg("!![%s] Throw bone[%s] not found in [%s], choosen root[%s]", __FUNCTION__,
@@ -1041,7 +1089,13 @@ bool CMissile::g_ThrowPointParams(Fvector& FirePos, Fvector& FireDir)
     */
     rq_dir.sub(FirePos, rq_pos);
     float rq_dist = rq_dir.magnitude();
-    rq_dir.normalize();
+    if (rq_dist > EPS)
+        rq_dir.div(rq_dist);
+    else
+    {
+        dbg->SetStaticDrawFlagDefault();
+        return true;
+    }
 
     //-- debug camera and calculated FirePos
     if (psActorFlags.test(AF_THROW_DEBUG))

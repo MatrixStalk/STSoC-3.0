@@ -420,6 +420,9 @@ void CLevel::OnFrame()
 
     CImGuiEditor& editor = CImGuiEditor::Get();
     editor.ShowEditor();
+
+    if (g_player_hud && !is_removing_objects())
+        g_player_hud->finalize_animation_pose();
 }
 
 extern Flags32 dbg_net_Draw_Flags;

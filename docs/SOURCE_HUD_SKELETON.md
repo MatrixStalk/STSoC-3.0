@@ -73,6 +73,33 @@ Source rig. Set it to `false` to force the legacy separated-hands animation
 path. In merge mode the item is placed in the HUD root coordinate system; the
 `item_position` and `item_orientation` values should normally remain zero.
 
+Missile HUD sections, including grenades, may retain their traditional
+`visual` key instead of renaming it to `item_visual`. Set `skeleton_merge = true`
+explicitly in such a section to make that Source-rigged model drive the external
+HUD hands. Without the explicit option, `visual` keeps its legacy complete-model
+behavior.
+
+Grenades and other missiles may release the held object at a normalized point
+inside `anim_throw_act`/`anm_throw_act` instead of relying on an OGF motion mark:
+
+```ini
+throw_act_release_time = 0.46
+throw_point            = 0.0, 0.3, 0.2
+snd_anm_throw_act_after = weapons\grenade\release
+```
+
+`throw_act_release_time` accepts `0..1`; omit it (or use `-1`) to retain motion
+mark behavior with animation-end fallback. Both values can be changed live in
+the HUD Editor under **Missile / grenade animation timeline**. Timing in the HUD
+section overrides the object section; `throw_point` remains an object-section
+setting. If `throw_point_bone` is omitted, the point is evaluated from the active
+HUD item's root, so it also works with merged Source skeletons.
+
+`snd_anm_throw_act_after` is separate from the animation-start
+`snd_anm_throw_act` cue. It is played once from `Throw()`, after the physical
+throw parameters are captured and the ownership-reject event is sent. It
+therefore follows either the motion mark or the live release timeline exactly.
+
 Changing `visual`/`visual_2` in the active actor HUD section replaces the hands
 mesh. The weapon animations are not copied into every hands model: the item
 skeleton is the animation master, and all common `ValveBiped.Bip01_*`
@@ -166,3 +193,55 @@ hud_recoil_damping           = 0.66
 
 HUD positions use HUD metres; HUD rotation values use degrees. Set
 `cam_recoil_modern = false` in a weapon section to restore its legacy recoil.
+
+## World models, inventory previews and skinning
+
+Animated weapon and addon world models use their exported `idle` cycle,
+including models without `use_hud_model_as_world`. The cycle is selected on
+spawn/creation and re-evaluated after pickup removes physics bone callbacks.
+World addon anchors and inventory modification markers use that same evaluated
+pose. Export an `idle` cycle that assembles the model correctly; an OGF bind
+pose is not a substitute for it.
+
+World fire-mode transition animations temporarily replace that base cycle. When
+the transition ends, the engine explicitly restores `idle` before applying the
+small selector pose; otherwise the live world model used by a 3D inventory icon
+can retain or loop the full transition animation.
+
+Inventory previews consume the prepared pose and current bone visibility without
+overwriting the live skeleton or its previous-frame history. Inactive rucksack
+items retain their last evaluated idle pose. Replaced meshes are restored in the
+preview immediately after an attachment is removed, even while the item is inactive.
+
+Deploy `gamedata/shaders/r3/skin.h` together with the renderer: both bone arrays
+now hold 256 entries, covering the renderer's accepted IDs 0 through 254. An old
+128-entry shader can corrupt the adjacent previous-pose array. The renderer now
+checks the reflected array sizes before uploading and logs a `Skinning palette
+mismatch` instead of writing beyond them. Restart the game after updating the
+shader; manually deleting its shader cache is not required.
+
+Runtime regression checks after rebuilding:
+
+- Fire repeatedly with a Source weapon and a hand-pose addon, then return to
+  idle; neither hidden arm copy nor replaced weapon geometry should reappear.
+- Install/remove an attachment in the rucksack and move the weapon to/from a
+  slot; the icon must keep its assembled idle pose and show the correct parts.
+- Drop and pick up the weapon and a standalone addon; their world and inventory
+  representations must remain assembled.
+
+### HUD pose update order
+
+The actor updates before its held items. Its early HUD pose is still needed for
+collision and fire points, but it is not the final render pose: item `UpdateCL`
+can start another animation or change bone visibility afterwards. At the end of
+`CLevel::OnFrame`, after the editor update, `finalize_animation_pose` evaluates
+the item, its addon proxies and the merged hands together. This does not rerun
+inertia, recoil, bobbing or collision; the addon blend advances only at this final
+stage. HUD addon rendering only submits prepared models and transforms. World
+and inventory animation selection is unaffected by this ordering change.
+
+Runtime verification still required: with recoil disabled, test idle and repeated
+fire/action-to-idle transitions, first without a hand-pose addon and then with
+one. Also pause/unpause with an attached addon: its cached HUD visual must remain
+visible while updates are paused. Source-order checks alone do not establish that
+the reported mesh jitter is gone.

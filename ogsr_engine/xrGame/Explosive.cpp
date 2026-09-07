@@ -118,6 +118,34 @@ void CExplosive::Load(CInifile* ini, LPCSTR section)
 
     // Alundaio: LAYERED_SND_SHOOT
     m_layered_sounds.LoadSound(ini, section, "snd_explode", "sndExplode", false, m_eSoundExplode);
+    struct explosion_sound_variant
+    {
+        LPCSTR line;
+        LPCSTR alias;
+    };
+    static constexpr explosion_sound_variant variants[] = {
+        {"snd_explode_close", "sndExplodeClose"},
+        {"snd_explode_distant", "sndExplodeDistant"},
+        {"snd_explode_far", "sndExplodeFar"},
+        {"snd_explode_indoor", "sndExplodeIndoor"},
+        {"snd_explode_outdoor", "sndExplodeOutdoor"},
+        {"snd_explode_close_indoor", "sndExplodeCloseIndoor"},
+        {"snd_explode_close_outdoor", "sndExplodeCloseOutdoor"},
+        {"snd_explode_distant_indoor", "sndExplodeDistantIndoor"},
+        {"snd_explode_distant_outdoor", "sndExplodeDistantOutdoor"},
+        {"snd_explode_far_indoor", "sndExplodeFarIndoor"},
+        {"snd_explode_far_outdoor", "sndExplodeFarOutdoor"},
+    };
+    for (const explosion_sound_variant& variant : variants)
+    {
+        if (ini->line_exist(section, variant.line))
+            m_layered_sounds.LoadSound(ini, section, variant.line, variant.alias, false, m_eSoundExplode);
+    }
+    m_explosion_sound_distant_distance = READ_IF_EXISTS(ini, r_float, section, "explosion_sound_distant_distance", 60.f);
+    m_explosion_sound_far_distance = READ_IF_EXISTS(ini, r_float, section, "explosion_sound_far_distance", 150.f);
+    if (m_explosion_sound_far_distance > 0.f && m_explosion_sound_distant_distance > 0.f)
+        m_explosion_sound_far_distance = _max(m_explosion_sound_far_distance, m_explosion_sound_distant_distance);
+    m_explosion_sound_indoor_check_distance = READ_IF_EXISTS(ini, r_float, section, "explosion_sound_indoor_check_distance", 30.f);
 
     m_fExplodeDurationMax = ini->r_float(section, "explode_duration");
 
@@ -142,6 +170,89 @@ void CExplosive::Load(CInifile* ini, LPCSTR section)
     m_bDynamicParticles = FALSE;
     if (ini->line_exist(section, "dynamic_explosion_particles"))
         m_bDynamicParticles = ini->r_bool(section, "dynamic_explosion_particles");
+}
+
+bool CExplosive::IsExplosionIndoor(const Fvector& position)
+{
+    if (!g_pGameLevel || m_explosion_sound_indoor_check_distance <= 0.f)
+        return false;
+
+    Fvector up;
+    up.set(0.f, 1.f, 0.f);
+    const collide::ray_defs query(position, up, m_explosion_sound_indoor_check_distance, CDB::OPT_CULL, collide::rqtStatic);
+    collide::rq_results results;
+    bool indoor = false;
+    Level().ObjectSpace.RayQuery(
+        results, query,
+        [](collide::rq_result& result, LPVOID params) -> BOOL {
+            const CDB::TRI* triangle = Level().ObjectSpace.GetStaticTris() + result.element;
+            const SGameMtl* material = GMLib.GetMaterialByIdx(triangle->material);
+            LPCSTR material_name = material->m_Name.c_str();
+            constexpr LPCSTR foliage_prefix = "materials\\bush";
+            const bool foliage = material_name && !_strnicmp(material_name, foliage_prefix, xr_strlen(foliage_prefix));
+            const bool non_occluding = foliage || material->Flags.is(SGameMtl::flPassable) ||
+                (fsimilar(material->fVisTransparencyFactor, 1.f, EPS) && material->Flags.is(SGameMtl::flSuppressWallmarks));
+            if (non_occluding)
+                return TRUE;
+
+            *static_cast<bool*>(params) = true;
+            return FALSE;
+        },
+        &indoor, nullptr, cast_game_object());
+    return indoor;
+}
+
+LPCSTR CExplosive::SelectExplosionSound(const Fvector& position)
+{
+    enum class distance_band
+    {
+        CloseRange,
+        DistantRange,
+        FarRange
+    };
+
+    const float listener_distance = Device.vCameraPosition.distance_to(position);
+    distance_band band = distance_band::CloseRange;
+    if (m_explosion_sound_far_distance > 0.f && listener_distance >= m_explosion_sound_far_distance)
+        band = distance_band::FarRange;
+    else if (m_explosion_sound_distant_distance > 0.f && listener_distance >= m_explosion_sound_distant_distance)
+        band = distance_band::DistantRange;
+    const bool indoor = IsExplosionIndoor(position);
+
+    LPCSTR distance = "sndExplodeClose";
+    LPCSTR combined = indoor ? "sndExplodeCloseIndoor" : "sndExplodeCloseOutdoor";
+    if (band == distance_band::DistantRange)
+    {
+        distance = "sndExplodeDistant";
+        combined = indoor ? "sndExplodeDistantIndoor" : "sndExplodeDistantOutdoor";
+    }
+    else if (band == distance_band::FarRange)
+    {
+        distance = "sndExplodeFar";
+        combined = indoor ? "sndExplodeFarIndoor" : "sndExplodeFarOutdoor";
+    }
+    if (m_layered_sounds.FindSoundItem(combined, false))
+        return combined;
+
+    // Configs made before the far band existed keep their distant tails at
+    // long range when no far-specific definition was supplied.
+    if (band == distance_band::FarRange)
+    {
+        const LPCSTR distant_combined = indoor ? "sndExplodeDistantIndoor" : "sndExplodeDistantOutdoor";
+        if (m_layered_sounds.FindSoundItem(distant_combined, false))
+            return distant_combined;
+    }
+
+    const LPCSTR environment = indoor ? "sndExplodeIndoor" : "sndExplodeOutdoor";
+    if (m_layered_sounds.FindSoundItem(environment, false))
+        return environment;
+
+    if (m_layered_sounds.FindSoundItem(distance, false))
+        return distance;
+    if (band == distance_band::FarRange && m_layered_sounds.FindSoundItem("sndExplodeDistant", false))
+        return "sndExplodeDistant";
+
+    return "sndExplode";
 }
 
 void CExplosive::net_Destroy()
@@ -339,7 +450,7 @@ void CExplosive::Explode()
     //	Msg("---------CExplosive Explode [%d] frame[%d]",cast_game_object()->ID(), Device.dwFrame);
     OnBeforeExplosion();
     //играем звук взрыва
-    m_layered_sounds.PlaySound("sndExplode", pos, smart_cast<CObject*>(this), false, false, (u8)-1);
+    m_layered_sounds.PlaySound(SelectExplosionSound(pos), pos, smart_cast<CObject*>(this), false, false, (u8)-1);
 
     //показываем эффекты
 

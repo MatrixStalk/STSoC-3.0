@@ -187,10 +187,56 @@ void update_arc9_spring(Fvector& value, Fvector& velocity, Fvector& acceleration
     constexpr float settle_velocity = 0.005f;
     constexpr float state_limit = 210.f;
 
+    if (stop_at_origin)
+    {
+        // Once no recoil impulse remains, solve a critically damped return
+        // analytically. Continuing the constant-magnitude ARC9 spring here can
+        // enter a visible limit cycle around zero, especially when ProcessCam
+        // is evaluated by more than one viewport. This preserves both position
+        // and velocity at the transition but cannot generate another oscillation.
+        const float omega = _max(_max(sqrtf(_max(spring_constant, 0.f)), spring_damping * 0.5f), 1.f);
+        const float decay = expf(-omega * dt);
+        const Fvector old_value = value;
+        const Fvector old_velocity = velocity;
+        Fvector coefficient = value;
+        coefficient.mul(omega);
+        coefficient.add(velocity);
+        value.mad(coefficient, dt);
+        value.mul(decay);
+        velocity.mad(coefficient, -omega * dt);
+        velocity.mul(decay);
+        if (dt > EPS_S)
+            acceleration.sub(velocity, old_velocity).div(dt);
+        else
+            acceleration.set(0.f, 0.f, 0.f);
+
+        const auto stop_crossed_axis = [](const float previous, float& current, float& speed, float& force)
+        {
+            if ((previous > 0.f && current <= 0.f) || (previous < 0.f && current >= 0.f))
+            {
+                current = 0.f;
+                speed = 0.f;
+                force = 0.f;
+            }
+        };
+        stop_crossed_axis(old_value.x, value.x, velocity.x, acceleration.x);
+        stop_crossed_axis(old_value.y, value.y, velocity.y, acceleration.y);
+        stop_crossed_axis(old_value.z, value.z, velocity.z, acceleration.z);
+
+        if (!_valid(value) || !_valid(velocity) || !_valid(acceleration) ||
+            (value.square_magnitude() < settle_value * settle_value &&
+                velocity.square_magnitude() < settle_velocity * settle_velocity))
+        {
+            value.set(0.f, 0.f, 0.f);
+            velocity.set(0.f, 0.f, 0.f);
+            acceleration.set(0.f, 0.f, 0.f);
+        }
+        return;
+    }
+
     while (dt > 0.f)
     {
         const float step = _min(dt, 1.f / 240.f);
-        const Fvector previous_value = value;
 
         Fvector drag = velocity;
         drag.mul(-velocity.magnitude() * 0.5f);
@@ -209,26 +255,6 @@ void update_arc9_spring(Fvector& value, Fvector& velocity, Fvector& acceleration
         clamp(acceleration.z, -state_limit, state_limit);
         velocity.mad(acceleration, step);
         value.mad(velocity, step);
-
-        // Once the shot impulse has finished, an axis is returning to rest,
-        // not starting another recoil motion. Stop it on its first crossing of
-        // the neutral pose. This preserves the authored spring-driven return
-        // while preventing an under-damped spring from shaking hands forever.
-        if (stop_at_origin)
-        {
-            const auto stop_crossed_axis = [](const float previous, float& current, float& speed, float& force)
-            {
-                if ((previous > 0.f && current <= 0.f) || (previous < 0.f && current >= 0.f))
-                {
-                    current = 0.f;
-                    speed = 0.f;
-                    force = 0.f;
-                }
-            };
-            stop_crossed_axis(previous_value.x, value.x, velocity.x, acceleration.x);
-            stop_crossed_axis(previous_value.y, value.y, velocity.y, acceleration.y);
-            stop_crossed_axis(previous_value.z, value.z, velocity.z, acceleration.z);
-        }
 
         if (!_valid(value) || !_valid(velocity) || !_valid(acceleration) || value.magnitude() > state_limit || velocity.magnitude() > state_limit)
         {
@@ -315,7 +341,14 @@ BOOL CCameraShotEffector::ProcessCam(SCamEffectorInfo& info)
 {
     if (m_modern_enabled)
     {
-        UpdateModernRecoil(Device.fTimeDelta);
+        // Camera managers may evaluate this effector several times in one
+        // render frame (main view, scopes and UI previews). Advancing the same
+        // spring on every evaluation makes its damping frame-count dependent.
+        if (m_last_update_frame != Device.dwFrame)
+        {
+            UpdateModernRecoil(Device.fTimeDelta);
+            m_last_update_frame = Device.dwFrame;
+        }
 
         Fmatrix camera_basis;
         camera_basis.set(info.r, info.n, info.d, Fvector().set(0.f, 0.f, 0.f));
@@ -592,5 +625,6 @@ void CCameraShotEffector::Clear()
     m_hud_rotation_acceleration.set(0.f, 0.f, 0.f);
     m_subtle_position_impulse.set(0.f, 0.f, 0.f);
     m_subtle_rotation_impulse.set(0.f, 0.f, 0.f);
+    m_last_update_frame = u32(-1);
     m_burst_shots = 0;
 }

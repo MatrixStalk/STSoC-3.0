@@ -86,7 +86,11 @@ void CWeapon::StopShooting()
     if (m_pFlameParticles && m_pFlameParticles->IsLooped())
         StopFlameParticles();
 
-    if (!dont_interrupt_shot_anm)
+    // `dont_interrupt_shot_anm` can wait only for a motion which actually has
+    // a finite completion timer. A cyclic fire variant produces no timer; the
+    // old code then left its root-bone motion active indefinitely, until a
+    // later shot happened to replace it. Fall back to idle in that case.
+    if (!dont_interrupt_shot_anm || !m_bStopAtEndAnimIsRunning)
         SwitchState(eIdle);
 
     bWorking = false;

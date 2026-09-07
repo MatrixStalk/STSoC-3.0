@@ -376,26 +376,12 @@ void play_world_idle(IRenderVisual* visual, LPCSTR section)
     const MotionID idle = animated->ID_Cycle_Safe("idle");
     if (!idle.valid())
     {
-        Msg("! Weapon addon [%s]: HUD world visual [%s] has no [idle] animation", section, visual->getDebugName().c_str());
+        Msg("! Weapon addon [%s]: world visual [%s] has no [idle] animation", section, visual->getDebugName().c_str());
         return;
     }
 
     animated->PlayCycle(idle, FALSE);
     animated->dcast_PKinematics()->CalculateBones_Invalidate();
-}
-
-Fmatrix addon_bone_transform(IKinematics* model, const u16 bone_id, const bool bind_pose)
-{
-    if (!bind_pose)
-        return model->LL_GetTransform(bone_id);
-
-    // Separately rendered world addons are created lazily by the render path.
-    // Their runtime bone matrices may therefore still contain the previous or
-    // initial pose. Building the bind pose is deterministic and does not force
-    // CalculateBones from rendering, which can contend with render workers.
-    xr_vector<Fmatrix> bind_transforms;
-    model->LL_GetBindTransform(bind_transforms);
-    return bone_id < bind_transforms.size() ? bind_transforms[bone_id] : Fidentity;
 }
 } // namespace
 
@@ -412,6 +398,7 @@ void CWeapon::DestroyAddonVisuals()
         addon.world_reported = false;
         addon.hud_reported = false;
         addon.hud_pose_animation = nullptr;
+        addon.hud_render_frame = u32(-1);
         addon.section = nullptr;
         addon.editor_override[0] = false;
         addon.editor_override[1] = false;
@@ -484,7 +471,6 @@ void CWeapon::CollectAddonUISlots(xr_vector<SAddonUISlot>& slots) const
 
         IKinematics* attach_model = weapon_model;
         Fmatrix attach_transform = weapon_transform;
-        bool attach_model_is_addon = false;
         LPCSTR owner_section = cNameSect().c_str();
         const shared_str parent = FindAddonParentSection(section.c_str(), false);
         LPCSTR requested_parent = read_addon_parent(section.c_str(), false);
@@ -505,7 +491,6 @@ void CWeapon::CollectAddonUISlots(xr_vector<SAddonUISlot>& slots) const
                 {
                     attach_model = parent_model;
                     attach_transform = m_addon_visuals[parent_index].world_transform;
-                    attach_model_is_addon = true;
                     owner_section = parent.c_str();
                 }
                 break;
@@ -530,7 +515,7 @@ void CWeapon::CollectAddonUISlots(xr_vector<SAddonUISlot>& slots) const
         Fmatrix anchor = attach_transform;
         if (bone_id != BI_NONE)
         {
-            const Fmatrix target_bone = addon_bone_transform(attach_model, bone_id, attach_model_is_addon);
+            const Fmatrix target_bone = attach_model->LL_GetTransform(bone_id);
             anchor.mul_43(attach_transform, target_bone);
         }
 
@@ -1291,6 +1276,42 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
     if (g_pGameLevel && Level().is_removing_objects())
         return;
 
+    if (hud_mode)
+    {
+        // HUD poses are prepared after item UpdateCL. Render passes must not
+        // start proxy animations, mutate bone masks or invalidate those poses.
+        for (SAddonVisual& instance : m_addon_visuals)
+            if (instance.hud && (instance.hud_render_frame == Device.dwFrame ||
+                (Device.Paused() && instance.hud_render_frame != u32(-1))))
+                ::Render->add_Visual(context_id, root, instance.hud, instance.hud_transform);
+        return;
+    }
+    UpdateAddonVisuals(context_id, root, false, ui_preview, false);
+}
+
+void CWeapon::PrepareHUDAddonVisuals()
+{
+    for (SAddonVisual& instance : m_addon_visuals)
+        instance.hud_render_frame = u32(-1);
+
+    UpdateAddonVisuals(0, nullptr, true, false, true);
+
+    // Children can hide a parent mesh after its anchors were evaluated. Settle
+    // all visibility changes here, before either the hands or the renderer reads it.
+    for (SAddonVisual& instance : m_addon_visuals)
+        if (instance.hud && instance.hud_render_frame == Device.dwFrame)
+            if (IKinematics* model = instance.hud->dcast_PKinematics())
+            {
+                model->CalculateBones_Invalidate();
+                model->CalculateBones(TRUE);
+            }
+}
+
+void CWeapon::UpdateAddonVisuals(u32 context_id, IRenderable* root, bool hud_mode, bool ui_preview, bool prepare_only)
+{
+    if (g_pGameLevel && Level().is_removing_objects())
+        return;
+
     const bool config_hud_mode = hud_mode || (!hud_mode && UsesHudModelAsWorld());
     bool active[addon_visual_count] = {IsScopeAttached(), IsSilencerAttached(), IsGrenadeLauncherAttached()};
     shared_str sections[addon_visual_count] = {m_sScopeName, m_sSilencerName, m_sGrenadeLauncherName};
@@ -1366,6 +1387,7 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             instance.hud_reported = false;
             instance.hud_pose_animation = nullptr;
             instance.hud_local_transform_valid = false;
+            instance.hud_render_frame = u32(-1);
             instance.editor_override[0] = false;
             instance.editor_override[1] = false;
             instance.section = sections[i];
@@ -1408,7 +1430,7 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             visual_created = visual != nullptr;
             if (visual && hud_mode)
                 visual->MarkAsHot(false);
-            if (visual && addon_hud_as_world)
+            if (visual && !hud_mode)
                 play_world_idle(visual, sections[i].c_str());
         }
         if (!visual)
@@ -1595,6 +1617,14 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
                 visual_model->LL_SetBoneVisible(reticle_bone_id, reticle_visible, FALSE);
         }
 
+        if ((prepare_only || visual_created) && visual_model)
+        {
+            // HUD preparation runs before render workers and before hand merge.
+            // New world instances also need their idle before reading anchors.
+            visual_model->CalculateBones_Invalidate();
+            visual_model->CalculateBones(TRUE);
+        }
+
         // Source/ValveBiped attachment exports can contain an arm hierarchy
         // plus a separate `root` which actually owns the visible addon mesh.
         // Their model origin belongs to the animation rig, so attaching that
@@ -1613,11 +1643,10 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             result.mul_43(attach_transform, offset);
         else if (attach_space == EAddonAttachSpace::WeaponBone)
         {
-            // Attach the addon's origin directly to the current weapon-bone
-            // transform. World children use their parent's bind pose because
-            // a lazily created addon has no guaranteed runtime pose yet.
+            // Match the same evaluated pose used to render both models. Source
+            // exports may assemble the weapon in idle rather than bind pose.
             Fmatrix bone_transform;
-            const Fmatrix target_bone = addon_bone_transform(attach_model, bone_id, !hud_mode && parent_index >= 0);
+            const Fmatrix target_bone = attach_model->LL_GetTransform(bone_id);
             bone_transform.mul_43(attach_transform, target_bone);
             result.mul_43(bone_transform, offset);
 
@@ -1628,7 +1657,7 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
                 {
                     visual_bone_found = true;
                     Fmatrix inverse_visual_bone, aligned_result;
-                    const Fmatrix visual_bone = addon_bone_transform(visual_model, visual_bone_id, !hud_mode);
+                    const Fmatrix visual_bone = visual_model->LL_GetTransform(visual_bone_id);
                     inverse_visual_bone.invert(visual_bone);
                     aligned_result.mul_43(result, inverse_visual_bone);
                     result = aligned_result;
@@ -1638,7 +1667,7 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
         else
         {
             Fmatrix bone_transform;
-            const Fmatrix target_bone = addon_bone_transform(attach_model, bone_id, !hud_mode && parent_index >= 0);
+            const Fmatrix target_bone = attach_model->LL_GetTransform(bone_id);
             bone_transform.mul_43(attach_transform, target_bone);
             result.mul_43(bone_transform, offset);
 
@@ -1651,7 +1680,7 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
             {
                 visual_bone_found = true;
                 Fmatrix inverse_visual_bone, aligned_result;
-                const Fmatrix visual_bone = addon_bone_transform(visual_model, visual_bone_id, !hud_mode);
+                const Fmatrix visual_bone = visual_model->LL_GetTransform(visual_bone_id);
                 inverse_visual_bone.invert(visual_bone);
                 aligned_result.mul_43(result, inverse_visual_bone);
                 result = aligned_result;
@@ -1781,7 +1810,10 @@ void CWeapon::RenderAddonVisuals(u32 context_id, IRenderable* root, bool hud_mod
         }
         else
             instance.world_transform = result;
-        ::Render->add_Visual(context_id, root, visual, result);
+        if (prepare_only)
+            instance.hud_render_frame = Device.dwFrame;
+        else
+            ::Render->add_Visual(context_id, root, visual, result);
         processed[i] = true;
         progressed = true;
         }
@@ -2947,6 +2979,14 @@ void CWeapon::UpdateCL()
     UpdateHUDAddonsVisibility();
 
     UpdateVisualBullets();
+
+    // World addons also serve inventory previews, where the world render graph
+    // never gets a chance to advance/evaluate their idle animations.
+    for (SAddonVisual& addon : m_addon_visuals)
+    {
+        if (IKinematics* model = addon.world ? addon.world->dcast_PKinematics() : nullptr)
+            model->CalculateBones(TRUE);
+    }
 
     //подсветка от выстрела
     UpdateLight();

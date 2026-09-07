@@ -117,20 +117,49 @@ CKinematics::~CKinematics()
 
 void CKinematics::StoreVisualMatrix(const Fmatrix& world_matrix)
 {
+    // Different shadow contexts can render children of this skeleton at the
+    // same time. Publish the complete history before another child reads it.
+    // Reuse the bone-update lock so the snapshot also cannot straddle a pose
+    // calculation.
+    std::scoped_lock temporal_lock(UCalc_Mutex);
+
     if (dwFirstRenderFrame != Device.dwFrame)
     {
-        dwFirstRenderFrame = Device.dwFrame;
-        mOldWorldMartrix.set(mOldWorldMartrixTmp);
+        const bool first_render = dwFirstRenderFrame == static_cast<u32>(-1);
+        mOldWorldMartrix.set(first_render ? world_matrix : mOldWorldMartrixTmp);
         mOldWorldMartrixTmp.set(world_matrix);
 
         for (u16 i = 0; i < LL_BoneCount(); ++i)
         {
             auto& Bi = LL_GetBoneInstance(i);
 
-            Bi.mRenderTransform_old.set(Bi.mRenderTransform_tmp);
+            Bi.mRenderTransform_old.set(first_render ? Bi.mRenderTransform : Bi.mRenderTransform_tmp);
             Bi.mRenderTransform_tmp.set(Bi.mRenderTransform);
         }
+
+        dwFirstRenderFrame = Device.dwFrame;
     }
+}
+
+void CKinematics::CollectUIRenderChildren(xr_vector<dxRender_Visual*>& result) const
+{
+    // Inventory items may be inactive. Showing a replacement bone updates its
+    // matrix immediately, but its mesh stays in children_invisible until the
+    // next CalculateBones. Query both lists against the current bone mask so
+    // UI rendering needs neither an animation update nor a visibility mutation.
+    result.clear();
+    const auto collect = [&result](const xr_vector<dxRender_Visual*>& source) {
+        for (dxRender_Visual* visual : source)
+        {
+            if (!visual || !visual->getRZFlag())
+                continue;
+            CSkeletonX* mesh = smart_cast<CSkeletonX*>(visual);
+            if (!mesh || mesh->has_visible_bones())
+                result.push_back(visual);
+        }
+    };
+    collect(children);
+    collect(children_invisible);
 }
 
 void CKinematics::IBoneInstances_Create()

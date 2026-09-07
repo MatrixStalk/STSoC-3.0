@@ -73,6 +73,7 @@ protected:
     Fvector m_subtle_position_impulse{};
     Fvector m_subtle_rotation_impulse{};
     float m_last_shot_time{-1000.f};
+    u32 m_last_update_frame{u32(-1)};
     u32 m_burst_shots{};
 
     void UpdateModernRecoil(float dt);
