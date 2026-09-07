@@ -113,7 +113,17 @@ bool CLevel::net_start2()
 {
     if (net_start_result_total && m_caServerOptions.size())
     {
-        if ((m_connect_server_err = Server->Connect(m_caServerOptions)) != xrServer::ErrNoError)
+        if (!m_serverConnectTask.valid())
+        {
+            m_serverConnectTask = std::async(std::launch::async, [this] { return Server->Connect(m_caServerOptions); });
+            return false;
+        }
+
+        if (m_serverConnectTask.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+            return false;
+
+        m_connect_server_err = m_serverConnectTask.get();
+        if (m_connect_server_err != xrServer::ErrNoError)
         {
             net_start_result_total = false;
             Msg("! Failed to start server.");

@@ -49,6 +49,14 @@ bool CLevel::net_start_client3()
 {
     if (connected_to_server)
     {
+        if (m_asyncLevelLoadStarted)
+        {
+            if (!ContinueAsyncLoad())
+                return false;
+            m_asyncLevelLoadStarted = false;
+            return true;
+        }
+
         LPCSTR level_name = name().c_str();
 
         // Determine internal level-ID
@@ -63,8 +71,9 @@ bool CLevel::net_start_client3()
             return false;
         }
         m_name = level_name;
-        // Load level
-        R_ASSERT2(Load(level_id), "Loading failed.");
+        BeginAsyncLoad(level_id);
+        m_asyncLevelLoadStarted = true;
+        return false;
     }
     return true;
 }
@@ -73,27 +82,32 @@ bool CLevel::net_start_client4()
 {
     if (connected_to_server)
     {
-        // Begin spawn
-        g_pGamePersistent->LoadTitle("st_client_spawning");
+        if (!m_clientSpawnInitialized)
+        {
+            // Begin spawn
+            g_pGamePersistent->LoadTitle("st_client_spawning");
 
-        // Send physics to single or multithreaded mode
-        LoadPhysicsGameParams();
-        ph_world = xr_new<CPHWorld>();
-        ph_world->Create();
+            // Send physics to single or multithreaded mode
+            LoadPhysicsGameParams();
+            ph_world = xr_new<CPHWorld>();
+            ph_world->Create();
 
-        // Send network to single or multithreaded mode
-        // *note: release version always has "mt_*" enabled
-        Device.seqFrameMT.Remove(g_pNetProcessor);
-        Device.seqFrame.Remove(g_pNetProcessor);
-        Device.seqFrameMT.Add(g_pNetProcessor, REG_PRIORITY_HIGH + 2);
+            // Send network to single or multithreaded mode
+            // *note: release version always has "mt_*" enabled
+            Device.seqFrameMT.Remove(g_pNetProcessor);
+            Device.seqFrame.Remove(g_pNetProcessor);
+            Device.seqFrameMT.Add(g_pNetProcessor, REG_PRIORITY_HIGH + 2);
+            m_clientSpawnInitialized = true;
+        }
 
-        while (!game_configured)
+        if (!game_configured)
         {
             ClientReceive();
             if (Server)
                 Server->Update();
-            Sleep(5);
+            return false;
         }
+        m_clientSpawnInitialized = false;
     }
     return true;
 }

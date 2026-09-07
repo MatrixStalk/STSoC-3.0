@@ -108,6 +108,9 @@ public:
 private:
     CObject* pCurrentControlEntity;
     xrServer::EConnect m_connect_server_err;
+    std::future<xrServer::EConnect> m_serverConnectTask;
+    bool m_asyncLevelLoadStarted{};
+    bool m_clientSpawnInitialized{};
 
 public:
     CObject* CurrentControlEntity(void) const { return pCurrentControlEntity; }

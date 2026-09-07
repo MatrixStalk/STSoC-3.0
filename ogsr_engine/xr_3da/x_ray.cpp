@@ -477,6 +477,9 @@ CApplication::CApplication() : loadingScreen(nullptr)
 
 CApplication::~CApplication()
 {
+    xr_free(m_startServerOptions);
+    xr_free(m_startClientOptions);
+
     Console->Hide();
 
     Device.seqFrame.Remove(this);
@@ -500,26 +503,18 @@ void CApplication::OnEvent(EVENT E, u64 P1, u64 P2)
     }
     else if (E == eStart)
     {
-        LPSTR op_server = LPSTR(P1);
-        LPSTR op_client = LPSTR(P2);
         R_ASSERT(0 == g_pGameLevel);
         R_ASSERT(g_pGamePersistent);
+        R_ASSERT(!m_startServerOptions && !m_startClientOptions);
 
-        {
-            Console->Execute("main_menu off");
-            Console->Hide();
-            
-            g_pGamePersistent->PreStart(op_server);
-            
-            g_pGameLevel = (IGame_Level*)NEW_INSTANCE(CLSID_GAME_LEVEL);
-
-            pApp->LoadBegin();
-            g_pGamePersistent->Start(op_server);
-            g_pGameLevel->net_Start(op_server, op_client);
-            pApp->LoadEnd();
-        }
-        xr_free(op_server);
-        xr_free(op_client);
+        m_startServerOptions = LPSTR(P1);
+        m_startClientOptions = LPSTR(P2);
+        LoadBegin();
+        // PreStart installs the loading screen before on_idle tries to draw it.
+        g_pGamePersistent->PreStart(m_startServerOptions);
+        g_loading_events.push_back(fastdelegate::MakeDelegate(this, &CApplication::StartGamePrepare));
+        g_loading_events.push_back(fastdelegate::MakeDelegate(this, &CApplication::StartGameCreateLevel));
+        g_loading_events.push_back(fastdelegate::MakeDelegate(this, &CApplication::StartGameConnect));
     }
     else if (E == eDisconnect)
     {
@@ -541,6 +536,29 @@ void CApplication::OnEvent(EVENT E, u64 P1, u64 P2)
 
         g_pGamePersistent->Disconnect();
     }
+}
+
+bool CApplication::StartGamePrepare()
+{
+    Console->Execute("main_menu off");
+    Console->Hide();
+    return true;
+}
+
+bool CApplication::StartGameCreateLevel()
+{
+    g_pGameLevel = (IGame_Level*)NEW_INSTANCE(CLSID_GAME_LEVEL);
+    return true;
+}
+
+bool CApplication::StartGameConnect()
+{
+    g_pGamePersistent->Start(m_startServerOptions);
+    g_pGameLevel->net_Start(m_startServerOptions, m_startClientOptions);
+    LoadEnd();
+    xr_free(m_startServerOptions);
+    xr_free(m_startClientOptions);
+    return true;
 }
 
 static CTimer phase_timer;
@@ -618,7 +636,10 @@ void CApplication::LoadStage()
     Msg("* phase cmem: %d K", Memory.mem_usage() / 1024);
 
 
-    LoadDraw();
+    // Background stages publish progress here. Device access stays on the
+    // main thread, which keeps the loading UI render path race-free.
+    if (Device.OnMainThread())
+        LoadDraw();
 
     ++load_stage;
     // Msg("--LoadStage is [%d]", load_stage);
@@ -813,7 +834,7 @@ void CApplication::load_draw_internal() const
     if (use_reshade)
         render_reshade_effects();
 
-    loadingScreen->Update(load_stage, max_load_stage);
+    loadingScreen->Update(load_stage.load(std::memory_order_relaxed), max_load_stage.load(std::memory_order_relaxed));
 }
 
 bool CApplication::CheckCsCopMode()

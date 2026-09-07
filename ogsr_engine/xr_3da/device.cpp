@@ -229,6 +229,8 @@ void CRenderDevice::on_idle()
 
     if (!g_loading_events.empty())
     {
+        FrameMoveLoading();
+
         if (g_loading_events.front()())
             g_loading_events.pop_front();
 
@@ -507,6 +509,24 @@ void CRenderDevice::FrameMove()
     Device.seqFrame.Process(rp_Frame);
 
     Statistic->EngineTOTAL.End();
+}
+
+void CRenderDevice::FrameMoveLoading()
+{
+    dwFrame++;
+
+    const u32 old_continual = dwTimeContinual;
+    dwTimeContinual = TimerMM.GetElapsed_ms() - app_inactive_time;
+    dwTimeDeltaContinual = dwTimeContinual - old_continual;
+
+    fTimeDeltaReal = Timer.GetElapsed_sec();
+    fTimeDeltaRealMS = static_cast<float>(Timer.GetElapsed_ms());
+    if (!_valid(fTimeDeltaReal))
+        fTimeDeltaReal = EPS_S + EPS_S;
+    Timer.Start();
+
+    // Loading UI time must keep moving even when gameplay timers are paused.
+    fTimeDelta = clampr(fTimeDeltaReal, EPS_S + EPS_S, .1f);
 }
 
 ENGINE_API BOOL bShowPauseString = TRUE;

@@ -32,6 +32,19 @@ protected:
     // temporary
     xr_vector<ISpatial*> snd_ER;
 
+    enum class EAsyncLoadStage : u8
+    {
+        Idle,
+        Opening,
+        Collision,
+        WaitCollision,
+        Render,
+        Objects
+    };
+    EAsyncLoadStage m_asyncLoadStage{EAsyncLoadStage::Idle};
+    IReader* m_asyncLevelStream{};
+    std::future<void> m_asyncCollisionTask;
+
 public:
     CObjectList Objects;
     CObjectSpace ObjectSpace;
@@ -64,6 +77,8 @@ public:
     virtual void net_Update() = 0;
 
     virtual BOOL Load(u32 dwNum);
+    void BeginAsyncLoad(u32 dwNum);
+    bool ContinueAsyncLoad();
     virtual BOOL Load_GameSpecific_Before() { return TRUE; }; // before object loading
     virtual BOOL Load_GameSpecific_After() { return TRUE; }; // after object loading
     virtual void Load_GameSpecific_CFORM(CDB::TRI* T, const size_t count) = 0;

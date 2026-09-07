@@ -21,10 +21,17 @@ class ENGINE_API CApplication : public pureFrame, public IEventReceiver
     EVENT eStart;
     EVENT eDisconnect;
 
+    LPSTR m_startServerOptions{};
+    LPSTR m_startClientOptions{};
+
+    bool StartGamePrepare();
+    bool StartGameCreateLevel();
+    bool StartGameConnect();
+
     void Level_Append(LPCSTR lname);
 
-    int load_stage;
-    int max_load_stage;
+    std::atomic_int load_stage;
+    std::atomic_int max_load_stage;
 
 public:
     // Levels

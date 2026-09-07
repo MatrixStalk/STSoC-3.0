@@ -12,6 +12,8 @@
 #include "..\xr_3da\x_ray.h"
 #include "ui/UILoadingScreen.h"
 #include "Actor_Flags.h"
+#include "../xr_3da/device.h"
+#include "level.h"
 
 game_sv_Single::game_sv_Single()
 {
@@ -19,7 +21,18 @@ game_sv_Single::game_sv_Single()
     m_type = GAME_SINGLE;
 };
 
-game_sv_Single::~game_sv_Single() { delete_data(m_alife_simulator); }
+game_sv_Single::~game_sv_Single()
+{
+    if (m_restart_task.valid())
+    {
+        CALifeSimulator* pending = m_restart_task.get();
+        if (!m_alife_simulator)
+            m_alife_simulator = pending;
+        else
+            xr_delete(pending);
+    }
+    delete_data(m_alife_simulator);
+}
 
 void game_sv_Single::Create(shared_str& options)
 {
@@ -310,22 +323,40 @@ void game_sv_Single::restart_simulator(LPCSTR saved_game_name)
 {
     // это загрузка сохранения на этом же уровне - загрузка quick save
 
-    shared_str& options = *alife().server_command_line();
+    m_restart_options = *alife().server_command_line();
+    m_restart_saved_name = saved_game_name;
 
+    pApp->SetLoadingScreen(xr_new<UILoadingScreen>());
+    pApp->LoadBegin(true);
+    g_loading_events.push_back(fastdelegate::MakeDelegate(this, &game_sv_Single::prepare_restart_simulator));
+}
+
+bool game_sv_Single::prepare_restart_simulator()
+{
+    Level().remove_objects();
     delete_data(m_alife_simulator);
     server().clear_ids();
     Memory.mem_compact();
 
-    strcpy_s(g_pGamePersistent->m_game_params.m_game_or_spawn, saved_game_name);
+    strcpy_s(g_pGamePersistent->m_game_params.m_game_or_spawn, m_restart_saved_name.c_str());
     strcpy_s(g_pGamePersistent->m_game_params.m_new_or_load, "load");
 
-    pApp->SetLoadingScreen(xr_new<UILoadingScreen>());
-    pApp->LoadBegin(true);
+    m_restart_task = std::async(
+        std::launch::async, [this] { return xr_new<CALifeSimulator>(&server(), &m_restart_options); });
+    g_loading_events.push_back(fastdelegate::MakeDelegate(this, &game_sv_Single::finish_restart_simulator));
+    return true;
+}
 
-    m_alife_simulator = xr_new<CALifeSimulator>(&server(), &options);
+bool game_sv_Single::finish_restart_simulator()
+{
+    if (m_restart_task.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+        return false;
+
+    m_alife_simulator = m_restart_task.get();
     if (!psActorFlags.test(AF_KEYPRESS_ON_START))
         pApp->LoadForceFinish();
     g_pGamePersistent->LoadTitle("st_client_synchronising");
     Device.PreCache(60, true, true);
     pApp->LoadEnd();
+    return true;
 }

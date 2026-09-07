@@ -130,6 +130,11 @@ CLevel::CLevel()
 
 CLevel::~CLevel()
 {
+    if (m_serverConnectTask.valid())
+        m_serverConnectTask.get();
+    if (m_asyncCollisionTask.valid())
+        m_asyncCollisionTask.wait();
+
     xr_delete(g_player_hud);
     //	g_pGameLevel		= NULL;
     Msg("- Destroying level");

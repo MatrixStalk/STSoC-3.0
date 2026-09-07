@@ -12,6 +12,12 @@ private:
 
 protected:
     CALifeSimulator* m_alife_simulator;
+    shared_str m_restart_options;
+    shared_str m_restart_saved_name;
+    std::future<CALifeSimulator*> m_restart_task;
+
+    bool prepare_restart_simulator();
+    bool finish_restart_simulator();
 
 public:
     game_sv_Single();

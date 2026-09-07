@@ -20,6 +20,7 @@ UILoadingScreen::UILoadingScreen()
       loadingTip(nullptr), maxTip(100), loadingLevelName(nullptr), loadingLevelDescription(nullptr)
 {
     UILoadingScreen::Initialize();
+    CUIWindow::ShowImmediate(true);
 }
 
 void UILoadingScreen::Initialize()
@@ -76,10 +77,9 @@ void UILoadingScreen::Update(const int stagesCompleted, const int stagesTotal)
 
     CUIWindow::Update();
 
-    // LoadDraw runs outside the regular UI frame loop. Bypass the animation
-    // wrapper for this entire tree so early loading stages cannot inherit a
-    // zero alpha or offset from an unfinished menu transition.
-    DrawWithoutAnimation();
+    // The dedicated loading tick advances window animations without updating
+    // gameplay. The root itself is immediate; its children remain animated.
+    DrawWithAnimation();
 }
 
 void UILoadingScreen::ForceFinish()
@@ -160,8 +160,7 @@ void UILoadingScreen::SetStageTip()
     }
 }
 
-// The loading screen is driven outside the regular UI update loop, so it must
-// remain immediate. Regular windows animate through CUIWindow::Show().
+// The root stays immediate; child windows are advanced by the loading tick.
 void UILoadingScreen::Show(bool status) { CUIWindow::ShowImmediate(status); }
 
 bool UILoadingScreen::IsShown() { return CUIWindow::IsShown(); }

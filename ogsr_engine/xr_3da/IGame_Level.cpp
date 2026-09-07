@@ -28,6 +28,11 @@ IGame_Level::IGame_Level()
 
 IGame_Level::~IGame_Level()
 {
+    if (m_asyncCollisionTask.valid())
+        m_asyncCollisionTask.get();
+    if (m_asyncLevelStream)
+        FS.r_close(m_asyncLevelStream);
+
     xr_delete(pLevel);
 
     // Render-level unload
@@ -68,6 +73,28 @@ void IGame_Level::net_Stop()
 
 BOOL IGame_Level::Load(u32 dwNum)
 {
+    BeginAsyncLoad(dwNum);
+    while (!ContinueAsyncLoad())
+    {
+        if (m_asyncLoadStage == EAsyncLoadStage::WaitCollision)
+            Sleep(1);
+    }
+    return TRUE;
+}
+
+void IGame_Level::BeginAsyncLoad(u32 dwNum)
+{
+    R_ASSERT(m_asyncLoadStage == EAsyncLoadStage::Idle);
+    R_ASSERT(!m_asyncLevelStream);
+    (void)dwNum;
+    m_asyncLoadStage = EAsyncLoadStage::Opening;
+}
+
+bool IGame_Level::ContinueAsyncLoad()
+{
+    switch (m_asyncLoadStage)
+    {
+    case EAsyncLoadStage::Opening: {
     // Initialize level data
     string_path temp;
     if (!FS.exist(temp, fsgame::level, fsgame::level_files::level_ltx))
@@ -76,37 +103,65 @@ BOOL IGame_Level::Load(u32 dwNum)
 
     // Open
     g_pGamePersistent->LoadTitle("st_opening_stream");
-    IReader* LL_Stream = FS.r_open(fsgame::level, fsgame::level_files::level);
-    IReader& fs = *LL_Stream;
+    m_asyncLevelStream = FS.r_open(fsgame::level, fsgame::level_files::level);
+    R_ASSERT(m_asyncLevelStream);
+    IReader& fs = *m_asyncLevelStream;
 
     // Header
     hdrLEVEL H;
     fs.r_chunk_safe(fsL_HEADER, &H, sizeof(H));
     R_ASSERT(XRCL_PRODUCTION_VERSION == H.XRLC_version, "Incompatible level version.");
 
+    m_asyncLoadStage = EAsyncLoadStage::Collision;
+    return false;
+    }
+
+    case EAsyncLoadStage::Collision:
     // CForms
     g_pGamePersistent->LoadTitle("st_loading_cform");
-    ObjectSpace.Load();
+    m_asyncCollisionTask = std::async(std::launch::async, [this] { ObjectSpace.Load(); });
+    m_asyncLoadStage = EAsyncLoadStage::WaitCollision;
+    return false;
 
+    case EAsyncLoadStage::WaitCollision:
+        if (m_asyncCollisionTask.wait_for(std::chrono::milliseconds(0)) != std::future_status::ready)
+            return false;
+        m_asyncCollisionTask.get();
+        m_asyncLoadStage = EAsyncLoadStage::Render;
+        return false;
+
+    case EAsyncLoadStage::Render:
     if (!g_hud)
         g_hud = (CCustomHUD*)NEW_INSTANCE(CLSID_HUDMANAGER);
 
-    Render->level_Load(LL_Stream);
+    Render->level_Load(m_asyncLevelStream);
     //  Msg						("* S-CREATE: %f ms, %d times",tscreate.result,tscreate.count);
 
+    m_asyncLoadStage = EAsyncLoadStage::Objects;
+    return false;
+
+    case EAsyncLoadStage::Objects:
     // Objects
     g_pGamePersistent->Environment().mods_load();
     R_ASSERT(Load_GameSpecific_Before());
     Objects.Load();
 
     // Done
-    FS.r_close(LL_Stream);
+    FS.r_close(m_asyncLevelStream);
+    m_asyncLevelStream = nullptr;
     bReady = true;
     IR_Capture();
     Device.seqRender.Add(this);
     Device.seqFrame.Add(this);
 
-    return TRUE;
+    m_asyncLoadStage = EAsyncLoadStage::Idle;
+    return true;
+
+    case EAsyncLoadStage::Idle: return true;
+    }
+
+    NODEFAULT;
+    return false;
 }
 
 void IGame_Level::OnRender()

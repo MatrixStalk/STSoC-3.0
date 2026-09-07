@@ -202,6 +202,7 @@ public:
     void Clear();
     void End();
     void FrameMove();
+    void FrameMoveLoading();
 
 #pragma warning(push)
 #pragma warning(disable : 4366)
