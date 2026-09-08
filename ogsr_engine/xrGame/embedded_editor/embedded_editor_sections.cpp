@@ -230,7 +230,7 @@ void CImGuiSectionsWnd::RevertSelected()
 
     m_Changes.erase(m_Changes.begin() + index);
     if (pSettings->line_exist(m_SelectedSection, m_SelectedLine))
-        strcpy_s(m_ValueBuffer, pSettings->r_string(m_SelectedSection, m_SelectedLine));
+        strcpy_s(m_ValueBuffer, pSettings->r_string(m_SelectedSection.c_str(), m_SelectedLine.c_str()));
     else
     {
         m_SelectedLine = nullptr;
@@ -261,7 +261,7 @@ void CImGuiSectionsWnd::RevertAll()
             reloaded += ReloadMatchingObjects(section.c_str());
 
     if (m_SelectedSection.c_str() && m_SelectedLine.c_str() && pSettings->line_exist(m_SelectedSection, m_SelectedLine))
-        strcpy_s(m_ValueBuffer, pSettings->r_string(m_SelectedSection, m_SelectedLine));
+        strcpy_s(m_ValueBuffer, pSettings->r_string(m_SelectedSection.c_str(), m_SelectedLine.c_str()));
     else if (m_SelectedLine.c_str())
     {
         m_SelectedLine = nullptr;

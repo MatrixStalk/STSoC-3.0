@@ -494,21 +494,26 @@ void CKinematicsAnimated::LL_UpdateTracks(float dt, bool b_force, bool leave_ble
     {
         if (m_Partition->part(part).Name == nullptr)
             continue;
-        BlendSVecIt I = blend_cycles[part].begin();
-        BlendSVecIt E = blend_cycles[part].end();
-        for (; I != E; I++)
+        BlendSVec& blends = blend_cycles[part];
+        u32 index = 0;
+        while (index < blends.size())
         {
-            CBlend& B = *(*I);
+            CBlend& B = *blends[index];
             if (!b_force && B.dwFrame == Device.dwFrame)
+            {
+                ++index;
                 continue;
+            }
             B.dwFrame = Device.dwFrame;
             if (B.update(dt, B.Callback) && !leave_blends)
             {
                 DestroyCycle(B);
-                blend_cycles[part].erase(I);
-                E = blend_cycles[part].end();
-                I--;
+                // svector::erase invalidates the current iterator and returns
+                // void. Keep this index: the next blend shifts into this slot.
+                blends.erase(blends.begin() + index);
             }
+            else
+                ++index;
             // else{
             //	CMotionDef* m_def						= m_Motions[B.motionID.slot].motions.motion_def(B.motionID.idx);
             //	float timeCurrent						= B.timeCurrent;
@@ -528,14 +533,15 @@ void CKinematicsAnimated::LL_UpdateTracks(float dt, bool b_force, bool leave_ble
 void CKinematicsAnimated::LL_UpdateFxTracks(float dt)
 {
     // FX
-    BlendSVecIt I = blend_fx.begin();
-    BlendSVecIt E = blend_fx.end();
-    for (; I != E; I++)
+    u32 index = 0;
+    while (index < blend_fx.size())
     {
-        CBlend& B = *(*I);
+        CBlend* blend = blend_fx[index];
+        CBlend& B = *blend;
         if (!B.stop_at_end_callback)
         {
             B.playing = FALSE;
+            ++index;
             continue;
         }
         // B.timeCurrent += dt*B.speed;
@@ -561,14 +567,15 @@ void CKinematicsAnimated::LL_UpdateFxTracks(float dt)
                 // destroy fx
                 // B.blend = CBlend::eFREE_SLOT;
                 B.set_free_state();
-                Bone_Motion_Stop((*bones)[B.bone_or_part], *I);
-                blend_fx.erase(I);
-                E = blend_fx.end();
-                I--;
+                Bone_Motion_Stop((*bones)[B.bone_or_part], blend);
+                // Keep the index after erase; the next FX shifts into it.
+                blend_fx.erase(blend_fx.begin() + index);
+                continue;
             }
             break;
         default: NODEFAULT;
         }
+        ++index;
     }
 }
 
@@ -627,11 +634,16 @@ void CKinematicsAnimated::IBoneInstances_Destroy()
 
 void CKinematicsAnimated::Copy(dxRender_Visual* P)
 {
-    inherited::Copy(P);
-
     const CKinematicsAnimated* pFrom = smart_cast<CKinematicsAnimated*>(P);
+    VERIFY(pFrom);
+
+    // CKinematics::Copy may calculate bones while duplicating a nested LOD.
+    // OnCalculateBones dispatches back to this class, so the animation data
+    // needed by LL_UpdateTracks must already be available at that point.
     PCOPY(m_Motions);
     PCOPY(m_Partition);
+
+    inherited::Copy(P);
 
     IBlend_Startup();
 }
