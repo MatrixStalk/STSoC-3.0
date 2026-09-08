@@ -323,6 +323,11 @@ void CHudItem::Load(LPCSTR section)
     constexpr float ORIGIN_OFFSET_AIM = -0.02f; // (Для прицеливания)
     constexpr float TENDTO_SPEED = 5.f; // Скорость нормализации положения ствола
     constexpr float TENDTO_SPEED_AIM = 10.f; // (Для прицеливания)
+    constexpr float ROTATION_PITCH_FACTOR = 0.70f; // Поворот всего HUD по pitch вслед за вертикальной инерцией
+    constexpr float ROTATION_YAW_FACTOR = 0.45f; // Поворот всего HUD по yaw вслед за горизонтальной инерцией
+    constexpr float ROTATION_ROLL_FACTOR = 0.18f; // Лёгкий наклон всего HUD при горизонтальном развороте
+    constexpr float ROTATION_LIMIT = 6.f; // Максимальный угол корневой инерции, градусы
+    constexpr float ROTATION_ZOOM_FACTOR = 0.35f; // Остаточная сила корневой инерции в полном прицеливании
 
     inertion_data.m_pitch_offset_r = READ_IF_EXISTS(pSettings, r_float, hud_sect, "pitch_offset_right", PITCH_OFFSET_R);
     inertion_data.m_pitch_offset_n = READ_IF_EXISTS(pSettings, r_float, hud_sect, "pitch_offset_up", PITCH_OFFSET_N);
@@ -333,6 +338,17 @@ void CHudItem::Load(LPCSTR section)
     inertion_data.m_origin_offset_aim = READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_zoom_origin_offset", ORIGIN_OFFSET_AIM);
     inertion_data.m_tendto_speed = READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_tendto_speed", TENDTO_SPEED);
     inertion_data.m_tendto_speed_aim = READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_zoom_tendto_speed", TENDTO_SPEED_AIM);
+    inertion_data.m_rotation_pitch_factor =
+        READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_rotation_pitch_factor", ROTATION_PITCH_FACTOR);
+    inertion_data.m_rotation_yaw_factor =
+        READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_rotation_yaw_factor", ROTATION_YAW_FACTOR);
+    inertion_data.m_rotation_roll_factor =
+        READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_rotation_roll_factor", ROTATION_ROLL_FACTOR);
+    inertion_data.m_rotation_limit =
+        deg2rad(_max(READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_rotation_limit", ROTATION_LIMIT), 0.f));
+    inertion_data.m_rotation_zoom_factor =
+        clampr(READ_IF_EXISTS(pSettings, r_float, hud_sect, "inertion_rotation_zoom_factor", ROTATION_ZOOM_FACTOR), 0.f, 1.f);
+    ResetInertion();
     //--#SM+# End--
 }
 
@@ -505,6 +521,7 @@ void CHudItem::OnH_A_Chield() {}
 void CHudItem::OnH_B_Chield()
 {
     StopCurrentAnimWithoutCallback();
+    ResetInertion();
 
     m_nearwall_last_hud_fov = m_base_fov > 0.0f ? m_base_fov : psHUD_FOV_def;
 }
@@ -513,6 +530,7 @@ void CHudItem::OnH_B_Independent(bool just_before_destroy)
 {
     StopHUDSounds();
     StopAnimationSounds();
+    ResetInertion();
     UpdateXForm();
 
     m_nearwall_last_hud_fov = m_base_fov > 0.0f ? m_base_fov : psHUD_FOV_def;
@@ -530,6 +548,7 @@ void CHudItem::on_b_hud_detach() {}
 
 void CHudItem::on_a_hud_attach()
 {
+    ResetInertion();
     if (m_current_motion_def)
     {
         PlayHUDMotion_noCB(m_current_motion, false);
@@ -996,67 +1015,97 @@ void CHudItem::UpdateCollision(Fmatrix& trans)
 }
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void CHudItem::UpdateInertion(Fmatrix& trans)
+void CHudItem::ResetInertion()
 {
-    if (HudInertionEnabled() && HudInertionAllowed())
+    inert_st_last_dir.set(0.f, 0.f, 0.f);
+    m_inertion_initialized = false;
+}
+
+void CHudItem::UpdateInertion(Fmatrix& trans, const bool apply_position)
+{
+    Fvector camera_direction = trans.k;
+    camera_direction.normalize_safe();
+
+    if (!HudInertionEnabled() || !HudInertionAllowed() || !_valid(camera_direction))
     {
-        Fmatrix xform;
-        Fvector& origin = trans.c;
-        xform = trans;
-
-        // calc difference
-        Fvector diff_dir;
-        diff_dir.sub(xform.k, inert_st_last_dir);
-
-        // clamp by PI_DIV_2
-        Fvector last;
-        last.normalize_safe(inert_st_last_dir);
-        const float dot = last.dotproduct(xform.k);
-        if (dot < EPS)
-        {
-            Fvector v0;
-            v0.crossproduct(inert_st_last_dir, xform.k);
-            inert_st_last_dir.crossproduct(xform.k, v0);
-            diff_dir.sub(xform.k, inert_st_last_dir);
-        }
-
-        // tend to forward
-        float _tendto_speed, _origin_offset;
-        if (GetCurrentHudOffsetIdx() > 0)
-        { // Худ в режиме "Прицеливание"
-            float factor = GetInertionFactor();
-            _tendto_speed = inertion_data.m_tendto_speed_aim - (inertion_data.m_tendto_speed_aim - inertion_data.m_tendto_speed) * factor;
-            _origin_offset = inertion_data.m_origin_offset_aim - (inertion_data.m_origin_offset_aim - inertion_data.m_origin_offset) * factor;
-        }
-        else
-        { // Худ в режиме "От бедра"
-            _tendto_speed = inertion_data.m_tendto_speed;
-            _origin_offset = inertion_data.m_origin_offset;
-        }
-
-        // Фактор силы инерции
-        const float power_factor = GetInertionPowerFactor();
-        _tendto_speed *= power_factor;
-        _origin_offset *= power_factor;
-
-        inert_st_last_dir.mad(diff_dir, _tendto_speed * Device.fTimeDelta);
-        origin.mad(diff_dir, -_origin_offset); // Инвертировал
-
-        // pitch compensation
-        float pitch = angle_normalize_signed(xform.k.getP());
-
-        pitch *= GetInertionFactor();
-
-        // Отдаление\приближение
-        origin.mad(xform.k, -pitch * inertion_data.m_pitch_offset_d);
-
-        // Сдвиг в противоположную часть экрана
-        origin.mad(xform.i, -pitch * inertion_data.m_pitch_offset_r);
-
-        // Подьём\опускание
-        clamp(pitch, inertion_data.m_pitch_low_limit, PI);
-        origin.mad(xform.j, -pitch * inertion_data.m_pitch_offset_n);
+        inert_st_last_dir = camera_direction;
+        m_inertion_initialized = _valid(camera_direction);
+        return;
     }
+
+    // The HUD may be attached after the camera has already moved, or return
+    // after a pause/loading hitch. Starting from an old direction would create
+    // a one-frame kick which looks like recoil rather than inertia.
+    if (!m_inertion_initialized || Device.fTimeDelta <= 0.f || Device.fTimeDelta > 0.25f)
+    {
+        inert_st_last_dir = camera_direction;
+        m_inertion_initialized = true;
+        return;
+    }
+
+    Fvector delayed_direction = inert_st_last_dir;
+    delayed_direction.normalize_safe(camera_direction);
+    const float direction_dot = delayed_direction.dotproduct(camera_direction);
+    if (!_valid(direction_dot) || direction_dot < 0.25f)
+    {
+        // Treat teleports and discontinuous camera changes as a new baseline.
+        inert_st_last_dir = camera_direction;
+        return;
+    }
+
+    const float zoom_factor = clampr(m_fZoomRotationFactor, 0.f, 1.f);
+    const float tendto_speed =
+        inertion_data.m_tendto_speed + (inertion_data.m_tendto_speed_aim - inertion_data.m_tendto_speed) * zoom_factor;
+    const float origin_offset =
+        inertion_data.m_origin_offset + (inertion_data.m_origin_offset_aim - inertion_data.m_origin_offset) * zoom_factor;
+    const float power_factor = _max(GetInertionPowerFactor(), 0.f);
+
+    Fvector direction_difference;
+    direction_difference.sub(camera_direction, delayed_direction);
+
+    if (apply_position)
+    {
+        // Preserve the established positional sway while driving it from the
+        // normalized lag direction, so it cannot accumulate during long turns.
+        trans.c.mad(direction_difference, -origin_offset * power_factor);
+
+        float camera_pitch = angle_normalize_signed(camera_direction.getP());
+        camera_pitch *= GetInertionFactor();
+        trans.c.mad(trans.k, -camera_pitch * inertion_data.m_pitch_offset_d);
+        trans.c.mad(trans.i, -camera_pitch * inertion_data.m_pitch_offset_r);
+        clamp(camera_pitch, inertion_data.m_pitch_low_limit, PI);
+        trans.c.mad(trans.j, -camera_pitch * inertion_data.m_pitch_offset_n);
+    }
+
+    // Resolve the delayed camera direction in current HUD-local axes. Applying
+    // this matrix to `trans` rotates the common HUD parent: hands, weapon,
+    // detectors and attached models retain their authored relationship.
+    const float local_right = delayed_direction.dotproduct(trans.i);
+    const float local_up = delayed_direction.dotproduct(trans.j);
+    const float local_forward = delayed_direction.dotproduct(camera_direction);
+    float yaw_lag = atan2f(local_right, local_forward);
+    float pitch_lag = atan2f(local_up, sqrtf(local_right * local_right + local_forward * local_forward));
+    clamp(yaw_lag, -inertion_data.m_rotation_limit, inertion_data.m_rotation_limit);
+    clamp(pitch_lag, -inertion_data.m_rotation_limit, inertion_data.m_rotation_limit);
+
+    const float rotation_strength =
+        power_factor * (1.f + (inertion_data.m_rotation_zoom_factor - 1.f) * zoom_factor);
+    Fmatrix root_rotation;
+    root_rotation.rotateX(-pitch_lag * inertion_data.m_rotation_pitch_factor * rotation_strength);
+
+    Fmatrix rotation_part;
+    rotation_part.rotateY(yaw_lag * inertion_data.m_rotation_yaw_factor * rotation_strength);
+    root_rotation.mulA_43(rotation_part);
+
+    rotation_part.rotateZ(yaw_lag * inertion_data.m_rotation_roll_factor * rotation_strength);
+    root_rotation.mulA_43(rotation_part);
+    trans.mulB_43(root_rotation);
+
+    // Exponential response is stable at different frame rates and cannot
+    // overshoot the camera direction like a raw speed * dt interpolation.
+    const float response = 1.f - expf(-_max(tendto_speed * power_factor, EPS_S) * Device.fTimeDelta);
+    inert_st_last_dir.lerp(delayed_direction, camera_direction, clampr(response, 0.f, 1.f));
+    inert_st_last_dir.normalize_safe(camera_direction);
 }
 
 // Обновление координат текущего худа
@@ -1071,15 +1120,10 @@ void CHudItem::UpdateHudAdditional(Fmatrix& trans, const bool need_update_collis
         actor->g_State(actor_state);
     const bool procedural_sprint = UseSprintHudOffset() && actor && actor_state.bSprint && !IsZoomed();
 
-    // The coordinate sprint pose is an absolute HUD pose. Feeding camera
-    // direction inertia into it made the weapon drift farther away for as
-    // long as sprint was held. Keep the inertia history in sync so entering
-    // and leaving sprint is seamless; movement layers are intentionally not
-    // touched here.
-    if (procedural_sprint)
-        inert_st_last_dir.set(trans.k);
-    else
-        UpdateInertion(trans);
+    // The coordinate sprint pose is absolute, so suppress positional sway to
+    // avoid the old long-turn drift. Root rotation is bounded and remains
+    // active, giving the complete sprint HUD the same pitch/yaw inertia.
+    UpdateInertion(trans, !procedural_sprint);
 
     Fvector summary_offset{}, summary_rotate{}, sprint_local_rotate{};
 

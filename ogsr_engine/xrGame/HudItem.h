@@ -371,9 +371,18 @@ private:
         float m_tendto_speed;
         // скорость возврата худ модели в нужное положение во время прицеливания
         float m_tendto_speed_aim;
+        // Camera-direction lag rotates the complete HUD root. This keeps the
+        // hands, item and attached models on the same inertial parent.
+        float m_rotation_pitch_factor;
+        float m_rotation_yaw_factor;
+        float m_rotation_roll_factor;
+        float m_rotation_limit;
+        float m_rotation_zoom_factor;
     } inertion_data{}; //--#SM+#--
     Fvector inert_st_last_dir{};
-    void UpdateInertion(Fmatrix& trans);
+    bool m_inertion_initialized{};
+    void UpdateInertion(Fmatrix& trans, bool apply_position = true);
+    void ResetInertion();
     float GetInertionFactor() const { return 1.f; } //--#SM+#--
     float GetInertionPowerFactor() const { return 0.5f; } //--#SM+#--
     bool HudInertionEnabled() const { return m_huditem_flags.test(fl_inertion_enable); }
