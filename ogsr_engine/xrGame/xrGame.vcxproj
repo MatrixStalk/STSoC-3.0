@@ -242,6 +242,7 @@
     <ClInclude Include="embedded_editor\embedded_editor_hud.h" />
     <ClInclude Include="embedded_editor\embedded_editor_main.h" />
     <ClInclude Include="embedded_editor\embedded_editor_pos_informer.h" />
+    <ClInclude Include="embedded_editor\embedded_editor_sections.h" />
     <ClInclude Include="embedded_editor\embedded_editor_settings.h" />
     <ClInclude Include="embedded_editor\embedded_editor_sound_env.h" />
     <ClInclude Include="embedded_editor\embedded_editor_weather.h" />
@@ -1503,6 +1504,7 @@
     <ClCompile Include="embedded_editor\embedded_editor_hud.cpp" />
     <ClCompile Include="embedded_editor\embedded_editor_main.cpp" />
     <ClCompile Include="embedded_editor\embedded_editor_pos_informer.cpp" />
+    <ClCompile Include="embedded_editor\embedded_editor_sections.cpp" />
     <ClCompile Include="embedded_editor\embedded_editor_settings.cpp" />
     <ClCompile Include="embedded_editor\embedded_editor_sound_env.cpp" />
     <ClCompile Include="embedded_editor\embedded_editor_weather.cpp" />

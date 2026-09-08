@@ -6068,6 +6068,9 @@
     <ClInclude Include="embedded_editor\embedded_editor_settings.h">
       <Filter>EmbeddedEditor\EditorWindows</Filter>
     </ClInclude>
+    <ClInclude Include="embedded_editor\embedded_editor_sections.h">
+      <Filter>EmbeddedEditor\EditorWindows</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="damage_manager.cpp">
@@ -8883,6 +8886,9 @@
       <Filter>EmbeddedEditor\EditorWindows</Filter>
     </ClCompile>
     <ClCompile Include="embedded_editor\embedded_editor_settings.cpp">
+      <Filter>EmbeddedEditor\EditorWindows</Filter>
+    </ClCompile>
+    <ClCompile Include="embedded_editor\embedded_editor_sections.cpp">
       <Filter>EmbeddedEditor\EditorWindows</Filter>
     </ClCompile>
   </ItemGroup>

@@ -19,6 +19,7 @@
 #include "embedded_editor_debug_rt.h"
 #include "embedded_editor_game.h"
 #include "embedded_editor_settings.h"
+#include "embedded_editor_sections.h"
 
 #include "../Layers/xrRender/Debug/dxPixEvents.h"
 
@@ -57,6 +58,10 @@ CImGuiEditor::CImGuiEditor() {
 
     auto* settings_wnd = xr_new<CImGuiSettingsWnd>();
     m_Windows.push_back(settings_wnd);
+
+    auto* sections_wnd = xr_new<CImGuiSectionsWnd>();
+    sections_wnd->m_Opened = true;
+    m_Windows.push_back(sections_wnd);
 }
 
 CImGuiEditor::~CImGuiEditor()
@@ -88,6 +93,7 @@ void CImGuiEditor::RenderDockSpace()
         ImGui::DockBuilderDockWindow("SoundEnv###SoundEnv", dock_id_left_bottom);
         ImGui::DockBuilderDockWindow("Demo Window", dock_id_left_bottom);
         ImGui::DockBuilderDockWindow("ImSettings###ImSettings", dock_id_left_bottom);
+        ImGui::DockBuilderDockWindow("LTX Sections###LTXSections", dock_id_left_bottom);
         ImGui::DockBuilderFinish(dockspace_id);
     }
     ImGui::DockSpaceOverViewport(dockspace_id, viewport, 0);

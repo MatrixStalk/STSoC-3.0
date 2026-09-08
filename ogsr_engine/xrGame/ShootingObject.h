@@ -25,7 +25,9 @@ protected:
     virtual ~CShootingObject(void);
 
     void reinit();
-    void reload(LPCSTR section){};
+    // Reload only configuration-backed shooting data. This is safe for an
+    // already spawned object and is used by the embedded LTX editor.
+    void reload(LPCSTR section) { Load(section); };
     void Load(LPCSTR section);
 
     // ID персонажа который иницировал действие
