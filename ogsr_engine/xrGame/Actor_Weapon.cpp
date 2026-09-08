@@ -164,11 +164,20 @@ void CActor::on_weapon_shot_start(CWeapon* weapon)
     CWeaponMagazined* pWM = smart_cast<CWeaponMagazined*>(weapon);
     //*
     CCameraShotEffector* effector = smart_cast<CCameraShotEffector*>(Cameras().GetCamEffector(eCEShot));
+    if (effector && !effector->IsWeaponOwner(weapon))
+    {
+        // eCEShot is actor-owned. Never feed a new weapon into the recovery
+        // state (and parameter set) left by the previously active weapon.
+        effector->Clear();
+        Cameras().RemoveCamEffector(eCEShot);
+        effector = nullptr;
+    }
     if (!effector)
     {
         effector = (CCameraShotEffector*)Cameras().AddCamEffector(
             xr_new<CCameraShotEffector>(weapon->camMaxAngle, weapon->camRelaxSpeed, weapon->camMaxAngleHorz, weapon->camStepAngleHorz,
                 weapon->camDispertionFrac, &weapon->modernRecoil));
+        effector->SetWeaponOwner(weapon);
     }
     R_ASSERT(effector);
 
@@ -215,6 +224,9 @@ void CActor::on_weapon_shot_stop(CWeapon* weapon)
 {
     //---------------------------------------------
     CCameraShotEffector* effector = smart_cast<CCameraShotEffector*>(Cameras().GetCamEffector(eCEShot));
+    if (effector && !effector->IsWeaponOwner(weapon))
+        return;
+
     if (effector && effector->UsesModernRecoil())
     {
         effector->StopShooting();
@@ -233,7 +245,7 @@ void CActor::on_weapon_shot_stop(CWeapon* weapon)
 void CActor::on_weapon_hide(CWeapon* weapon)
 {
     CCameraShotEffector* effector = smart_cast<CCameraShotEffector*>(Cameras().GetCamEffector(eCEShot));
-    if (!effector)
+    if (!effector || !effector->IsWeaponOwner(weapon))
         return;
 
     if (effector->UsesModernRecoil())

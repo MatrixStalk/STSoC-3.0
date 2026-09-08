@@ -2869,6 +2869,11 @@ void CWeapon::shedule_Update(u32 dT)
 
 void CWeapon::OnH_B_Independent(bool just_before_destroy)
 {
+    // The shot effector belongs to the actor, not to this weapon instance.
+    // StopShooting() deliberately keeps modern recoil alive so it can return
+    // smoothly after FireEnd(), but it must not survive losing this weapon as
+    // the actor's HUD item and affect the next weapon.
+    ClearShotEffector();
     RemoveShotEffector();
 
     inherited::OnH_B_Independent(just_before_destroy);
@@ -2910,6 +2915,14 @@ void CWeapon::OnActiveItem()
 
 void CWeapon::OnHiddenItem()
 {
+    // Normal inventory switching does not detach the weapon from the actor, so
+    // OnH_B_Independent() is not called. Retire only this actor-owned recoil
+    // state here; FireEnd() still preserves smooth recovery while the weapon
+    // remains active. Clear removes modern recoil, while Remove also covers an
+    // active legacy effector (on_weapon_hide intentionally leaves that alive).
+    ClearShotEffector();
+    RemoveShotEffector();
+
     inherited::OnHiddenItem();
     SetState(eHidden);
     SetNextState(eHidden);

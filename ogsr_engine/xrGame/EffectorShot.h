@@ -9,6 +9,8 @@
 #include "Actor.h"
 #include "WeaponRecoil.h"
 
+class CWeapon;
+
 class CWeaponShotEffector
 {
 protected:
@@ -52,6 +54,7 @@ class CCameraShotEffector : public CWeaponShotEffector, public CEffectorCam
 {
 protected:
     CActor* m_pActor;
+    const CWeapon* m_weapon_owner{};
 
     SModernRecoilParams m_modern_params{};
     bool m_modern_enabled{};
@@ -90,6 +93,8 @@ public:
     void StopShooting();
     virtual void Clear() override;
     bool UsesModernRecoil() const { return m_modern_enabled; }
+    bool IsWeaponOwner(const CWeapon* weapon) const { return m_weapon_owner == weapon; }
+    void SetWeaponOwner(const CWeapon* weapon) { m_weapon_owner = weapon; }
     void GetHudRecoil(Fmatrix& transform) const;
 
     virtual void SetActor(CActor* pActor) { m_pActor = pActor; };
