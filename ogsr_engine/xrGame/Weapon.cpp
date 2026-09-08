@@ -3924,6 +3924,11 @@ void CWeapon::reload(LPCSTR section)
     CShootingObject::reload(section);
     CHudItemObject::reload(section);
 
+    // A permanent silencer suppresses shot lighting after the generic
+    // shooting parameters have been refreshed. Keep the same rule as Load().
+    if (m_eSilencerStatus == ALife::eAddonPermanent)
+        m_bLightShotEnabled = false;
+
     m_can_be_strapped = true;
     m_strapped_mode = false;
 
